@@ -453,9 +453,24 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
 
     // ===================== DELETE PLATFORM USER (permanent) =====================
     // Permanently deletes a student or teacher account AND cascades cleanup of
-    // every table that references them (sessions, fees, misc charges, teacher
-    // assignments, course materials, diary, salaries, attendance, results).
-    // The user's row is then removed — this is irreversible.
+    // every table that references them. The user's row is then removed — this
+    // is irreversible.
+    //
+    // Robustness strategy: the production Turso DB still carries legacy tables
+    // (course_materials, diary, salary_payments, teacher_salaries) with real
+    // FOREIGN KEY constraints to `users`. To avoid "FOREIGN KEY constraint
+    // failed" errors when removing the user row, we:
+    //   1. Try to disable FK enforcement for the cascade (PRAGMA foreign_keys =
+    //      OFF). On libSQL/Turso HTTP this may be a no-op, so we ALSO…
+    //   2. Explicitly clean EVERY table that references the user (by teacherId,
+    //      studentId, userId, or senderId/createdBy columns that may carry FKs).
+    //      Each cleanup is wrapped in try/catch so a missing table or a
+    //      no-op column never aborts the cascade.
+    //   3. For teacher class-teacher assignments (classes.teacherId) and
+    //      timetable slots (timetable.teacherId) we NULL the column (preserve
+    //      the class/slot) rather than delete the row.
+    //   4. Only then delete the user row.
+    //   5. Re-enable FK enforcement.
     if (method === 'DELETE' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments.length === 3) {
       const user = await requireAuth(req);
       const id = pathSegments[2];
@@ -477,25 +492,52 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           return NextResponse.json({ error: 'Can only delete users in your branch' }, { status: 403 });
         }
       }
+
+      // Helper: run a SQL statement, swallowing any error. Missing legacy
+      // tables or no-op columns must never abort the cascade.
+      const safe = async (sql: string, args: any[] = []) => {
+        try { await db.execute({ sql, args }); } catch {}
+      };
+
+      // 0) Try to disable FK enforcement for the duration of the cascade.
+      //    libSQL/Turso HTTP may ignore this (PRAGMAs are connection-scoped
+      //    and the HTTP pool may use different connections), which is why we
+      //    ALSO clean every referencing table explicitly below.
+      await safe('PRAGMA foreign_keys = OFF');
+
       // 1) Kill every active session for this user (signs them out everywhere).
-      await db.execute({ sql: 'DELETE FROM sessions WHERE userId = ?', args: [target.id] });
-      // 2) Teacher-owned data: assignments, materials, diary, salaries,
-      //    and the attendance/results rows they authored.
+      await safe('DELETE FROM sessions WHERE userId = ?', [target.id]);
+
+      // 2) Teacher-owned data. Every table with a `teacherId` column that
+      //    references users(id) must be cleared, otherwise the user row
+      //    delete fails with a FOREIGN KEY constraint error.
       if (target.role === 'teacher') {
-        await db.execute({ sql: 'DELETE FROM teacher_class_courses WHERE teacherId = ?', args: [target.id] });
-        await db.execute({ sql: 'DELETE FROM course_materials WHERE teacherId = ?', args: [target.id] });
-        try { await db.execute({ sql: 'DELETE FROM diary WHERE teacherId = ?', args: [target.id] }); } catch {}
-        try { await db.execute({ sql: 'DELETE FROM salary_payments WHERE teacherId = ?', args: [target.id] }); } catch {}
-        try { await db.execute({ sql: 'DELETE FROM teacher_salaries WHERE teacherId = ?', args: [target.id] }); } catch {}
-        await db.execute({ sql: 'DELETE FROM attendance WHERE teacherId = ?', args: [target.id] });
-        await db.execute({ sql: 'DELETE FROM results WHERE teacherId = ?', args: [target.id] });
+        // Class-teacher assignments + timetable slots: NULL the teacherId
+        // (keep the class / slot, just detach the teacher).
+        await safe('UPDATE classes SET teacherId = NULL WHERE teacherId = ?', [target.id]);
+        await safe('UPDATE timetable SET teacherId = NULL, teacherName = ? WHERE teacherId = ?', ['(deleted)', target.id]);
+        // Hard-delete rows the teacher authored/owns.
+        await safe('DELETE FROM teacher_class_courses WHERE teacherId = ?', [target.id]);
+        await safe('DELETE FROM course_materials WHERE teacherId = ?', [target.id]);
+        await safe('DELETE FROM diary WHERE teacherId = ?', [target.id]);
+        await safe('DELETE FROM salary_payments WHERE teacherId = ?', [target.id]);
+        await safe('DELETE FROM teacher_salaries WHERE teacherId = ?', [target.id]);
+        await safe('DELETE FROM attendance WHERE teacherId = ?', [target.id]);
+        await safe('DELETE FROM results WHERE teacherId = ?', [target.id]);
+        // Announcements the teacher sent — detach sender (keep the
+        // announcement row so recipients aren't orphaned).
+        await safe('UPDATE announcements SET senderId = ? WHERE senderId = ?', ['', target.id]);
       }
-      // 3) Student-owned data: fee invoices, misc charges. Also strip the
-      //    student out of any attendance/results JSON `records` arrays so
-      //    no dangling references remain inside class-wide rows.
+
+      // 3) Student-owned data: fee invoices, misc charges, report cards.
+      //    Also strip the student out of any attendance/results JSON
+      //    `records` arrays so no dangling references remain inside
+      //    class-wide rows.
       if (target.role === 'student') {
-        try { await db.execute({ sql: 'DELETE FROM fee_invoices WHERE studentId = ?', args: [target.id] }); } catch {}
-        try { await db.execute({ sql: 'DELETE FROM misc_charges WHERE studentId = ?', args: [target.id] }); } catch {}
+        await safe('DELETE FROM fee_invoices WHERE studentId = ?', [target.id]);
+        await safe('DELETE FROM misc_charges WHERE studentId = ?', [target.id]);
+        await safe('DELETE FROM report_cards WHERE studentId = ?', [target.id]);
+        await safe('DELETE FROM fees WHERE studentId = ?', [target.id]);
         try {
           const attR = await db.execute({ sql: 'SELECT id, records FROM attendance WHERE records LIKE ?', args: [`%${target.id}%`] });
           for (const row of attR.rows as any[]) {
@@ -521,8 +563,24 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           }
         } catch {}
       }
-      // 4) Finally, remove the user row itself.
-      await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [target.id] });
+
+      // 4) Finally, remove the user row itself. With every referencing row
+      //    cleared (and FK enforcement disabled where supported), this
+      //    should always succeed. We catch+rethrow with the raw error so
+      //    the frontend can surface exactly which constraint (if any)
+      //    still blocks deletion.
+      try {
+        await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [target.id] });
+      } catch (e: any) {
+        await safe('PRAGMA foreign_keys = ON');
+        return NextResponse.json(
+          { error: 'Could not delete user — a data dependency still references them: ' + (e?.message || String(e)) },
+          { status: 500 },
+        );
+      }
+
+      // 5) Re-enable FK enforcement.
+      await safe('PRAGMA foreign_keys = ON');
       return NextResponse.json({ success: true, deleted: target.id });
     }
 
