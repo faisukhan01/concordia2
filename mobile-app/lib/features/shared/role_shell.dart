@@ -1,13 +1,14 @@
 // Role shell — the main scaffold after login.
 //
-// Premium layout:
-//   • Clean app bar with avatar, page title, user name, notification bell
-//   • White bottom navigation with soft top shadow + active indicator pill
+// Clean, professional layout:
+//   • Minimal app bar with menu button, page title, user name
+//   • Bottom navigation: icon + label, active state uses color + small
+//     dot indicator (no bulky pill toggle)
 //   • Roles with >5 modules: first 4 + "More" sheet
 //   • Drawer for full navigation, settings, logout
 //
-// The bottom nav is ALWAYS white on warm off-white background — there is no
-// dark mode anywhere in the app (the web portal is light-only).
+// The bottom nav is ALWAYS white on warm off-white background — there is
+// no dark mode anywhere in the app (the web portal is light-only).
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -50,18 +51,14 @@ class _RoleShellState extends State<RoleShell> {
         leading: Builder(
           builder: (ctx) => Padding(
             padding: const EdgeInsets.only(left: 12),
-            child: GestureDetector(
-              onTap: () => Scaffold.of(ctx).openDrawer(),
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: appGradient(AppColors.primaryGradient),
+            child: IconButton(
+              onPressed: () => Scaffold.of(ctx).openDrawer(),
+              icon: const Icon(Icons.menu_rounded,
+                  color: AppColors.textPrimary, size: 24),
+              style: IconButton.styleFrom(
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadii.md),
-                  boxShadow: AppShadows.subtle,
                 ),
-                child: const Icon(Icons.menu_rounded,
-                    color: Colors.white, size: 20),
               ),
             ),
           ),
@@ -76,6 +73,7 @@ class _RoleShellState extends State<RoleShell> {
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
                 letterSpacing: -0.2,
+                height: 1.2,
               ),
             ),
             const SizedBox(height: 1),
@@ -90,20 +88,16 @@ class _RoleShellState extends State<RoleShell> {
           ],
         ),
         actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: () => _showNotifications(context),
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.card,
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: IconButton(
+              onPressed: () => _showNotifications(context),
+              icon: const Icon(Icons.notifications_none_rounded,
+                  color: AppColors.textSecondary, size: 22),
+              style: IconButton.styleFrom(
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadii.md),
-                  border: Border.all(color: AppColors.border),
                 ),
-                child: const Icon(Icons.notifications_none_rounded,
-                    size: 20, color: AppColors.textSecondary),
               ),
             ),
           ),
@@ -111,13 +105,13 @@ class _RoleShellState extends State<RoleShell> {
       ),
       drawer: const AppDrawer(),
       body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
+        duration: const Duration(milliseconds: 180),
         child: KeyedSubtree(
           key: ValueKey(_index),
           child: currentItem.builder(context),
         ),
       ),
-      bottomNavigationBar: _PremiumBottomNav(
+      bottomNavigationBar: _BottomNav(
         items: visibleItems,
         currentIndex: hasMore && _index >= 4 ? 4 : _index,
         hasMore: hasMore,
@@ -140,57 +134,52 @@ class _RoleShellState extends State<RoleShell> {
   void _showMoreSheet(BuildContext context, List<NavItem> moreItems) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.white,
       isScrollControlled: true,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 10, 8, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'More Modules',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
-                      letterSpacing: -0.2,
-                    ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'More Modules',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 10),
-                for (final it in moreItems)
-                  _MoreTile(
-                    item: it,
-                    isActive: false,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _goTo(NavItems.forRole(
-                        context.read<AuthProvider>().user!.role,
-                      ).indexOf(it));
-                    },
-                  ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 8),
+              for (final it in moreItems)
+                _MoreTile(
+                  item: it,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _goTo(NavItems.forRole(
+                      context.read<AuthProvider>().user!.role,
+                    ).indexOf(it));
+                  },
+                ),
+            ],
           ),
         ),
       ),
@@ -200,91 +189,61 @@ class _RoleShellState extends State<RoleShell> {
   void _showNotifications(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.white,
       isScrollControlled: true,
-      showDragHandle: false,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Notifications',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
                 ),
-                Row(
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: const Column(
                   children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppColors.primarySoft,
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                      ),
-                      child: const Icon(Icons.notifications_active_rounded,
-                          size: 18, color: AppColors.primary),
-                    ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'Notifications',
+                    Icon(Icons.check_circle_outline_rounded,
+                        size: 32, color: AppColors.success),
+                    SizedBox(height: 8),
+                    Text(
+                      "You're all caught up",
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary,
                       ),
                     ),
+                    SizedBox(height: 4),
+                    Text(
+                      'No new notifications right now.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
-                const SizedBox(height: 18),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceAlt,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: const Column(
-                    children: [
-                      Icon(Icons.check_circle_outline_rounded,
-                          size: 36, color: AppColors.success),
-                      SizedBox(height: 8),
-                      Text(
-                        "You're all caught up",
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'No new notifications right now.',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.textSecondary,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -292,14 +251,16 @@ class _RoleShellState extends State<RoleShell> {
   }
 }
 
-// ── Premium bottom navigation ───────────────────────────────────
-class _PremiumBottomNav extends StatelessWidget {
+// ── Bottom navigation — clean, professional ──────────────────────
+// Active state: orange icon + small dot indicator above label + bold
+// orange label. No bulky pill background.
+class _BottomNav extends StatelessWidget {
   final List<NavItem> items;
   final int currentIndex;
   final bool hasMore;
   final ValueChanged<int> onTap;
 
-  const _PremiumBottomNav({
+  const _BottomNav({
     required this.items,
     required this.currentIndex,
     required this.hasMore,
@@ -308,17 +269,12 @@ class _PremiumBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allItems = <NavItem>[...items];
-    final labels = allItems.map((i) => i.shortLabel).toList();
-    final icons = allItems.map((i) => i.icon).toList();
-    final activeIcons = allItems.map((i) => i.activeIcon ?? i.icon).toList();
-
     final tabs = <_NavTab>[];
-    for (int i = 0; i < allItems.length; i++) {
+    for (final i in items) {
       tabs.add(_NavTab(
-        label: labels[i],
-        icon: icons[i],
-        activeIcon: activeIcons[i],
+        label: i.shortLabel,
+        icon: i.icon,
+        activeIcon: i.activeIcon ?? i.icon,
       ));
     }
     if (hasMore) {
@@ -332,9 +288,7 @@ class _PremiumBottomNav extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(0)),
         border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
-        boxShadow: AppShadows.navBar,
       ),
       child: SafeArea(
         top: false,
@@ -374,34 +328,42 @@ class _NavTabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = active ? AppColors.primary : AppColors.textMuted;
-    return InkWell(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-              decoration: BoxDecoration(
-                color: active ? AppColors.primarySoft : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppRadii.pill),
+            // Active dot indicator (small, clean)
+            SizedBox(
+              height: 4,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: Container(
+                  key: ValueKey(active),
+                  width: active ? 18 : 0,
+                  height: active ? 3 : 0,
+                  decoration: BoxDecoration(
+                    color: active ? AppColors.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-              child: Icon(
-                active ? tab.activeIcon : tab.icon,
-                size: 22,
-                color: color,
-              ),
+            ),
+            const SizedBox(height: 5),
+            Icon(
+              active ? tab.activeIcon : tab.icon,
+              size: 22,
+              color: color,
             ),
             const SizedBox(height: 3),
             Text(
               tab.label,
               style: TextStyle(
                 fontSize: 10.5,
-                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
                 color: color,
               ),
               maxLines: 1,
@@ -416,9 +378,8 @@ class _NavTabButton extends StatelessWidget {
 
 class _MoreTile extends StatelessWidget {
   final NavItem item;
-  final bool isActive;
   final VoidCallback onTap;
-  const _MoreTile({required this.item, required this.isActive, required this.onTap});
+  const _MoreTile({required this.item, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -427,25 +388,17 @@ class _MoreTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                ),
-                child: Icon(item.icon, size: 20, color: AppColors.primary),
-              ),
-              const SizedBox(width: 12),
+              Icon(item.icon, size: 22, color: AppColors.textSecondary),
+              const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   item.label,
                   style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                     color: AppColors.textPrimary,
                   ),
                 ),

@@ -1,16 +1,18 @@
-// Concordia College — Premium Sign In
+// Concordia College — Sign In
 //
-// A pro-level, eye-catching login experience:
-//   • Split visual: branded orange gradient header with Concordia logo + tagline
-//   • Floating glass-style login card with soft layered shadows
-//   • Refined inputs with focus animations + iconography
-//   • Smooth staged entrance animation (logo → card → fields → button)
-//   • Quick-fill demo chips for each role
-//   • Inline error states + success feedback
-//   • "A project of Beaconhouse" footer
+// Clean, professional sign-in experience:
+//   • Simple white background with logo
+//   • Single login card with standard inputs
+//   • Solid color button (no gradient overload)
+//   • Inline error + loading state
+//   • Quick-fill demo chips for testing
 //
-// Auth is delegated to AuthProvider.login() — on success the go_router
+// Auth is delegated to AuthProvider.login(). On success the go_router
 // redirect in app.dart moves the user into their role portal.
+//
+// Performance note: we use Selector (not watch) so only the button +
+// error banner rebuild when busy/error change — the rest of the page
+// stays stable, preventing the "refresh then sign in" flicker.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -24,430 +26,319 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage>
-    with TickerProviderStateMixin {
+class _LoginPageState extends State<LoginPage> {
   final _identifier = TextEditingController();
   final _password = TextEditingController();
-  final _identifierFocus = FocusNode();
-  final _passwordFocus = FocusNode();
-
+  final _formKey = GlobalKey<FormState>();
   bool _obscure = true;
-  bool _idHasText = false;
-  bool _pwHasText = false;
-
-  late final AnimationController _ac;
-  late final Animation<double> _fade;
-  late final Animation<Offset> _slide;
-
-  @override
-  void initState() {
-    super.initState();
-    _identifier.addListener(() {
-      final v = _identifier.text.isNotEmpty;
-      if (v != _idHasText) setState(() => _idHasText = v);
-    });
-    _password.addListener(() {
-      final v = _password.text.isNotEmpty;
-      if (v != _pwHasText) setState(() => _pwHasText = v);
-    });
-    _ac = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 950),
-    );
-    _fade = CurvedAnimation(parent: _ac, curve: Curves.easeOut);
-    _slide = Tween<Offset>(
-      begin: const Offset(0, 0.06),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _ac, curve: Curves.easeOutCubic));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _ac.forward());
-  }
 
   @override
   void dispose() {
-    _ac.dispose();
     _identifier.dispose();
     _password.dispose();
-    _identifierFocus.dispose();
-    _passwordFocus.dispose();
     super.dispose();
   }
 
   void _submit() {
-    final id = _identifier.text.trim();
-    final pw = _password.text;
-    if (id.isEmpty || pw.isEmpty) return;
-    FocusScope.of(context).unfocus();
-    context.read<AuthProvider>().login(id, pw);
+    if (_formKey.currentState?.validate() != true) return;
+    // Do NOT unfocus — closing the keyboard causes a layout resize that
+    // looks like a "page refresh". Let the keyboard close naturally when
+    // navigation happens on success.
+    context.read<AuthProvider>().login(
+          _identifier.text.trim(),
+          _password.text,
+        );
   }
 
   void _quickFill(String id, String pw) {
     _identifier.text = id;
     _password.text = pw;
-    setState(() {});
+    setState(() => _obscure = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final screen = MediaQuery.of(context).size;
-    final topPad = MediaQuery.of(context).padding.top;
+    final bottomPad = MediaQuery.of(context).viewInsets.bottom;
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFFFF6EE),
-              Color(0xFFFCFBF9),
-              Color(0xFFFFFFFF),
-            ],
-            stops: [0.0, 0.45, 1.0],
-          ),
-        ),
-        child: SafeArea(
-          child: FadeTransition(
-            opacity: _fade,
-            child: SlideTransition(
-              position: _slide,
-              child: SingleChildScrollView(
-                physics: const ClampingScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: screen.height - topPad - MediaQuery.of(context).padding.bottom,
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          // Pad bottom so the content scrolls above the keyboard
+          padding: EdgeInsets.only(bottom: bottomPad + 24),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 48),
+                // ── Logo ──
+                Center(
+                  child: Image.asset(
+                    'assets/images/concordia-logo.png',
+                    height: 48,
+                    fit: BoxFit.contain,
                   ),
+                ),
+                const SizedBox(height: 40),
+                // ── Heading ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const _BrandHeader(),
-                      const SizedBox(height: 8),
-                      _LoginCard(
-                        identifier: _identifier,
-                        password: _password,
-                        identifierFocus: _identifierFocus,
-                        passwordFocus: _passwordFocus,
-                        obscure: _obscure,
-                        idHasText: _idHasText,
-                        pwHasText: _pwHasText,
-                        busy: auth.busy,
-                        error: auth.error,
-                        onToggleObscure: () =>
-                            setState(() => _obscure = !_obscure),
-                        onSubmit: _submit,
+                      const Text(
+                        'Sign in',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.5,
+                          height: 1.2,
+                        ),
                       ),
-                      const SizedBox(height: 22),
-                      _QuickFill(onPick: _quickFill),
-                      const SizedBox(height: 22),
-                      const _BrandFooter(),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Use your Concordia account to continue.',
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          color: AppColors.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Brand header (orange gradient banner with logo) ─────────────
-class _BrandHeader extends StatelessWidget {
-  const _BrandHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 18, 24, 28),
-      child: Column(
-        children: [
-          // Logo in a floating white card for premium feel
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(AppRadii.xl),
-              boxShadow: AppShadows.floating,
-            ),
-            child: Image.asset(
-              'assets/images/concordia-logo.png',
-              height: 52,
-              fit: BoxFit.contain,
-            ),
-          ),
-          const SizedBox(height: 22),
-          ShaderMask(
-            shaderCallback: (bounds) => appGradient(AppColors.primaryGradient)
-                .createShader(bounds),
-            child: const Text(
-              'Management Portal',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                letterSpacing: -0.5,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Sign in to access your dashboard, records, and tools.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13.5,
-              color: AppColors.textSecondary,
-              height: 1.45,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Login card ──────────────────────────────────────────────────
-class _LoginCard extends StatelessWidget {
-  final TextEditingController identifier;
-  final TextEditingController password;
-  final FocusNode identifierFocus;
-  final FocusNode passwordFocus;
-  final bool obscure;
-  final bool idHasText;
-  final bool pwHasText;
-  final bool busy;
-  final String? error;
-  final VoidCallback onToggleObscure;
-  final VoidCallback onSubmit;
-
-  const _LoginCard({
-    required this.identifier,
-    required this.password,
-    required this.identifierFocus,
-    required this.passwordFocus,
-    required this.obscure,
-    required this.idHasText,
-    required this.pwHasText,
-    required this.busy,
-    required this.error,
-    required this.onToggleObscure,
-    required this.onSubmit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 26),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppRadii.xl),
-          boxShadow: AppShadows.floating,
-          border: Border.all(color: AppColors.border, width: 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Welcome row with small accent dot
-            Row(
-              children: [
-                Container(
-                  width: 6,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    gradient: appGradient(AppColors.primaryGradient),
-                    borderRadius: BorderRadius.circular(3),
+                const SizedBox(height: 28),
+                // ── Form card ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppRadii.lg),
+                      border: Border.all(color: AppColors.border),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // ── Identifier ──
+                        _Label('Email or ID'),
+                        const SizedBox(height: 6),
+                        _TextField(
+                          controller: _identifier,
+                          hint: 'admin@concordia.edu.pk',
+                          icon: Icons.person_outline_rounded,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty) ? 'Enter your email or ID' : null,
+                        ),
+                        const SizedBox(height: 16),
+                        // ── Password ──
+                        _Label('Password'),
+                        const SizedBox(height: 6),
+                        _TextField(
+                          controller: _password,
+                          hint: 'Enter your password',
+                          icon: Icons.lock_outline_rounded,
+                          obscure: _obscure,
+                          textInputAction: TextInputAction.done,
+                          suffix: GestureDetector(
+                            onTap: () => setState(() => _obscure = !_obscure),
+                            child: Icon(
+                              _obscure
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              size: 20,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          validator: (v) =>
+                              (v == null || v.isEmpty) ? 'Enter your password' : null,
+                          onSubmitted: (_) => _submit(),
+                        ),
+                        const SizedBox(height: 10),
+                        // ── Forgot password ──
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: GestureDetector(
+                            onTap: () {},
+                            child: Text(
+                              'Forgot password?',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        // ── Error banner (only rebuilds when error changes) ──
+                        Selector<AuthProvider, String?>(
+                          selector: (_, a) => a.error,
+                          builder: (_, error, __) {
+                            if (error == null) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: AppColors.dangerSoft,
+                                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                                  border: Border.all(
+                                      color: AppColors.danger.withValues(alpha: 0.2)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.error_outline_rounded,
+                                        size: 16, color: AppColors.danger),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        error,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: AppColors.danger,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        // ── Sign in button (only rebuilds when busy changes) ──
+                        Selector<AuthProvider, bool>(
+                          selector: (_, a) => a.busy,
+                          builder: (_, busy, __) {
+                            return SizedBox(
+                              width: double.infinity,
+                              height: 52,
+                              child: ElevatedButton(
+                                onPressed: busy ? null : _submit,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor:
+                                      AppColors.primary.withValues(alpha: 0.6),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(AppRadii.md),
+                                  ),
+                                ),
+                                child: busy
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2.5,
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Sign In',
+                                        style: TextStyle(
+                                          fontSize: 15.5,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.2,
+                                        ),
+                                      ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.4,
+                const SizedBox(height: 28),
+                // ── Quick demo logins ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(width: 24, height: 1, color: AppColors.border),
+                          const SizedBox(width: 10),
+                          Text(
+                            'DEMO LOGINS',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Container(width: 24, height: 1, color: AppColors.border),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ('Admin', Icons.shield_outlined, 'admin@concordia.edu.pk'),
+                          ('Accountant', Icons.calculate_outlined, 'accountant@concordia.edu.pk'),
+                          ('Teacher', Icons.school_outlined, 'teacher@concordia.edu.pk'),
+                          ('Student', Icons.person_outline, 'student@concordia.edu.pk'),
+                        ].map((d) => _DemoChip(
+                              label: d.$1,
+                              icon: d.$2,
+                              onTap: () => _quickFill(d.$3, 'concordia123'),
+                            )).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 36),
+                // ── Footer ──
+                Center(
+                  child: Text(
+                    '© 2025 Concordia College',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.textMuted,
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            const Text(
-              'Enter your credentials to continue',
-              style: TextStyle(
-                fontSize: 13.5,
-                color: AppColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 26),
-
-            // Identifier field
-            _FieldLabel(text: 'Email or ID'),
-            const SizedBox(height: 7),
-            _PremiumField(
-              controller: identifier,
-              focusNode: identifierFocus,
-              hint: 'admin@concordia.edu.pk',
-              icon: Icons.person_outline_rounded,
-              hasText: idHasText,
-              keyboardType: TextInputType.emailAddress,
-              textInputAction: TextInputAction.next,
-              onSubmitted: (_) => passwordFocus.requestFocus(),
-            ),
-            const SizedBox(height: 18),
-
-            // Password field
-            _FieldLabel(text: 'Password'),
-            const SizedBox(height: 7),
-            _PremiumField(
-              controller: password,
-              focusNode: passwordFocus,
-              hint: 'Enter your password',
-              icon: Icons.lock_outline_rounded,
-              hasText: pwHasText,
-              obscure: obscure,
-              suffix: GestureDetector(
-                onTap: onToggleObscure,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  child: Icon(
-                    obscure
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    key: ValueKey(obscure),
-                    size: 20,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => onSubmit(),
-            ),
-            const SizedBox(height: 14),
-
-            // Forgot password (decorative — no recovery flow in MVP)
-            Align(
-              alignment: Alignment.centerRight,
-              child: GestureDetector(
-                onTap: () {},
-                child: const Text(
-                  'Forgot password?',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-
-            // Error banner
-            if (error != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 11),
-                decoration: BoxDecoration(
-                  color: AppColors.dangerSoft,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  border:
-                      Border.all(color: AppColors.danger.withValues(alpha: 0.25)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.error_outline_rounded,
-                        size: 18, color: AppColors.danger),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        error!,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: AppColors.danger,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Sign-in button
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                child: DecoratedBox(
-                  key: ValueKey(busy),
-                  decoration: BoxDecoration(
-                    gradient: appGradient(AppColors.primaryGradient),
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    boxShadow: AppShadows.button,
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      onTap: busy ? null : onSubmit,
-                      child: Center(
-                        child: busy
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5,
-                                ),
-                              )
-                            : const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Sign In',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                      letterSpacing: 0.3,
-                                    ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Icon(Icons.arrow_forward_rounded,
-                                      size: 18, color: Colors.white),
-                                ],
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _FieldLabel extends StatelessWidget {
+// ── Widgets ──────────────────────────────────────────────────────
+
+class _Label extends StatelessWidget {
   final String text;
-  const _FieldLabel({required this.text});
+  const _Label(this.text);
 
   @override
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 13,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
@@ -456,144 +347,75 @@ class _FieldLabel extends StatelessWidget {
   }
 }
 
-class _PremiumField extends StatelessWidget {
+class _TextField extends StatelessWidget {
   final TextEditingController controller;
-  final FocusNode? focusNode;
   final String hint;
   final IconData icon;
-  final bool hasText;
   final bool obscure;
   final Widget? suffix;
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
+  final String? Function(String?)? validator;
 
-  const _PremiumField({
+  const _TextField({
     required this.controller,
-    this.focusNode,
     required this.hint,
     required this.icon,
-    required this.hasText,
     this.obscure = false,
     this.suffix,
     this.keyboardType,
     this.textInputAction,
     this.onSubmitted,
+    this.validator,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(
-          color: hasText ? AppColors.primary.withValues(alpha: 0.4) : AppColors.border,
-          width: hasText ? 1.5 : 1,
-        ),
+    return TextFormField(
+      controller: controller,
+      obscureText: obscure,
+      keyboardType: keyboardType,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onSubmitted,
+      validator: validator,
+      style: TextStyle(
+        fontSize: 15,
+        color: AppColors.textPrimary,
+        fontWeight: FontWeight.w500,
       ),
-      child: TextField(
-        controller: controller,
-        focusNode: focusNode,
-        obscureText: obscure,
-        keyboardType: keyboardType,
-        textInputAction: textInputAction,
-        onSubmitted: onSubmitted,
-        style: const TextStyle(
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(
           fontSize: 15,
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w500,
+          color: AppColors.textMuted,
+          fontWeight: FontWeight.w400,
         ),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(
-            fontSize: 15,
-            color: AppColors.textMuted,
-            fontWeight: FontWeight.w400,
-          ),
-          prefixIcon: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: Icon(
-              icon,
-              key: ValueKey(hasText),
-              size: 20,
-              color: hasText ? AppColors.primary : AppColors.textMuted,
-            ),
-          ),
-          suffixIcon: suffix,
-          filled: true,
-          fillColor: Colors.transparent,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            borderSide: BorderSide.none,
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-          ),
+        prefixIcon: Icon(icon, size: 20, color: AppColors.textMuted),
+        suffixIcon: suffix,
+        filled: true,
+        fillColor: AppColors.surfaceAlt,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderSide: const BorderSide(color: AppColors.border),
         ),
-      ),
-    );
-  }
-}
-
-// ── Quick fill demo chips ───────────────────────────────────────
-class _QuickFill extends StatelessWidget {
-  final void Function(String id, String pw) onPick;
-  const _QuickFill({required this.onPick});
-
-  @override
-  Widget build(BuildContext context) {
-    final demos = [
-      ('Admin', Icons.shield_outlined, 'admin@concordia.edu.pk'),
-      ('Accountant', Icons.calculate_outlined, 'accountant@concordia.edu.pk'),
-      ('Teacher', Icons.school_outlined, 'teacher@concordia.edu.pk'),
-      ('Student', Icons.person_outline, 'student@concordia.edu.pk'),
-    ];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(width: 28, height: 1, color: AppColors.border),
-              const SizedBox(width: 10),
-              const Text(
-                'QUICK DEMO LOGIN',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: AppColors.textMuted,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.4,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(width: 28, height: 1, color: AppColors.border),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              for (final d in demos)
-                _DemoChip(
-                  label: d.$1,
-                  icon: d.$2,
-                  onTap: () => onPick(d.$3, 'concordia123'),
-                ),
-            ],
-          ),
-        ],
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderSide: const BorderSide(color: AppColors.danger, width: 1),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderSide: const BorderSide(color: AppColors.danger, width: 1.5),
+        ),
       ),
     );
   }
@@ -614,21 +436,20 @@ class _DemoChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.pill),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadii.pill),
             border: Border.all(color: AppColors.border),
-            boxShadow: AppShadows.subtle,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: AppColors.primary),
-              const SizedBox(width: 6),
+              Icon(icon, size: 13, color: AppColors.primary),
+              const SizedBox(width: 5),
               Text(
                 label,
-                style: const TextStyle(
-                  fontSize: 12.5,
+                style: TextStyle(
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary,
                 ),
@@ -637,49 +458,6 @@ class _DemoChip extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ── Brand footer ────────────────────────────────────────────────
-class _BrandFooter extends StatelessWidget {
-  const _BrandFooter();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'A project of ',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            Text(
-              'Beaconhouse',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          '© 2025 Concordia College',
-          style: TextStyle(
-            fontSize: 11,
-            color: AppColors.textMuted,
-            fontWeight: FontWeight.w400,
-          ),
-        ),
-      ],
     );
   }
 }
