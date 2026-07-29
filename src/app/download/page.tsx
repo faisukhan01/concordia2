@@ -241,7 +241,7 @@ export default function DownloadPage() {
                 </div>
                 <div>
                   <p className="text-sm font-bold text-[#1A1A1A]">Concordia College</p>
-                  <p className="text-xs text-gray-500">Management Portal</p>
+                  <p className="text-xs text-gray-500">Student &amp; Staff Portal</p>
                 </div>
               </div>
 

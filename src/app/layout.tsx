@@ -14,23 +14,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Concordia College — Management Portal",
-  description: "Concordia College management portal for administration, staff, teachers, and students. Admissions, attendance, fees, academics, HR, finance, library, transport & more — all in one place.",
+  title: "Concordia College — Portal",
+  description: "Concordia College portal for students, teachers, parents, and staff. Admissions, attendance, fees, academics, results, timetable & more — all in one place.",
   keywords: ["Concordia College", "School Management", "Education Portal", "Admissions", "Attendance", "Fees", "Academics", "ERP"],
   authors: [{ name: "Concordia College" }],
   icons: {
     icon: "/concordia-logo.png",
   },
   openGraph: {
-    title: "Concordia College — Management Portal",
-    description: "Manage your entire institution from a single platform.",
+    title: "Concordia College — Portal",
+    description: "Your campus, one tap away. For students, teachers, parents, and staff.",
     siteName: "Concordia College",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Concordia College — Management Portal",
-    description: "Manage your entire institution from a single platform.",
+    title: "Concordia College — Portal",
+    description: "Your campus, one tap away. For students, teachers, parents, and staff.",
   },
 };
 
