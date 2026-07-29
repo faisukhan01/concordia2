@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../config/api_config.dart';
 import '../models/models.dart';
+import 'api_cache.dart';
 import 'auth_storage.dart';
 
 final _log = _Logger();
@@ -32,6 +33,7 @@ class ApiClient {
   factory ApiClient() => _instance;
 
   late final Dio _dio;
+  final ApiCache _cache = ApiCache();
   String? _token;
 
   ApiClient._internal() {
@@ -84,11 +86,30 @@ class ApiClient {
   /// Clear token (called on logout / 401).
   Future<void> clearToken() async {
     _token = null;
+    _cache.clear();
     await AuthStorage.clear();
   }
 
   // ── Core request helper ──────────────────────────────────────────
   Future<dynamic> _req(
+    String method,
+    String path, {
+    Map<String, dynamic>? query,
+    dynamic body,
+  }) async {
+    // Cache GET requests for 60s (cuts perceived load time dramatically).
+    if (method == 'GET') {
+      final key = cacheKey(path, query);
+      return _cache.getOrFetch(key, () => _rawRequest(method, path, query: query, body: body));
+    }
+    // Mutations: fire the request, then invalidate any cached GETs for this
+    // resource prefix so the next read reflects the new state.
+    final result = await _rawRequest(method, path, query: query, body: body);
+    _invalidateForMutation(method, path);
+    return result;
+  }
+
+  Future<dynamic> _rawRequest(
     String method,
     String path, {
     Map<String, dynamic>? query,
@@ -111,6 +132,29 @@ class ApiClient {
       throw ApiException(0, 'Network error: $e');
     }
   }
+
+  /// Invalidate cache entries that would be affected by a mutation.
+  /// Heuristic: clear any cached GET whose key starts with the resource path.
+  void _invalidateForMutation(String method, String path) {
+    // path e.g. "fee-invoices/123/pay" → prefix "fee-invoices"
+    final seg = path.split('/').first;
+    _cache.invalidate(seg);
+    // Also clear dashboards/overview aggregates that depend on this resource.
+    const aggregates = [
+      'scoped/stats', 'platform/overview', 'branch/finance',
+      'institute/finance', 'platform/finance', 'teacher/analytics',
+      'student/analytics', 'notifications',
+    ];
+    for (final a in aggregates) {
+      _cache.invalidate(a);
+    }
+  }
+
+  /// Force-invalidate a cache prefix (call from UI after a manual refresh).
+  void invalidate(String prefix) => _cache.invalidate(prefix);
+
+  /// Clear the entire API cache (call on logout).
+  void clearCache() => _cache.clear();
 
   // ════════════════════════════════════════════════════════════════
   // AUTH
