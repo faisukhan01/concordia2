@@ -56,14 +56,21 @@ class AppColors {
   static const Color chart5 = Color(0xFF6B4423);
   static const Color chart6 = Color(0xFF16A34A);
 
-  // Premium gradients (LinearGradient begin=topLeft → end=bottomRight)
+  // ── Brand gradients ────────────────────────────────────────────
+  // All gradients are unified to the official Concordia orange palette.
+  // The legacy names (success/info/warning/purple/sunset) are kept as
+  // semantic aliases so existing call-sites keep compiling, but every
+  // one now resolves to a Concordia-orange tone — no multi-colored
+  // "vibe coded" rainbow. Solid semantic colors (success/warning/danger)
+  // are still used for StatusChip badges where differentiation matters.
   static const List<Color> primaryGradient = [Color(0xFFF26522), Color(0xFFD4541E)];
   static const List<Color> warmGradient = [Color(0xFFFF8C42), Color(0xFFF26522)];
-  static const List<Color> successGradient = [Color(0xFF22C55E), Color(0xFF16A34A)];
-  static const List<Color> infoGradient = [Color(0xFF38BDF8), Color(0xFF0EA5E9)];
-  static const List<Color> warningGradient = [Color(0xFFFBBF24), Color(0xFFF59E0B)];
-  static const List<Color> purpleGradient = [Color(0xFFA78BFA), Color(0xFF8B5CF6)];
-  static const List<Color> sunsetGradient = [Color(0xFFF8941D), Color(0xFFC8102E)];
+  // Aliases — all resolve to Concordia orange so the app is single-brand.
+  static const List<Color> successGradient = primaryGradient;
+  static const List<Color> infoGradient = [Color(0xFFFF8C42), Color(0xFFE55A1B)];
+  static const List<Color> warningGradient = [Color(0xFFF8941D), Color(0xFFF26522)];
+  static const List<Color> purpleGradient = primaryGradient;
+  static const List<Color> sunsetGradient = [Color(0xFFF8941D), Color(0xFFE55A1B)];
 
   // Dark theme (unused but kept for completeness)
   static const Color darkBackground = Color(0xFF1A1A1A);

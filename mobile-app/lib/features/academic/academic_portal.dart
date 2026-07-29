@@ -27,9 +27,32 @@ class AcademicPortal extends StatefulWidget {
 }
 
 class _AcademicPortalState extends State<AcademicPortal> {
+  late AcademicTab _tab = widget.initialTab;
+
+  void _switchTo(AcademicTab t) => setState(() => _tab = t);
+
   @override
   Widget build(BuildContext context) {
-    switch (widget.initialTab) {
+    return Column(
+      children: [
+        SubTabBar(
+          tabs: const [
+            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
+            SubTabItem(label: 'Classes', icon: Icons.class_outlined),
+            SubTabItem(label: 'Timetable', icon: Icons.calendar_today_outlined),
+            SubTabItem(label: 'Exams', icon: Icons.assignment_outlined),
+            SubTabItem(label: 'Results', icon: Icons.description_outlined),
+          ],
+          currentIndex: _tab.index,
+          onTap: (i) => _switchTo(AcademicTab.values[i]),
+        ),
+        Expanded(child: _buildTab()),
+      ],
+    );
+  }
+
+  Widget _buildTab() {
+    switch (_tab) {
       case AcademicTab.dashboard:
         return const _AcDashboard();
       case AcademicTab.classes:

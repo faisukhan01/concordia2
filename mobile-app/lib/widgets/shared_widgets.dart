@@ -126,7 +126,9 @@ class GradientHero extends StatelessWidget {
   }
 }
 
-/// Compact gradient summary card (e.g. "Pending Rs 50K | Collected Rs 120K").
+/// Compact summary card (e.g. "Pending Rs 50K | Collected Rs 120K").
+/// Renders as a subtle orange-tinted card with dark-orange values —
+/// professional and on-brand, not a loud multi-colored gradient.
 class GradientSummary extends StatelessWidget {
   final List<_SummaryItem> items;
   final List<Color> gradient;
@@ -158,15 +160,12 @@ class GradientSummary extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
-        gradient: appGradient(gradient),
+        color: AppColors.primarySoft,
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        boxShadow: [
-          BoxShadow(
-            color: gradient.first.withValues(alpha: 0.28),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        border: Border.all(
+          color: AppColors.primary.withValues(alpha: 0.16),
+          width: 1,
+        ),
       ),
       child: Row(
         children: [
@@ -176,7 +175,7 @@ class GradientSummary extends StatelessWidget {
                 width: 1,
                 height: 38,
                 margin: const EdgeInsets.symmetric(horizontal: 14),
-                color: Colors.white.withValues(alpha: 0.3),
+                color: AppColors.primary.withValues(alpha: 0.22),
               ),
             ],
             Expanded(
@@ -187,7 +186,7 @@ class GradientSummary extends StatelessWidget {
                     items[i].label,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.white.withValues(alpha: 0.88),
+                      color: AppColors.secondaryText,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -197,7 +196,7 @@ class GradientSummary extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
-                      color: Colors.white,
+                      color: AppColors.primaryDark,
                       letterSpacing: -0.3,
                     ),
                   ),
@@ -247,25 +246,21 @@ class StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? AppColors.primary;
-    final useGradient = gradient != null;
-    final iconBg = useGradient
-        ? Colors.white.withValues(alpha: 0.22)
-        : c.withValues(alpha: 0.12);
-    final iconColor = useGradient ? Colors.white : c;
+    // Unified professional look: always a WHITE card with a soft orange
+    // icon bubble. The gradient/color param only tints the icon — no
+    // full-card multi-colored gradients (per official Concordia brand).
+    final c = color ??
+        (gradient != null ? gradient!.first : AppColors.primary);
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: EdgeInsets.all(compact ? 12 : 14),
         decoration: BoxDecoration(
-          color: useGradient ? null : AppColors.card,
-          gradient: useGradient ? appGradient(gradient!) : null,
+          color: AppColors.card,
           borderRadius: BorderRadius.circular(AppRadii.md),
-          border: useGradient
-              ? null
-              : Border.all(color: AppColors.border, width: 1),
-          boxShadow: AppShadows.card,
+          border: Border.all(color: AppColors.border, width: 1),
+          boxShadow: AppShadows.subtle,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,10 +271,10 @@ class StatCard extends StatelessWidget {
                   width: compact ? 30 : 36,
                   height: compact ? 30 : 36,
                   decoration: BoxDecoration(
-                    color: iconBg,
+                    color: c.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(AppRadii.sm),
                   ),
-                  child: Icon(icon, size: compact ? 16 : 18, color: iconColor),
+                  child: Icon(icon, size: compact ? 16 : 18, color: c),
                 ),
                 const Spacer(),
                 if (trend != null)
@@ -327,18 +322,16 @@ class StatCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: compact ? 18 : 22,
                 fontWeight: FontWeight.w800,
-                color: useGradient ? Colors.white : AppColors.textPrimary,
+                color: AppColors.textPrimary,
                 letterSpacing: -0.3,
               ),
             ),
             const SizedBox(height: 2),
             Text(
               label,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 12,
-                color: useGradient
-                    ? Colors.white.withValues(alpha: 0.88)
-                    : AppColors.textSecondary,
+                color: AppColors.textSecondary,
                 fontWeight: FontWeight.w500,
               ),
               maxLines: 1,
@@ -1062,4 +1055,94 @@ String initialsOf(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
   if (parts.length == 1) return parts[0][0].toUpperCase();
   return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SUB TAB BAR — persistent in-portal tab switcher
+// ════════════════════════════════════════════════════════════════
+// Used by the sub-portals (Accountant / Admissions / Academic) when
+// they are embedded inside the Admin shell. The Admin's bottom nav
+// only switches between the 5 top-level modules; this SubTabBar lets
+// the admin (and the role user) switch between every sub-tab of the
+// embedded portal so they can perform ALL of that role's tasks.
+
+/// A single sub-tab definition.
+class SubTabItem {
+  final String label;
+  final IconData icon;
+  const SubTabItem({required this.label, required this.icon});
+}
+
+/// Horizontally-scrollable pill bar for switching sub-tabs.
+class SubTabBar extends StatelessWidget {
+  final List<SubTabItem> tabs;
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  const SubTabBar({
+    super.key,
+    required this.tabs,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      margin: const EdgeInsets.fromLTRB(16, 8, 0, 6),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(right: 16),
+        physics: const BouncingScrollPhysics(),
+        itemCount: tabs.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final active = i == currentIndex;
+          return GestureDetector(
+            onTap: () => onTap(i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                color: active ? AppColors.primary : AppColors.card,
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                border: Border.all(
+                  color: active ? AppColors.primary : AppColors.border,
+                  width: 1,
+                ),
+                boxShadow: active
+                    ? [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.22),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    tabs[i].icon,
+                    size: 15,
+                    color: active ? Colors.white : AppColors.textSecondary,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    tabs[i].label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      color: active ? Colors.white : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
