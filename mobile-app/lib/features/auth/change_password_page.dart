@@ -6,7 +6,8 @@ import '../../core/theme/app_theme.dart';
 import 'auth_provider.dart';
 
 class ChangePasswordPage extends StatefulWidget {
-  const ChangePasswordPage({super.key});
+  final bool embedded;
+  const ChangePasswordPage({super.key, this.embedded = false});
 
   @override
   State<ChangePasswordPage> createState() => _ChangePasswordPageState();
@@ -47,15 +48,9 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Change Password'),
-      ),
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
+    final body = SafeArea(
+      child: Form(
+        key: _formKey,
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
@@ -130,7 +125,19 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
             ],
           ),
         ),
+      );
+    // When embedded in the Settings tab, don't wrap in a Scaffold (the
+    // RoleShell already provides the app bar + body). Otherwise standalone.
+    if (widget.embedded) {
+      return body;
+    }
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: const Text('Change Password'),
       ),
+      body: body,
     );
   }
 }

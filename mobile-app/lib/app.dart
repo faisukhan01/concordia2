@@ -1,5 +1,9 @@
 // Root widget + go_router setup.
 // Routes to /login or the role-specific home based on auth state.
+//
+// Theme is forced to LIGHT always — the web portal is light-only and the
+// mobile app must match. Never use ThemeMode.system (that caused the dark
+// footer/bottom-nav bug on phones in dark mode).
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -64,13 +68,15 @@ class ConcordiaApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Concordia College',
       theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.system,
+      // Force light theme — NEVER system/dark. The web portal is light-only.
+      themeMode: ThemeMode.light,
       routerConfig: router,
     );
   }
 }
 
+/// Branded splash — shown for <500ms while AuthProvider.bootstrap() restores
+/// the session from SharedPreferences. Clean, minimal, no animation jank.
 class _Splash extends StatelessWidget {
   const _Splash();
 
@@ -82,40 +88,39 @@ class _Splash extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 96,
-              height: 96,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: const Icon(
-                Icons.school,
-                size: 52,
-                color: Color(0xFFF26522),
+            // Concordia app icon (the orange square + black C from the real logo)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: Image.asset(
+                'assets/images/app-icon.png',
+                width: 96,
+                height: 96,
+                fit: BoxFit.cover,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
             const Text(
               'Concordia College',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: FontWeight.w700,
+                letterSpacing: -0.3,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             const Text(
               'Management Portal',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 14,
+                fontWeight: FontWeight.w400,
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 36),
             const SizedBox(
-              width: 28,
-              height: 28,
+              width: 24,
+              height: 24,
               child: CircularProgressIndicator(
                 color: Colors.white,
                 strokeWidth: 2.5,
