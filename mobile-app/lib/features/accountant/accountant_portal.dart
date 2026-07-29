@@ -34,7 +34,22 @@ class _AccountantPortalState extends State<AccountantPortal> {
 
   @override
   Widget build(BuildContext context) {
-    return _buildTab();
+    return Column(
+      children: [
+        SubTabBar(
+          tabs: const [
+            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
+            SubTabItem(label: 'Students', icon: Icons.people_outline),
+            SubTabItem(label: 'Fees', icon: Icons.receipt_long_outlined),
+            SubTabItem(label: 'Misc', icon: Icons.add_circle_outline),
+            SubTabItem(label: 'Logins', icon: Icons.vpn_key_outlined),
+          ],
+          currentIndex: _tab.index,
+          onTap: (i) => _switchTo(AccountantTab.values[i]),
+        ),
+        Expanded(child: _buildTab()),
+      ],
+    );
   }
 
   Widget _buildTab() {

@@ -34,9 +34,31 @@ class AdmissionsPortal extends StatefulWidget {
 }
 
 class _AdmissionsPortalState extends State<AdmissionsPortal> {
+  late AdmissionsTab _tab = widget.initialTab;
+
+  void _switchTo(AdmissionsTab t) => setState(() => _tab = t);
+
   @override
   Widget build(BuildContext context) {
-    switch (widget.initialTab) {
+    return Column(
+      children: [
+        SubTabBar(
+          tabs: const [
+            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
+            SubTabItem(label: 'New Enrollment', icon: Icons.person_add_outlined),
+            SubTabItem(label: 'Records', icon: Icons.people_outline),
+            SubTabItem(label: 'Fee Records', icon: Icons.account_balance_wallet_outlined),
+          ],
+          currentIndex: _tab.index,
+          onTap: (i) => _switchTo(AdmissionsTab.values[i]),
+        ),
+        Expanded(child: _buildTab()),
+      ],
+    );
+  }
+
+  Widget _buildTab() {
+    switch (_tab) {
       case AdmissionsTab.dashboard:
         return const _AdDashboard();
       case AdmissionsTab.newEnrollment:
