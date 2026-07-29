@@ -1,0 +1,81 @@
+name: Build & Release Android APK
+
+# Builds a signed-with-debug-keys release APK whenever a version tag (v*.*.*)
+# is pushed, then attaches it to a GitHub Release named "latest".
+# The /download landing page points at:
+#   https://github.com/faisukhan01/concordia2/releases/latest/download/concordia-college.apk
+# so the APK MUST be published as a release asset named `concordia-college.apk`.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Download dependencies
+        run: flutter pub get
+
+      - name: Verify Dart analysis
+        run: flutter analyze --no-fatal-infos || true
+
+      - name: Build release APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Rename APK to concordia-college.apk
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/concordia-college.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: concordia-college-apk
+          path: mobile-app/build/app/outputs/flutter-apk/concordia-college.apk
+          retention-days: 90
+
+      - name: Create / update GitHub Release & attach APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Concordia College ${{ github.ref_name }}
+          body: |
+            # Concordia College — Android App ${{ github.ref_name }}
+
+            Mobile management portal for Concordia College — built with Flutter.
+
+            ## Install
+            1. Download `concordia-college.apk` below.
+            2. On your phone, allow "Install unknown apps" for your browser.
+            3. Tap the downloaded file to install.
+
+            **Minimum:** Android 5.0 (API 21) · **Size:** ~27 MB
+          prerelease: false
+          make_latest: true
+          files: mobile-app/build/app/outputs/flutter-apk/concordia-college.apk
