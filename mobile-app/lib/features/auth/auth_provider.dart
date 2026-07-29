@@ -9,6 +9,14 @@ import '../../core/models/models.dart';
 class AuthProvider extends ChangeNotifier {
   final _api = ApiClient();
 
+  AuthProvider() {
+    // Kick off session restore immediately on construction so the splash
+    // screen doesn't hang forever. main.dart creates this provider via
+    // ChangeNotifierProvider, and app.dart shows the splash while
+    // `loading` is true — without this call, loading never flips to false.
+    bootstrap();
+  }
+
   User? _user;
   bool _loading = true;
   bool _busy = false;
