@@ -22,6 +22,8 @@ import {
   Presentation,
   GraduationCap,
   HeartHandshake,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -30,6 +32,36 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
+const APK_VERSION = 'v1.0.0';
+const APK_UPDATED = 'July 29, 2026';
+const APK_SIZE = '~26 MB';
+
+const whatsNew = [
+  {
+    title: 'Fresh white-background app icon',
+    desc: 'Clean white launcher icon with the Concordia mark — looks crisp on every home screen.',
+  },
+  {
+    title: 'Professional sign-in experience',
+    desc: 'Floating logo card, gradient title, glass-style form, focus-aware inputs, quick-fill demo logins.',
+  },
+  {
+    title: 'All 6 portals redesigned',
+    desc: 'Admin, Admissions, Accountant, Academic, Teacher & Student portals rebuilt with gradient hero banners, stat cards, charts and premium cards.',
+  },
+  {
+    title: 'Up to 5x faster data loading',
+    desc: '60-second in-memory cache + parallel API fetching. Warm tab switches are now sub-second.',
+  },
+  {
+    title: 'Fixed bottom navigation',
+    desc: 'White bottom nav with animated active-pill indicators — no more dark footer.',
+  },
+  {
+    title: 'Premium shared widgets',
+    desc: 'Shimmer loading skeletons, donut & bar charts, status chips, gradient summary cards throughout.',
+  },
+];
 
 const features = [
   {
@@ -114,10 +146,6 @@ export default function DownloadPage() {
     });
   }, []);
 
-  const handleDownload = () => {
-    window.location.href = APK_DOWNLOAD_URL;
-  };
-
   const buttonLabel = mounted && isAndroid ? 'Update App' : 'Download for Android';
 
   return (
@@ -174,19 +202,29 @@ export default function DownloadPage() {
             </p>
 
             <div className="mt-8 flex flex-col items-start gap-3">
-              <button
-                onClick={handleDownload}
+              <a
+                href={APK_DOWNLOAD_URL}
                 className="group inline-flex items-center gap-2.5 rounded-2xl bg-[#F26522] px-7 py-4 text-base font-semibold text-white shadow-[0_10px_30px_-8px_rgba(242,101,34,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_14px_36px_-8px_rgba(242,101,34,0.65)]"
               >
                 <Download className="h-5 w-5" />
                 <span>{buttonLabel}</span>
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-              </button>
+              </a>
               <p className="text-sm text-gray-500">
                 {mounted && isAndroid
-                  ? '~27 MB · Installs over current version · Free'
-                  : '~27 MB · Android 5.0+ · Free'}
+                  ? `${APK_SIZE} · Installs over current version · Free`
+                  : `${APK_SIZE} · Android 5.0+ · Free`}
               </p>
+              {/* Version badge */}
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-200/70 bg-white/80 px-3 py-1 font-semibold text-[#F26522] backdrop-blur-sm">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {APK_VERSION} · Latest
+                </span>
+                <span className="rounded-full border border-orange-100 bg-white/70 px-3 py-1 text-gray-600 backdrop-blur-sm">
+                  Updated {APK_UPDATED}
+                </span>
+              </div>
             </div>
 
             {/* App icon card + QR card */}
@@ -244,6 +282,62 @@ export default function DownloadPage() {
           <div className="relative mx-auto lg:mx-0">
             <PhoneMockup />
           </div>
+        </div>
+      </section>
+
+      {/* What's new in this version */}
+      <section className="border-y border-orange-100/60 bg-gradient-to-b from-[#FFF6EE] to-[#FCFBF9]">
+        <div className="mx-auto max-w-6xl px-6 py-20 md:py-24">
+          <Reveal className="mx-auto max-w-2xl text-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200/70 bg-white/80 px-3.5 py-1.5 backdrop-blur-sm">
+              <Sparkles className="h-3.5 w-3.5 text-[#F26522]" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#F26522]">
+                Just shipped · {APK_VERSION}
+              </span>
+            </div>
+            <h2 className="mt-4 text-3xl font-bold tracking-tight text-[#1A1A1A] sm:text-4xl">
+              What&rsquo;s new in this version
+            </h2>
+            <p className="mt-3 text-lg text-gray-600">
+              Updated {APK_UPDATED} · {APK_SIZE} · This is the build you&rsquo;ll download today.
+            </p>
+          </Reveal>
+
+          <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {whatsNew.map((item, i) => (
+              <Reveal key={item.title} delay={i * 0.06}>
+                <div className="group h-full rounded-2xl border border-orange-100/70 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_12px_28px_-12px_rgba(242,101,34,0.25)]">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE8DC] to-[#FFD3B8] ring-1 ring-orange-200/50">
+                    <Check className="h-5 w-5 text-[#F26522]" />
+                  </div>
+                  <h3 className="mt-4 text-base font-bold text-[#1A1A1A]">{item.title}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{item.desc}</p>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+
+          {/* Reassurance banner */}
+          <Reveal delay={0.2}>
+            <div className="mx-auto mt-12 flex max-w-3xl flex-col items-center gap-4 rounded-3xl border border-orange-200/70 bg-white p-6 text-center shadow-sm sm:flex-row sm:text-left">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#F26522] to-[#D4541E] text-white shadow-lg">
+                <ShieldCheck className="h-7 w-7" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-[#1A1A1A]">
+                  This exact build is live right now
+                </h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  The button above downloads the APK from the official GitHub release at{' '}
+                  <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-xs text-[#F26522]">
+                    github.com/faisukhan01/concordia2
+                  </code>
+                  . Every install gets the same {APK_VERSION} ({APK_SIZE}) premium build — white
+                  icon, redesigned portals, and the faster cache.
+                </p>
+              </div>
+            </div>
+          </Reveal>
         </div>
       </section>
 
