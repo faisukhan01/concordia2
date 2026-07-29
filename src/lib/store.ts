@@ -85,7 +85,7 @@ export const useApp = create<AppState>()(
       logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null }),
     }),
     {
-      name: 'esm-app',
+      name: 'concordia-app',
       storage: createJSONStorage(() => sessionStorageAdapter),
     }
   )

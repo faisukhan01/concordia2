@@ -38,7 +38,7 @@ export function nextId(prefix: string) {
 }
 
 export async function createSession(user: any) {
-  const token = 'esm-' + crypto.randomBytes(32).toString('hex');
+  const token = 'concordia-' + crypto.randomBytes(32).toString('hex');
   await db.execute({
     sql: 'INSERT INTO sessions (token, userId, role, issuedAt, expiresAt) VALUES (?, ?, ?, ?, ?)',
     args: [token, user.id, user.role, Date.now(), Date.now() + SESSION_TTL],

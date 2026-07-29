@@ -379,7 +379,7 @@ function studentsForClass(students: Student[], cls: TeacherClass): Student[] {
 // feedback POST (which goes to a route the backend hasn't formally defined yet).
 async function authHeaders(): Promise<Record<string, string>> {
   try {
-    const raw = sessionStorage.getItem('esm-app');
+    const raw = sessionStorage.getItem('concordia-app');
     if (raw) {
       const parsed = JSON.parse(raw);
       const token = parsed?.state?.token;

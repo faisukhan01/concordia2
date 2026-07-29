@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, initDB } from './db';
 import { requireAuth, requireRole, createSession, buildUserProfile, nextId, registerFailedAttempt, ROLE_LABELS } from './auth';
 
-// ESM API request handler — converts the previous Express service (~2200 lines, 81 endpoints)
+// Concordia API request handler — converts the previous Express service (~2200 lines, 81 endpoints)
 // into a single Next.js API dispatcher. Each Express `app.<method>('/api/<path>', ...)` block
 // is mapped to an `if (method === '...' && path === '...')` block here.
 //
@@ -2668,7 +2668,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'GET' && path === 'health') {
       try {
         const r = await db.execute('SELECT COUNT(*) as count FROM users');
-        return NextResponse.json({ ok: true, service: 'esm-api', users: (r.rows[0] as any).count, db: 'turso' });
+        return NextResponse.json({ ok: true, service: 'concordia-api', users: (r.rows[0] as any).count, db: 'turso' });
       } catch (e: any) {
         return NextResponse.json({ ok: false, error: e.message });
       }
@@ -2920,7 +2920,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           const row = r.rows[i] as Record<string, unknown>;
           const isActive = String(row.status ?? 'Active') === 'Active';
           cards.push({
-            id: `ESM-${new Date().getFullYear()}-${String(i + 1).padStart(4, '0')}`,
+            id: `CC-${new Date().getFullYear()}-${String(i + 1).padStart(4, '0')}`,
             studentId: String(row.id ?? ''),
             studentName: String(row.name ?? ''),
             rollNo: String(row.rollNo ?? ''),
@@ -2941,12 +2941,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       // Fallback to realistic mock cards.
       if (cards.length === 0) {
         const mockCards: IdCard[] = [
-          { id: 'ESM-2025-0421', studentId: 'U-S-0421', studentName: 'Ayesha Khan', rollNo: 'AGR-8-A-12', className: 'Grade 8', section: 'A', instituteName: 'Punjab College for Girls', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'B+', contact: '+92 300 1234567' },
-          { id: 'ESM-2025-0422', studentId: 'U-S-0422', studentName: 'Hamza Tariq', rollNo: 'AGR-9-B-07', className: 'Grade 9', section: 'B', instituteName: 'Punjab College for Boys', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'O+', contact: '+92 301 7654321' },
-          { id: 'ESM-2025-0423', studentId: 'U-S-0423', studentName: 'Zainab Ali', rollNo: 'AGR-10-A-21', className: 'Grade 10', section: 'A', instituteName: 'Punjab College for Girls', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'expired', issuedAt: '2024-03-01', bloodGroup: 'A+', contact: '+92 302 9876543' },
-          { id: 'ESM-2025-0424', studentId: 'U-S-0424', studentName: 'Bilal Raza', rollNo: 'AGR-7-C-04', className: 'Grade 7', section: 'C', instituteName: 'Punjab College for Boys', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'AB+', contact: '+92 303 5550100' },
-          { id: 'ESM-2025-0425', studentId: 'U-S-0425', studentName: 'Fatima Noor', rollNo: 'AGR-9-A-15', className: 'Grade 9', section: 'A', instituteName: 'Punjab College for Girls', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'revoked', issuedAt: '2025-03-01', bloodGroup: 'O−', contact: '+92 311 4442020' },
-          { id: 'ESM-2025-0426', studentId: 'U-S-0426', studentName: 'Usman Sheikh', rollNo: 'AGR-11-B-09', className: 'Grade 11', section: 'B', instituteName: 'Punjab College for Boys', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'B−', contact: '+92 321 8883030' },
+          { id: 'CC-2025-0421', studentId: 'U-S-0421', studentName: 'Ayesha Khan', rollNo: 'AGR-8-A-12', className: 'Grade 8', section: 'A', instituteName: 'Punjab College for Girls', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'B+', contact: '+92 300 1234567' },
+          { id: 'CC-2025-0422', studentId: 'U-S-0422', studentName: 'Hamza Tariq', rollNo: 'AGR-9-B-07', className: 'Grade 9', section: 'B', instituteName: 'Punjab College for Boys', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'O+', contact: '+92 301 7654321' },
+          { id: 'CC-2025-0423', studentId: 'U-S-0423', studentName: 'Zainab Ali', rollNo: 'AGR-10-A-21', className: 'Grade 10', section: 'A', instituteName: 'Punjab College for Girls', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'expired', issuedAt: '2024-03-01', bloodGroup: 'A+', contact: '+92 302 9876543' },
+          { id: 'CC-2025-0424', studentId: 'U-S-0424', studentName: 'Bilal Raza', rollNo: 'AGR-7-C-04', className: 'Grade 7', section: 'C', instituteName: 'Punjab College for Boys', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'AB+', contact: '+92 303 5550100' },
+          { id: 'CC-2025-0425', studentId: 'U-S-0425', studentName: 'Fatima Noor', rollNo: 'AGR-9-A-15', className: 'Grade 9', section: 'A', instituteName: 'Punjab College for Girls', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'revoked', issuedAt: '2025-03-01', bloodGroup: 'O−', contact: '+92 311 4442020' },
+          { id: 'CC-2025-0426', studentId: 'U-S-0426', studentName: 'Usman Sheikh', rollNo: 'AGR-11-B-09', className: 'Grade 11', section: 'B', instituteName: 'Punjab College for Boys', branchName: 'Lahore Main', photoUrl: '', validThru: 'Mar 2026', status: 'active', issuedAt: '2025-03-01', bloodGroup: 'B−', contact: '+92 321 8883030' },
         ];
         // Filter mock cards by search/status for consistency with SQL path.
         cards = mockCards.filter((c) => {
@@ -2988,16 +2988,16 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         date: string; time: string; referenceNo: string;
       };
       const all: WalletTxn[] = [
-        { id: 't1', type: 'cafeteria', merchant: 'Cafeteria — Lunch Combo', amount: -240, balanceBefore: 2690, balanceAfter: 2450, date: 'Today', time: '12:35 PM', referenceNo: 'ESM-W-2410-T1' },
-        { id: 't2', type: 'printing', merchant: 'Print Job — 14 pages', amount: -70, balanceBefore: 2760, balanceAfter: 2690, date: 'Today', time: '10:12 AM', referenceNo: 'ESM-W-2410-T2' },
-        { id: 't3', type: 'bookshop', merchant: 'Bookshop — Physics Notebook', amount: -350, balanceBefore: 3110, balanceAfter: 2760, date: 'Yesterday', time: '04:48 PM', referenceNo: 'ESM-W-2409-T3' },
-        { id: 't4', type: 'topup', merchant: 'Top Up — JazzCash', amount: 2000, balanceBefore: 1110, balanceAfter: 3110, date: 'Yesterday', time: '09:15 AM', referenceNo: 'ESM-W-2409-T4' },
-        { id: 't5', type: 'transport', merchant: 'Transport — Monthly Pass', amount: -660, balanceBefore: 1770, balanceAfter: 1110, date: 'Oct 12', time: '08:00 AM', referenceNo: 'ESM-W-2412-T5' },
-        { id: 't6', type: 'stationery', merchant: 'Stationery — Geometry Box', amount: -180, balanceBefore: 1950, balanceAfter: 1770, date: 'Oct 11', time: '01:22 PM', referenceNo: 'ESM-W-2411-T6' },
-        { id: 't7', type: 'cafeteria', merchant: 'Cafeteria — Tea & Samosa', amount: -90, balanceBefore: 2040, balanceAfter: 1950, date: 'Oct 10', time: '11:10 AM', referenceNo: 'ESM-W-2410-T7' },
-        { id: 't8', type: 'refund', merchant: 'Refund — Cancelled Order', amount: 70, balanceBefore: 1970, balanceAfter: 2040, date: 'Oct 09', time: '03:30 PM', referenceNo: 'ESM-W-2409-T8' },
-        { id: 't9', type: 'printing', merchant: 'Print Job — 8 pages', amount: -40, balanceBefore: 2010, balanceAfter: 1970, date: 'Oct 08', time: '10:00 AM', referenceNo: 'ESM-W-2408-T9' },
-        { id: 't10', type: 'bookshop', merchant: 'Bookshop — Urdu Novel', amount: -250, balanceBefore: 2260, balanceAfter: 2010, date: 'Oct 05', time: '02:15 PM', referenceNo: 'ESM-W-2405-T10' },
+        { id: 't1', type: 'cafeteria', merchant: 'Cafeteria — Lunch Combo', amount: -240, balanceBefore: 2690, balanceAfter: 2450, date: 'Today', time: '12:35 PM', referenceNo: 'CC-W-2410-T1' },
+        { id: 't2', type: 'printing', merchant: 'Print Job — 14 pages', amount: -70, balanceBefore: 2760, balanceAfter: 2690, date: 'Today', time: '10:12 AM', referenceNo: 'CC-W-2410-T2' },
+        { id: 't3', type: 'bookshop', merchant: 'Bookshop — Physics Notebook', amount: -350, balanceBefore: 3110, balanceAfter: 2760, date: 'Yesterday', time: '04:48 PM', referenceNo: 'CC-W-2409-T3' },
+        { id: 't4', type: 'topup', merchant: 'Top Up — JazzCash', amount: 2000, balanceBefore: 1110, balanceAfter: 3110, date: 'Yesterday', time: '09:15 AM', referenceNo: 'CC-W-2409-T4' },
+        { id: 't5', type: 'transport', merchant: 'Transport — Monthly Pass', amount: -660, balanceBefore: 1770, balanceAfter: 1110, date: 'Oct 12', time: '08:00 AM', referenceNo: 'CC-W-2412-T5' },
+        { id: 't6', type: 'stationery', merchant: 'Stationery — Geometry Box', amount: -180, balanceBefore: 1950, balanceAfter: 1770, date: 'Oct 11', time: '01:22 PM', referenceNo: 'CC-W-2411-T6' },
+        { id: 't7', type: 'cafeteria', merchant: 'Cafeteria — Tea & Samosa', amount: -90, balanceBefore: 2040, balanceAfter: 1950, date: 'Oct 10', time: '11:10 AM', referenceNo: 'CC-W-2410-T7' },
+        { id: 't8', type: 'refund', merchant: 'Refund — Cancelled Order', amount: 70, balanceBefore: 1970, balanceAfter: 2040, date: 'Oct 09', time: '03:30 PM', referenceNo: 'CC-W-2409-T8' },
+        { id: 't9', type: 'printing', merchant: 'Print Job — 8 pages', amount: -40, balanceBefore: 2010, balanceAfter: 1970, date: 'Oct 08', time: '10:00 AM', referenceNo: 'CC-W-2408-T9' },
+        { id: 't10', type: 'bookshop', merchant: 'Bookshop — Urdu Novel', amount: -250, balanceBefore: 2260, balanceAfter: 2010, date: 'Oct 05', time: '02:15 PM', referenceNo: 'CC-W-2405-T10' },
       ];
       return NextResponse.json({ transactions: all.slice(0, limit) });
     }

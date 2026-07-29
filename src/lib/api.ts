@@ -1,4 +1,4 @@
-// eSM API client — talks to the in-process Next.js API routes directly (no port).
+// Concordia API client — talks to the in-process Next.js API routes directly (no port).
 function apiUrl(path: string) {
   return '/api/' + path.replace(/^\//, '');
 }
@@ -8,7 +8,7 @@ function apiUrl(path: string) {
 // instantly and refresh silently in the background.
 const _cache = new Map<string, { data: any; time: number }>();
 const CACHE_TTL = 60_000; // 60 seconds
-const SESSION_KEY = 'esm-api-cache';
+const SESSION_KEY = 'concordia-api-cache';
 
 // Restore cache from sessionStorage on module load
 try {
@@ -64,7 +64,7 @@ async function backgroundRefresh<T>(path: string) {
 // Get the stored auth token (from zustand persist — uses sessionStorage for per-tab sessions)
 function getToken(): string | null {
   try {
-    const raw = sessionStorage.getItem('esm-app');
+    const raw = sessionStorage.getItem('concordia-app');
     if (raw) {
       const parsed = JSON.parse(raw);
       return parsed?.state?.token || null;
@@ -122,7 +122,7 @@ export const api = {
   // Client-side logout — clears the persisted zustand session (auth is stateless JWT,
   // no server round-trip needed). After calling, redirect to '/' to reload the app.
   logout: async () => {
-    try { sessionStorage.removeItem('esm-app'); } catch {}
+    try { sessionStorage.removeItem('concordia-app'); } catch {}
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<any>('auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),

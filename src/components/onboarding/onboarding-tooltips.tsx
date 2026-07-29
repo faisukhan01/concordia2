@@ -16,8 +16,8 @@ import { Info, Lightbulb, X, ChevronRight, Target, BookOpen } from 'lucide-react
 // (server snapshot defaults to dismissed=true → no flash on first paint), and avoids
 // the `react-hooks/set-state-in-effect` lint error.
 
-const STORAGE_KEY = 'esm_onboarding_dismissed_v1';
-const STORAGE_EVENT = 'esm:onboarding-change';
+const STORAGE_KEY = 'concordia_onboarding_dismissed_v1';
+const STORAGE_EVENT = 'concordia:onboarding-change';
 
 type TipDef = { id: string; icon: typeof Info; text: string };
 
