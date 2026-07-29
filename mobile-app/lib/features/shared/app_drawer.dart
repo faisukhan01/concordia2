@@ -164,7 +164,7 @@ class AppDrawer extends StatelessWidget {
   }
 }
 
-// ── Drawer header (gradient with avatar + name + role badge) ────
+// ── Drawer header (clean, restrained — not vibe coded) ────
 class _DrawerHeader extends StatelessWidget {
   final dynamic user; // User model
   const _DrawerHeader({required this.user});
@@ -173,16 +173,9 @@ class _DrawerHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
       decoration: BoxDecoration(
         gradient: appGradient(AppColors.primaryGradient),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.28),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,25 +183,18 @@ class _DrawerHeader extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 56,
-                height: 56,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(AppRadii.md),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
                 ),
                 child: Center(
                   child: Text(
                     initialsOf(user.name as String),
                     style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
                       color: AppColors.primary,
                     ),
                   ),
@@ -219,7 +205,7 @@ class _DrawerHeader extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.22),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
                 child: Text(
@@ -227,7 +213,7 @@ class _DrawerHeader extends StatelessWidget {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 0.3,
                   ),
                 ),
@@ -239,8 +225,8 @@ class _DrawerHeader extends StatelessWidget {
             user.name as String,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
               letterSpacing: -0.2,
             ),
             maxLines: 1,
@@ -250,13 +236,13 @@ class _DrawerHeader extends StatelessWidget {
           Row(
             children: [
               Icon(Icons.badge_outlined,
-                  size: 13, color: Colors.white.withValues(alpha: 0.8)),
+                  size: 13, color: Colors.white.withValues(alpha: 0.75)),
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
                   user.displayId as String,
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
+                    color: Colors.white.withValues(alpha: 0.85),
                     fontSize: 12.5,
                   ),
                   maxLines: 1,
@@ -270,13 +256,13 @@ class _DrawerHeader extends StatelessWidget {
             Row(
               children: [
                 Icon(Icons.location_on_outlined,
-                    size: 13, color: Colors.white.withValues(alpha: 0.8)),
+                    size: 13, color: Colors.white.withValues(alpha: 0.75)),
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
                     user.branchName as String,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
+                      color: Colors.white.withValues(alpha: 0.8),
                       fontSize: 12.5,
                     ),
                     maxLines: 1,

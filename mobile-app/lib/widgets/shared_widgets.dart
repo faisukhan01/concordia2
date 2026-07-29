@@ -25,6 +25,7 @@ import '../core/theme/app_theme.dart';
 // ════════════════════════════════════════════════════════════════
 
 /// Full-bleed gradient hero with title, subtitle, optional trailing stat.
+/// Restrained design: subtle shadow, clean typography — not "vibe coded".
 class GradientHero extends StatelessWidget {
   final String title;
   final String? subtitle;
@@ -41,22 +42,22 @@ class GradientHero extends StatelessWidget {
     this.icon,
     this.gradient = AppColors.primaryGradient,
     this.trailing,
-    this.height = 132,
+    this.height = 116,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
       decoration: BoxDecoration(
         gradient: appGradient(gradient),
         borderRadius: BorderRadius.circular(AppRadii.lg),
         boxShadow: [
           BoxShadow(
-            color: gradient.first.withValues(alpha: 0.32),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
+            color: gradient.first.withValues(alpha: 0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -72,31 +73,31 @@ class GradientHero extends StatelessWidget {
                   Text(
                     eyebrow!.toUpperCase(),
                     style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white.withValues(alpha: 0.85),
-                      letterSpacing: 1.4,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.8),
+                      letterSpacing: 1.2,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 5),
                 ],
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
                     color: Colors.white,
                     letterSpacing: -0.3,
-                    height: 1.1,
+                    height: 1.15,
                   ),
                 ),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 5),
                   Text(
                     subtitle!,
                     style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.white.withValues(alpha: 0.92),
+                      fontSize: 12.5,
+                      color: Colors.white.withValues(alpha: 0.9),
                       height: 1.3,
                     ),
                   ),
@@ -110,13 +111,13 @@ class GradientHero extends StatelessWidget {
           ] else if (icon != null) ...[
             const SizedBox(width: 12),
             Container(
-              width: 52,
-              height: 52,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.22),
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(AppRadii.md),
               ),
-              child: Icon(icon, size: 26, color: Colors.white),
+              child: Icon(icon, size: 22, color: Colors.white),
             ),
           ],
         ],

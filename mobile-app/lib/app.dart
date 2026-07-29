@@ -110,7 +110,7 @@ class _Splash extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Management Portal',
+              'Student & Staff Portal',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 14,
