@@ -1074,6 +1074,11 @@ class SubTabItem {
 }
 
 /// Horizontally-scrollable pill bar for switching sub-tabs.
+///
+/// Premium segmented control: the active pill uses a Concordia-orange
+/// gradient with a soft glow, inactives are clean white cards. Shown for
+/// admins (who need it to switch a sub-portal's tasks); the portal's own
+/// role hides it because their bottom nav already covers the same items.
 class SubTabBar extends StatelessWidget {
   final List<SubTabItem> tabs;
   final int currentIndex;
@@ -1088,53 +1093,78 @@ class SubTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 46,
-      margin: const EdgeInsets.fromLTRB(16, 8, 0, 6),
+      height: 50,
+      margin: const EdgeInsets.fromLTRB(16, 10, 0, 8),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(right: 16),
         physics: const BouncingScrollPhysics(),
         itemCount: tabs.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 9),
         itemBuilder: (_, i) {
           final active = i == currentIndex;
           return GestureDetector(
             onTap: () => onTap(i),
+            behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : AppColors.card,
+                gradient: active
+                    ? appGradient(AppColors.primaryGradient)
+                    : null,
+                color: active ? null : AppColors.card,
                 borderRadius: BorderRadius.circular(AppRadii.pill),
                 border: Border.all(
-                  color: active ? AppColors.primary : AppColors.border,
+                  color: active
+                      ? AppColors.primary
+                      : AppColors.border,
                   width: 1,
                 ),
                 boxShadow: active
                     ? [
                         BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.22),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
+                          color: AppColors.primary.withValues(alpha: 0.30),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                          spreadRadius: 0,
+                        ),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
                         ),
                       ]
-                    : null,
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     tabs[i].icon,
-                    size: 15,
-                    color: active ? Colors.white : AppColors.textSecondary,
+                    size: 16,
+                    color: active
+                        ? Colors.white
+                        : AppColors.textSecondary,
                   ),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
                   Text(
                     tabs[i].label,
                     style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                      color: active ? Colors.white : AppColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight:
+                          active ? FontWeight.w700 : FontWeight.w500,
+                      color: active
+                          ? Colors.white
+                          : AppColors.textSecondary,
+                      letterSpacing: active ? 0.1 : 0,
                     ),
                   ),
                 ],

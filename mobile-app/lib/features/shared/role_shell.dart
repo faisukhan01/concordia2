@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../auth/auth_provider.dart';
 import 'nav_items.dart';
+import 'nav_provider.dart';
 import 'app_drawer.dart';
 
 class RoleShell extends StatefulWidget {
@@ -25,18 +26,27 @@ class RoleShell extends StatefulWidget {
 }
 
 class _RoleShellState extends State<RoleShell> {
-  int _index = 0;
-
-  void _goTo(int i) => setState(() => _index = i);
+  @override
+  void initState() {
+    super.initState();
+    // Start every fresh shell session at the Home tab so a stale index from
+    // a previous session doesn't carry over (e.g. after logout → login).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<NavProvider>().reset();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final nav = context.watch<NavProvider>();
     final user = auth.user!;
     final items = NavItems.forRole(user.role);
 
-    if (_index >= items.length) _index = 0;
-    final currentItem = items[_index];
+    int index = nav.index;
+    if (index >= items.length) index = 0;
+    if (index < 0) index = 0;
+    final currentItem = items[index];
     final hasMore = items.length > 5;
     final visibleItems = hasMore ? items.sublist(0, 4) : items;
     final moreItems = hasMore ? items.sublist(4) : <NavItem>[];
@@ -107,19 +117,19 @@ class _RoleShellState extends State<RoleShell> {
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 180),
         child: KeyedSubtree(
-          key: ValueKey(_index),
+          key: ValueKey(index),
           child: currentItem.builder(context),
         ),
       ),
       bottomNavigationBar: _BottomNav(
         items: visibleItems,
-        currentIndex: hasMore && _index >= 4 ? 4 : _index,
+        currentIndex: hasMore && index >= 4 ? 4 : index,
         hasMore: hasMore,
         onTap: (i) {
           if (hasMore && i == 4) {
             _showMoreSheet(context, moreItems);
           } else {
-            _goTo(i);
+            context.read<NavProvider>().setIndex(i);
           }
         },
       ),
@@ -174,9 +184,12 @@ class _RoleShellState extends State<RoleShell> {
                   item: it,
                   onTap: () {
                     Navigator.pop(context);
-                    _goTo(NavItems.forRole(
+                    final targetIndex = NavItems.forRole(
                       context.read<AuthProvider>().user!.role,
-                    ).indexOf(it));
+                    ).indexOf(it);
+                    if (targetIndex >= 0) {
+                      context.read<NavProvider>().setIndex(targetIndex);
+                    }
                   },
                 ),
             ],

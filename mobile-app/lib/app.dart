@@ -1,6 +1,12 @@
 // Root widget + go_router setup.
 // Routes to /login or the role-specific home based on auth state.
 //
+// IMPORTANT: the GoRouter is created ONCE in a Stateful widget and wired to
+// `auth` via refreshListenable. The previous version rebuilt the router inside
+// a StatelessWidget.build on every auth notify — that recreated the whole
+// navigator tree and caused the "flash / refresh" the user saw right after
+// sign-in. Creating it once fixes that.
+//
 // Theme is forced to LIGHT always — the web portal is light-only and the
 // mobile app must match. Never use ThemeMode.system (that caused the dark
 // footer/bottom-nav bug on phones in dark mode).
@@ -14,33 +20,32 @@ import 'features/auth/login_page.dart';
 import 'features/auth/change_password_page.dart';
 import 'features/shared/role_shell.dart';
 
-class ConcordiaApp extends StatelessWidget {
+class ConcordiaApp extends StatefulWidget {
   const ConcordiaApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+  State<ConcordiaApp> createState() => _ConcordiaAppState();
+}
 
-    // While restoring session, show a branded splash.
-    if (auth.loading) {
-      return MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
-        home: const _Splash(),
-      );
-    }
+class _ConcordiaAppState extends State<ConcordiaApp> {
+  late final AuthProvider _auth;
+  late final GoRouter _router;
 
-    final router = GoRouter(
+  @override
+  void initState() {
+    super.initState();
+    _auth = context.read<AuthProvider>();
+    _router = GoRouter(
       initialLocation: '/',
-      refreshListenable: auth,
+      refreshListenable: _auth,
       redirect: (context, state) {
-        final loggedIn = auth.isLoggedIn;
+        final loggedIn = _auth.isLoggedIn;
         final loggingIn = state.matchedLocation == '/login';
 
         if (!loggedIn) return loggingIn ? null : '/login';
 
         // Logged in — force password change if flagged.
-        if (auth.user!.mustChangePassword == 1 &&
+        if (_auth.user!.mustChangePassword == 1 &&
             state.matchedLocation != '/change-password') {
           return '/change-password';
         }
@@ -63,6 +68,28 @@ class ConcordiaApp extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  @override
+  void dispose() {
+    _router.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+
+    // While restoring session, show a branded splash. This branch only runs
+    // during the initial bootstrap (loading flips once), never during a
+    // login/logout transition (those flip `isLoggedIn`, not `loading`).
+    if (auth.loading) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        home: const _Splash(),
+      );
+    }
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
@@ -70,7 +97,7 @@ class ConcordiaApp extends StatelessWidget {
       theme: AppTheme.light,
       // Force light theme — NEVER system/dark. The web portal is light-only.
       themeMode: ThemeMode.light,
-      routerConfig: router,
+      routerConfig: _router,
     );
   }
 }
@@ -88,7 +115,6 @@ class _Splash extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Concordia app icon (the orange square + black C from the real logo)
             ClipRRect(
               borderRadius: BorderRadius.circular(28),
               child: Image.asset(

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app.dart';
 import 'features/auth/auth_provider.dart';
+import 'features/shared/nav_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -11,6 +12,7 @@ void main() {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => NavProvider()),
       ],
       child: const ConcordiaApp(),
     ),

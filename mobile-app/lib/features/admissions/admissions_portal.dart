@@ -40,9 +40,15 @@ class _AdmissionsPortalState extends State<AdmissionsPortal> {
 
   @override
   Widget build(BuildContext context) {
+    // Admins need this tab bar to switch a sub-portal's tasks; the portal's
+    // own role already has the same items in the bottom nav, so we hide it
+    // there to avoid redundancy.
+    final role = context.read<AuthProvider>().user!.role;
+    final showTabs = role == 'admin' || role == 'super-admin';
     return Column(
       children: [
-        SubTabBar(
+        if (showTabs)
+          SubTabBar(
           tabs: const [
             SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
             SubTabItem(label: 'New Enrollment', icon: Icons.person_add_outlined),
