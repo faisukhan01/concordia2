@@ -20,6 +20,7 @@ import '../../core/theme/app_theme.dart';
 import '../../widgets/shared_widgets.dart';
 import '../auth/auth_provider.dart';
 import '../shared/nav_items.dart';
+import '../shared/nav_provider.dart';
 
 class AdminPortal extends StatefulWidget {
   final AdminTab initialTab;
@@ -220,7 +221,7 @@ class _AdminDashboardState extends State<_AdminDashboard> {
             gradient: AppColors.sunsetGradient,
           ),
 
-          // Quick actions
+          // Quick actions — functional: jump straight into a sub-portal.
           const SectionHeader(title: 'Quick Actions', subtitle: 'Jump to a module'),
           _QuickAction(
             icon: Icons.people_alt_rounded,
@@ -228,7 +229,7 @@ class _AdminDashboardState extends State<_AdminDashboard> {
             subtitle: '${s.totalStudents} enrolled · ${s.totalTeachers} teachers',
             color: AppColors.primary,
             accent: AppColors.primaryGradient,
-            onTap: () => _toast('Open Students from the bottom nav'),
+            onTap: () => context.read<NavProvider>().setIndex(1),
           ),
           const SizedBox(height: 10),
           _QuickAction(
@@ -237,7 +238,7 @@ class _AdminDashboardState extends State<_AdminDashboard> {
             subtitle: 'Collect payments, track invoices',
             color: AppColors.success,
             accent: AppColors.successGradient,
-            onTap: () => _toast('Open Fees from the bottom nav'),
+            onTap: () => context.read<NavProvider>().setIndex(2),
           ),
           const SizedBox(height: 10),
           _QuickAction(
@@ -246,16 +247,16 @@ class _AdminDashboardState extends State<_AdminDashboard> {
             subtitle: 'Classes, exams, results',
             color: AppColors.info,
             accent: AppColors.infoGradient,
-            onTap: () => _toast('Open Academics from the bottom nav'),
+            onTap: () => context.read<NavProvider>().setIndex(3),
           ),
           const SizedBox(height: 10),
           _QuickAction(
-            icon: Icons.campaign_rounded,
-            label: 'Announcements',
-            subtitle: '${s.activeAnnouncements} active notices',
+            icon: Icons.settings_rounded,
+            label: 'Settings',
+            subtitle: 'Preferences & account',
             color: AppColors.purple,
             accent: AppColors.purpleGradient,
-            onTap: () => _toast('Open Announcements from the bottom nav'),
+            onTap: () => context.read<NavProvider>().setIndex(4),
           ),
 
           // Fee breakdown chart
@@ -271,12 +272,6 @@ class _AdminDashboardState extends State<_AdminDashboard> {
           ),
         ],
       ),
-    );
-  }
-
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 1)),
     );
   }
 }

@@ -69,10 +69,23 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Instant logout: clears local state + notifies listeners FIRST so the UI
+  /// navigates to /login immediately, then fires the server logout call in
+  /// the background (fire-and-forget). This fixes the "I have to tap Sign Out
+  /// 4-5 times" issue — the old code awaited the network call before flipping
+  /// `_user`, so a slow/failing request made the button feel dead.
   Future<void> logout() async {
-    await _api.logout();
+    if (_user == null) return;
     _user = null;
-    notifyListeners();
+    _error = null;
+    _busy = false;
+    notifyListeners(); // immediate redirect to /login
+    // Wipe cached session locally right away.
+    try {
+      await AuthStorage.clear();
+    } catch (_) {}
+    // Best-effort server-side logout — never block the UI on it.
+    _api.logout().catchError((_) {});
   }
 
   Future<bool> changePassword({
