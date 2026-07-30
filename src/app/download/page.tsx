@@ -32,34 +32,34 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v1.0.0';
-const APK_UPDATED = 'July 29, 2026';
-const APK_SIZE = '~26 MB';
+const APK_VERSION = 'v1.1.0';
+const APK_UPDATED = 'July 30, 2026';
+const APK_SIZE = '~11 MB';
 
 const whatsNew = [
   {
-    title: 'Fresh white-background app icon',
-    desc: 'Clean white launcher icon with the Concordia mark — looks crisp on every home screen.',
+    title: 'Instant sign-out',
+    desc: 'Sign Out now clears your session immediately — no more tapping 4-5 times waiting for it to respond.',
   },
   {
-    title: 'Professional sign-in experience',
-    desc: 'Floating logo card, gradient title, glass-style form, focus-aware inputs, quick-fill demo logins.',
+    title: 'No more sign-in flash',
+    desc: 'The router is now created once, so logging in no longer rebuilds the whole screen.',
   },
   {
-    title: 'All 6 portals redesigned',
-    desc: 'Admin, Admissions, Accountant, Academic, Teacher & Student portals rebuilt with gradient hero banners, stat cards, charts and premium cards.',
+    title: 'Premium admin sub-tab bar',
+    desc: 'The Admissions / Accountant / Academic tab pills got a Concordia-orange gradient redesign with a soft glow.',
   },
   {
-    title: 'Up to 5x faster data loading',
-    desc: '60-second in-memory cache + parallel API fetching. Warm tab switches are now sub-second.',
+    title: 'Smarter navigation',
+    desc: 'Sub-portal tab bars now show only for admins (who need them) — portal roles already have those items in the bottom nav.',
   },
   {
-    title: 'Fixed bottom navigation',
-    desc: 'White bottom nav with animated active-pill indicators — no more dark footer.',
+    title: 'Cleaner side drawer',
+    desc: 'Removed dead links, added Notifications / Change Password / Settings / Send Feedback. Download App is now Update App.',
   },
   {
-    title: 'Premium shared widgets',
-    desc: 'Shimmer loading skeletons, donut & bar charts, status chips, gradient summary cards throughout.',
+    title: 'Logo-only footer',
+    desc: 'Above Sign Out you now see just the Concordia logo — no text, no version clutter.',
   },
 ];
 
