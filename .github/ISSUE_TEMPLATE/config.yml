@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Concordia College Discussions
+    url: https://github.com/faisukhan01/concordia2/discussions
+    about: Ask questions and share ideas in Discussions.
+  - name: Security Report
+    url: https://github.com/faisukhan01/concordia2/security/policy
+    about: Report security vulnerabilities privately.
