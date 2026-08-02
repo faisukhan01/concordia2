@@ -2146,9 +2146,9 @@ class _DetailTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
+        border: Border.all(color: color.withOpacity(0.18)),
       ),
       child: Row(
         children: [
@@ -2156,7 +2156,7 @@ class _DetailTile extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.18),
+              color: color.withOpacity(0.18),
               borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
             child: Icon(icon, color: color, size: 18),

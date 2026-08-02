@@ -91,7 +91,7 @@ class _LoginPageState extends State<LoginPage> {
                           borderRadius: BorderRadius.circular(22),
                           boxShadow: [
                             BoxShadow(
-                              color: AppColors.primary.withValues(alpha: 0.15),
+                              color: AppColors.primary.withOpacity(0.15),
                               blurRadius: 24,
                               offset: const Offset(0, 8),
                             ),
@@ -190,12 +190,12 @@ class _FormCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
           BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.06),
+            color: AppColors.primary.withOpacity(0.06),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -262,7 +262,7 @@ class _FormCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(AppRadii.sm),
                           border: Border.all(
                               color:
-                                  AppColors.danger.withValues(alpha: 0.22)),
+                                  AppColors.danger.withOpacity(0.22)),
                         ),
                         child: Row(
                           children: [
@@ -298,7 +298,7 @@ class _FormCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppRadii.md),
                   boxShadow: [
                     BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.25),
+                      color: AppColors.primary.withOpacity(0.25),
                       blurRadius: 12,
                       offset: const Offset(0, 6),
                     ),
@@ -466,7 +466,7 @@ class _DemoSection extends StatelessWidget {
           'Quick Demo Access',
           style: TextStyle(
             fontSize: 11,
-            color: AppColors.textMuted.withValues(alpha: 0.8),
+            color: AppColors.textMuted.withOpacity(0.8),
             fontWeight: FontWeight.w500,
             letterSpacing: 0.4,
           ),
@@ -510,7 +510,7 @@ class _DemoChip extends StatelessWidget {
             color: AppColors.primarySoft,
             borderRadius: BorderRadius.circular(AppRadii.pill),
             border: Border.all(
-              color: AppColors.primary.withValues(alpha: 0.15),
+              color: AppColors.primary.withOpacity(0.15),
             ),
           ),
           child: Row(

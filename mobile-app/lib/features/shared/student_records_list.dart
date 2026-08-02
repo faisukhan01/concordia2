@@ -241,9 +241,9 @@ class _StudentRecordsListState extends State<StudentRecordsList> {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.10),
+            color: color.withOpacity(0.10),
             borderRadius: BorderRadius.circular(AppRadii.sm),
-            border: Border.all(color: color.withValues(alpha: 0.22)),
+            border: Border.all(color: color.withOpacity(0.22)),
           ),
           child: Icon(icon, size: 18, color: color),
         ),
@@ -830,7 +830,7 @@ class _DocumentsSheetState extends State<_DocumentsSheet> {
                             subtitle,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.white.withValues(alpha: 0.9),
+                              color: Colors.white.withOpacity(0.9),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1009,11 +1009,11 @@ class _DocumentsSheetState extends State<_DocumentsSheet> {
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: AppColors.primarySoft.withValues(alpha: 0.40),
+                        color: AppColors.primarySoft.withOpacity(0.40),
                         borderRadius: BorderRadius.circular(AppRadii.md),
                         border: Border.all(
                             color:
-                                AppColors.primary.withValues(alpha: 0.30)),
+                                AppColors.primary.withOpacity(0.30)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1150,7 +1150,7 @@ class _DocumentsSheetState extends State<_DocumentsSheet> {
         width: 34,
         height: 34,
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.10),
+          color: color.withOpacity(0.10),
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
         child: loading

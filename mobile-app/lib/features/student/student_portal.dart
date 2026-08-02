@@ -345,7 +345,7 @@ class _FeesState extends State<_Fees> {
                   height: 38,
                   decoration: BoxDecoration(
                     color: (allPaid ? AppColors.success : AppColors.warning)
-                        .withValues(alpha: 0.12),
+                        .withOpacity(0.12),
                     borderRadius: BorderRadius.circular(AppRadii.sm),
                   ),
                   child: Icon(
@@ -679,7 +679,7 @@ class _ResultsState extends State<_Results> {
                           width: 52,
                           height: 52,
                           decoration: BoxDecoration(
-                            color: _gradeColor(c.grade).withValues(alpha: 0.12),
+                            color: _gradeColor(c.grade).withOpacity(0.12),
                             borderRadius: BorderRadius.circular(AppRadii.md),
                           ),
                           child: Center(
@@ -847,7 +847,7 @@ class _ReportCardSpotlight extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.lg),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.30),
+            color: AppColors.primary.withOpacity(0.30),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -864,7 +864,7 @@ class _ReportCardSpotlight extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w700,
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: Colors.white.withOpacity(0.85),
                     letterSpacing: 1.3,
                   ),
                 ),
@@ -883,7 +883,7 @@ class _ReportCardSpotlight extends StatelessWidget {
                   '${card.term} · ${card.className} ${card.section}',
                   style: TextStyle(
                     fontSize: 12.5,
-                    color: Colors.white.withValues(alpha: 0.92),
+                    color: Colors.white.withOpacity(0.92),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -902,10 +902,10 @@ class _ReportCardSpotlight extends StatelessWidget {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.22),
+              color: Colors.white.withOpacity(0.22),
               borderRadius: BorderRadius.circular(AppRadii.md),
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.3),
+                color: Colors.white.withOpacity(0.3),
                 width: 1.5,
               ),
             ),
@@ -946,7 +946,7 @@ class _ReportCardSpotlight extends StatelessWidget {
           style: TextStyle(
             fontSize: 9.5,
             fontWeight: FontWeight.w700,
-            color: Colors.white.withValues(alpha: 0.78),
+            color: Colors.white.withOpacity(0.78),
             letterSpacing: 1.0,
           ),
         ),
@@ -1421,11 +1421,11 @@ class _TimetableState extends State<_Timetable> {
                             width: 46,
                             height: 46,
                             decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.12),
+                              color: color.withOpacity(0.12),
                               borderRadius:
                                   BorderRadius.circular(AppRadii.md),
                               border: Border.all(
-                                color: color.withValues(alpha: 0.32),
+                                color: color.withOpacity(0.32),
                                 width: 1.2,
                               ),
                             ),

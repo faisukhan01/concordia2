@@ -318,7 +318,7 @@ class _QuickAction extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   boxShadow: [
                     BoxShadow(
-                      color: accent.first.withValues(alpha: 0.32),
+                      color: accent.first.withOpacity(0.32),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -512,7 +512,7 @@ class _AdminStudentsState extends State<_AdminStudents>
               borderRadius: BorderRadius.circular(AppRadii.pill),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.32),
+                  color: AppColors.primary.withOpacity(0.32),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -620,9 +620,9 @@ class _CountChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: color.withOpacity(0.10),
         borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: color.withValues(alpha: 0.28), width: 1),
+        border: Border.all(color: color.withOpacity(0.28), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
