@@ -32,34 +32,34 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v1.1.0';
-const APK_UPDATED = 'July 30, 2026';
-const APK_SIZE = '~11 MB';
+const APK_VERSION = 'v1.2.0';
+const APK_UPDATED = 'August 2, 2026';
+const APK_SIZE = '~26 MB';
 
 const whatsNew = [
   {
+    title: 'Admin portal: own dashboard only',
+    desc: 'Admin now keeps just his own Admin Dashboard — the Admissions / Accountant / Academic dashboards no longer appear inside the admin portal. Each sub-portal keeps its own dashboard for its own role.',
+  },
+  {
+    title: 'Sub-portal tab bar: no Dashboard pill',
+    desc: 'When an admin opens Admissions / Accountant / Academic Office, the sub-portal tab bar drops the Dashboard pill and lands directly on the first working module — New Enrollment, Students, Classes.',
+  },
+  {
+    title: 'Sub-portals keep their own Dashboard',
+    desc: 'Logging in as Admissions, Accountant, or Academic Office still opens that role\u2019s dedicated Dashboard as the first tab — untouched, exactly as before.',
+  },
+  {
     title: 'Instant sign-out',
-    desc: 'Sign Out now clears your session immediately — no more tapping 4-5 times waiting for it to respond.',
+    desc: 'Sign Out clears your session immediately — no more tapping 4-5 times waiting for it to respond.',
   },
   {
     title: 'No more sign-in flash',
-    desc: 'The router is now created once, so logging in no longer rebuilds the whole screen.',
-  },
-  {
-    title: 'Premium admin sub-tab bar',
-    desc: 'The Admissions / Accountant / Academic tab pills got a Concordia-orange gradient redesign with a soft glow.',
-  },
-  {
-    title: 'Smarter navigation',
-    desc: 'Sub-portal tab bars now show only for admins (who need them) — portal roles already have those items in the bottom nav.',
+    desc: 'The router is created once, so logging in no longer rebuilds the whole screen.',
   },
   {
     title: 'Cleaner side drawer',
     desc: 'Removed dead links, added Notifications / Change Password / Settings / Send Feedback. Download App is now Update App.',
-  },
-  {
-    title: 'Logo-only footer',
-    desc: 'Above Sign Out you now see just the Concordia logo — no text, no version clutter.',
   },
 ];
 

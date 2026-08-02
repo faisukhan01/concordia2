@@ -36,6 +36,22 @@ class AdmissionsPortal extends StatefulWidget {
 class _AdmissionsPortalState extends State<AdmissionsPortal> {
   late AdmissionsTab _tab = widget.initialTab;
 
+  @override
+  void initState() {
+    super.initState();
+    // Admin-portal cleanup: admins must never land on a sub-portal dashboard.
+    // If an admin opens this portal with the default dashboard tab, jump to
+    // the first working module instead.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final role = context.read<AuthProvider>().user?.role;
+      final isAdmin = role == 'admin' || role == 'super-admin';
+      if (isAdmin && _tab == AdmissionsTab.dashboard) {
+        _switchTo(AdmissionsTab.newEnrollment);
+      }
+    });
+  }
+
   void _switchTo(AdmissionsTab t) => setState(() => _tab = t);
 
   @override
@@ -43,21 +59,42 @@ class _AdmissionsPortalState extends State<AdmissionsPortal> {
     // Admins need this tab bar to switch a sub-portal's tasks; the portal's
     // own role already has the same items in the bottom nav, so we hide it
     // there to avoid redundancy.
+    //
+    // IMPORTANT (admin-portal cleanup): when an ADMIN opens a sub-portal, the
+    // sub-portal's own Dashboard is intentionally HIDDEN from the tab bar.
+    // The admin already has his own Admin Dashboard — sub-portal dashboards
+    // are for the portal's own role only. This mirrors the web app, where the
+    // admin sidebar's sub-portal dropdowns contain only working modules.
     final role = context.read<AuthProvider>().user!.role;
     final showTabs = role == 'admin' || role == 'super-admin';
+    // Parallel lists: SubTabItem (UI) <-> AdmissionsTab (state).
+    final allLabels = <String>['Dashboard', 'New Enrollment', 'Records', 'Fee Records'];
+    final allIcons = <IconData>[
+      Icons.dashboard_outlined,
+      Icons.person_add_outlined,
+      Icons.people_outline,
+      Icons.account_balance_wallet_outlined,
+    ];
+    final allValues = AdmissionsTab.values.toList();
+    // Admins never see the Dashboard pill in a sub-portal.
+    final idx = List<int>.generate(allLabels.length, (i) => i);
+    final visibleIdx = showTabs
+        ? idx.where((i) => allValues[i] != AdmissionsTab.dashboard).toList()
+        : idx;
+    final visibleTabs = [
+      for (final i in visibleIdx) SubTabItem(label: allLabels[i], icon: allIcons[i]),
+    ];
+    final currentVisible = visibleIdx.indexOf(
+      visibleIdx.firstWhere((i) => allValues[i] == _tab, orElse: () => visibleIdx.first),
+    );
     return Column(
       children: [
         if (showTabs)
           SubTabBar(
-          tabs: const [
-            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
-            SubTabItem(label: 'New Enrollment', icon: Icons.person_add_outlined),
-            SubTabItem(label: 'Records', icon: Icons.people_outline),
-            SubTabItem(label: 'Fee Records', icon: Icons.account_balance_wallet_outlined),
-          ],
-          currentIndex: _tab.index,
-          onTap: (i) => _switchTo(AdmissionsTab.values[i]),
-        ),
+            tabs: visibleTabs,
+            currentIndex: currentVisible,
+            onTap: (i) => _switchTo(allValues[visibleIdx[i]]),
+          ),
         Expanded(child: _buildTab()),
       ],
     );

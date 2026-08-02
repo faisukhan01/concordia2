@@ -164,7 +164,11 @@ class NavItems {
       shortLabel: 'Admissions',
       icon: Icons.person_add_outlined,
       activeIcon: Icons.person_add,
-      builder: (_) => const AdmissionsPortal(),
+      // Admin opens Admissions at its first WORKING module (New Enrollment),
+      // never at the Admissions dashboard — that belongs to the Admissions
+      // role only. Mirrors the web admin sidebar.
+      builder: (_) => const AdmissionsPortal(
+          initialTab: AdmissionsTab.newEnrollment),
     ),
     NavItem(
       id: 'accountant',
@@ -172,7 +176,10 @@ class NavItems {
       shortLabel: 'Accountant',
       icon: Icons.account_balance_wallet_outlined,
       activeIcon: Icons.account_balance_wallet,
-      builder: (_) => const AccountantPortal(),
+      // Admin opens Accountant at its first WORKING module (Students),
+      // never at the Accountant dashboard.
+      builder: (_) => const AccountantPortal(
+          initialTab: AccountantTab.students),
     ),
     NavItem(
       id: 'academic',
@@ -180,7 +187,10 @@ class NavItems {
       shortLabel: 'Academic',
       icon: Icons.class_outlined,
       activeIcon: Icons.class_,
-      builder: (_) => const AcademicPortal(),
+      // Admin opens Academic at its first WORKING module (Classes),
+      // never at the Academic dashboard.
+      builder: (_) => const AcademicPortal(
+          initialTab: AcademicTab.classes),
     ),
     NavItem(
       id: 'settings',

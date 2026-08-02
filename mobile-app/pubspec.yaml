@@ -1,7 +1,7 @@
 name: concordia_college
 description: Concordia College — Management Portal mobile app. Admin, accountant, admissions, academic, teacher, student & parent portals in one app.
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
