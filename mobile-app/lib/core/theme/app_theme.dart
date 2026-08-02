@@ -82,12 +82,12 @@ class AppColors {
 class AppShadows {
   static List<BoxShadow> get card => [
     BoxShadow(
-      color: const Color(0xFFF26522).withValues(alpha: 0.06),
+      color: const Color(0xFFF26522).withOpacity(0.06),
       blurRadius: 16,
       offset: const Offset(0, 4),
     ),
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.02),
+      color: Colors.black.withOpacity(0.02),
       blurRadius: 6,
       offset: const Offset(0, 2),
     ),
@@ -95,12 +95,12 @@ class AppShadows {
 
   static List<BoxShadow> get cardHover => [
     BoxShadow(
-      color: const Color(0xFFF26522).withValues(alpha: 0.12),
+      color: const Color(0xFFF26522).withOpacity(0.12),
       blurRadius: 24,
       offset: const Offset(0, 8),
     ),
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.04),
+      color: Colors.black.withOpacity(0.04),
       blurRadius: 10,
       offset: const Offset(0, 4),
     ),
@@ -108,13 +108,13 @@ class AppShadows {
 
   static List<BoxShadow> get floating => [
     BoxShadow(
-      color: const Color(0xFFF26522).withValues(alpha: 0.18),
+      color: const Color(0xFFF26522).withOpacity(0.18),
       blurRadius: 32,
       offset: const Offset(0, 12),
       spreadRadius: -4,
     ),
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.06),
+      color: Colors.black.withOpacity(0.06),
       blurRadius: 16,
       offset: const Offset(0, 6),
     ),
@@ -122,7 +122,7 @@ class AppShadows {
 
   static List<BoxShadow> get button => [
     BoxShadow(
-      color: const Color(0xFFF26522).withValues(alpha: 0.30),
+      color: const Color(0xFFF26522).withOpacity(0.30),
       blurRadius: 14,
       offset: const Offset(0, 6),
     ),
@@ -130,7 +130,7 @@ class AppShadows {
 
   static List<BoxShadow> get subtle => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.03),
+      color: Colors.black.withOpacity(0.03),
       blurRadius: 8,
       offset: const Offset(0, 2),
     ),
@@ -138,7 +138,7 @@ class AppShadows {
 
   static List<BoxShadow> get navBar => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.05),
+      color: Colors.black.withOpacity(0.05),
       blurRadius: 18,
       offset: const Offset(0, -2),
     ),

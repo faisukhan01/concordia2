@@ -337,7 +337,7 @@ class _DrawerHeader extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
                 child: Text(
@@ -368,13 +368,13 @@ class _DrawerHeader extends StatelessWidget {
           Row(
             children: [
               Icon(Icons.badge_outlined,
-                  size: 13, color: Colors.white.withValues(alpha: 0.75)),
+                  size: 13, color: Colors.white.withOpacity(0.75)),
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
                   user.displayId as String,
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: Colors.white.withOpacity(0.85),
                     fontSize: 12.5,
                   ),
                   maxLines: 1,
@@ -388,13 +388,13 @@ class _DrawerHeader extends StatelessWidget {
             Row(
               children: [
                 Icon(Icons.location_on_outlined,
-                    size: 13, color: Colors.white.withValues(alpha: 0.75)),
+                    size: 13, color: Colors.white.withOpacity(0.75)),
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
                     user.branchName as String,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
+                      color: Colors.white.withOpacity(0.8),
                       fontSize: 12.5,
                     ),
                     maxLines: 1,
@@ -489,9 +489,9 @@ class _UpdateBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.12),
+        color: AppColors.primary.withOpacity(0.12),
         borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
       ),
       child: const Text(
         'v1.1',

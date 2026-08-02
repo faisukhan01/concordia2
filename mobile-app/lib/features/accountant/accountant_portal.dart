@@ -112,7 +112,7 @@ Widget _iconBubble(IconData icon, List<Color> gradient, {double size = 46}) {
       borderRadius: BorderRadius.circular(size * 0.32),
       boxShadow: [
         BoxShadow(
-          color: gradient.first.withValues(alpha: 0.32),
+          color: gradient.first.withOpacity(0.32),
           blurRadius: 10,
           offset: const Offset(0, 4),
         ),
@@ -212,7 +212,7 @@ class _DashboardState extends State<_Dashboard> {
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.22),
+                color: Colors.white.withOpacity(0.22),
                 borderRadius: BorderRadius.circular(AppRadii.md),
               ),
               child: Column(
@@ -223,7 +223,7 @@ class _DashboardState extends State<_Dashboard> {
                     'Collected',
                     style: TextStyle(
                       fontSize: 10,
-                      color: Colors.white.withValues(alpha: 0.88),
+                      color: Colors.white.withOpacity(0.88),
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.6,
                     ),
@@ -835,7 +835,7 @@ class _FeeInstallmentsViewState extends State<_FeeInstallmentsView> {
                                 color: active ? chipColor : AppColors.border,
                               ),
                               boxShadow: active
-                                  ? [BoxShadow(color: chipColor.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3))]
+                                  ? [BoxShadow(color: chipColor.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))]
                                   : null,
                             ),
                             child: Text(
@@ -1821,9 +1821,9 @@ class _AddChargeCompactState extends State<_AddChargeCompact> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.primarySoft.withValues(alpha: 0.30),
+        color: AppColors.primarySoft.withOpacity(0.30),
         borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.20)),
+        border: Border.all(color: AppColors.primary.withOpacity(0.20)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2013,9 +2013,9 @@ class _BulkChargeCardState extends State<_BulkChargeCard> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.primarySoft.withValues(alpha: 0.40),
+        color: AppColors.primarySoft.withOpacity(0.40),
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.30)),
+        border: Border.all(color: AppColors.primary.withOpacity(0.30)),
         boxShadow: AppShadows.floating,
       ),
       child: Column(
@@ -2578,7 +2578,7 @@ class _SheetAction extends StatelessWidget {
               Container(
                 width: 34, height: 34,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
+                  color: color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                 ),
                 child: Icon(icon, size: 18, color: color),

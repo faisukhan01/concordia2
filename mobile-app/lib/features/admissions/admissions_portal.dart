@@ -322,7 +322,7 @@ class _AdDashboardState extends State<_AdDashboard> {
         borderRadius: BorderRadius.circular(AppRadii.sm),
         boxShadow: [
           BoxShadow(
-            color: gradient.first.withValues(alpha: 0.32),
+            color: gradient.first.withOpacity(0.32),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -505,7 +505,7 @@ class _AdEnrollState extends State<_AdEnroll> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: AppColors.success.withValues(alpha: 0.30),
+                      color: AppColors.success.withOpacity(0.30),
                       blurRadius: 14,
                       offset: const Offset(0, 6),
                     ),
@@ -590,7 +590,7 @@ class _AdEnrollState extends State<_AdEnroll> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
+              color: color.withOpacity(0.12),
               borderRadius: BorderRadius.circular(AppRadii.pill),
             ),
             child: Text(

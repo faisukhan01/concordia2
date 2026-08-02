@@ -55,7 +55,7 @@ class GradientHero extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.lg),
         boxShadow: [
           BoxShadow(
-            color: gradient.first.withValues(alpha: 0.15),
+            color: gradient.first.withOpacity(0.15),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -75,7 +75,7 @@ class GradientHero extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.8),
+                      color: Colors.white.withOpacity(0.8),
                       letterSpacing: 1.2,
                     ),
                   ),
@@ -97,7 +97,7 @@ class GradientHero extends StatelessWidget {
                     subtitle!,
                     style: TextStyle(
                       fontSize: 12.5,
-                      color: Colors.white.withValues(alpha: 0.9),
+                      color: Colors.white.withOpacity(0.9),
                       height: 1.3,
                     ),
                   ),
@@ -114,7 +114,7 @@ class GradientHero extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+                color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(AppRadii.md),
               ),
               child: Icon(icon, size: 22, color: Colors.white),
@@ -163,7 +163,7 @@ class GradientSummary extends StatelessWidget {
         color: AppColors.primarySoft,
         borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(
-          color: AppColors.primary.withValues(alpha: 0.16),
+          color: AppColors.primary.withOpacity(0.16),
           width: 1,
         ),
       ),
@@ -175,7 +175,7 @@ class GradientSummary extends StatelessWidget {
                 width: 1,
                 height: 38,
                 margin: const EdgeInsets.symmetric(horizontal: 14),
-                color: AppColors.primary.withValues(alpha: 0.22),
+                color: AppColors.primary.withOpacity(0.22),
               ),
             ],
             Expanded(
@@ -271,7 +271,7 @@ class StatCard extends StatelessWidget {
                   width: compact ? 30 : 36,
                   height: compact ? 30 : 36,
                   decoration: BoxDecoration(
-                    color: c.withValues(alpha: 0.12),
+                    color: c.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(AppRadii.sm),
                   ),
                   child: Icon(icon, size: compact ? 16 : 18, color: c),
@@ -285,7 +285,7 @@ class StatCard extends StatelessWidget {
                       color: (trendUp ?? true
                               ? AppColors.success
                               : AppColors.danger)
-                          .withValues(alpha: 0.12),
+                          .withOpacity(0.12),
                       borderRadius: BorderRadius.circular(AppRadii.pill),
                     ),
                     child: Row(
@@ -519,7 +519,7 @@ class AppAvatar extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         gradient: useGradient ? appGradient(AppColors.primaryGradient) : null,
-        color: useGradient ? null : color.withValues(alpha: 0.12),
+        color: useGradient ? null : color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(size * 0.3),
       ),
       child: Center(
@@ -1125,20 +1125,20 @@ class SubTabBar extends StatelessWidget {
                 boxShadow: active
                     ? [
                         BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.30),
+                          color: AppColors.primary.withOpacity(0.30),
                           blurRadius: 12,
                           offset: const Offset(0, 4),
                           spreadRadius: 0,
                         ),
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
+                          color: Colors.black.withOpacity(0.04),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
                       ]
                     : [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.03),
+                          color: Colors.black.withOpacity(0.03),
                           blurRadius: 4,
                           offset: const Offset(0, 1),
                         ),

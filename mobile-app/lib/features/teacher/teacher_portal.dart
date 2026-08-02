@@ -691,7 +691,7 @@ class _TAttendanceState extends State<_TAttendance> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.white.withValues(alpha: 0.85),
+                                color: Colors.white.withOpacity(0.85),
                                 letterSpacing: 1.2,
                               ),
                             ),
@@ -711,7 +711,7 @@ class _TAttendanceState extends State<_TAttendance> {
                               formatDate(_selectedDate.toIso8601String()),
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.white.withValues(alpha: 0.9),
+                                color: Colors.white.withOpacity(0.9),
                               ),
                             ),
                           ],
@@ -723,7 +723,7 @@ class _TAttendanceState extends State<_TAttendance> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.22),
+                            color: Colors.white.withOpacity(0.22),
                             borderRadius: BorderRadius.circular(AppRadii.md),
                           ),
                           child: const Icon(Icons.calendar_today_rounded,
@@ -1107,7 +1107,7 @@ class _TResultsState extends State<_TResults> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.white.withValues(alpha: 0.85),
+                                color: Colors.white.withOpacity(0.85),
                                 letterSpacing: 1.2,
                               ),
                             ),
@@ -1127,7 +1127,7 @@ class _TResultsState extends State<_TResults> {
                                   : '',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.white.withValues(alpha: 0.9),
+                                color: Colors.white.withOpacity(0.9),
                               ),
                             ),
                           ],
@@ -1137,7 +1137,7 @@ class _TResultsState extends State<_TResults> {
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.22),
+                          color: Colors.white.withOpacity(0.22),
                           borderRadius: BorderRadius.circular(AppRadii.md),
                         ),
                         child: const Icon(Icons.grade_rounded,
@@ -1946,7 +1946,7 @@ class _TargetOption extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
         decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.1) : AppColors.card,
+          color: active ? color.withOpacity(0.1) : AppColors.card,
           borderRadius: BorderRadius.circular(AppRadii.md),
           border: Border.all(
             color: active ? color : AppColors.border,
