@@ -1,5 +1,11 @@
 // Auth state provider — the single source of truth for the logged-in user.
 // Exposes login(), logout(), changePassword() and the current user.
+//
+// Shows user-friendly error messages (matching web app's toast messages):
+//   • 401 → "Invalid username or password"
+//   • 429 → "Account temporarily locked"
+//   • Network → "Cannot connect to server"
+//   • Blocked → "Access blocked"
 
 import 'package:flutter/foundation.dart';
 import '../../core/api/api_client.dart';
@@ -11,9 +17,7 @@ class AuthProvider extends ChangeNotifier {
 
   AuthProvider() {
     // Kick off session restore immediately on construction so the splash
-    // screen doesn't hang forever. main.dart creates this provider via
-    // ChangeNotifierProvider, and app.dart shows the splash while
-    // `loading` is true — without this call, loading never flips to false.
+    // screen doesn't hang forever.
     bootstrap();
   }
 
@@ -34,14 +38,42 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     try {
       _user = await AuthStorage.getUser();
-      // If we have a stored user but no valid token, the first API call
-      // will 401 and trigger logout. No need to validate eagerly.
     } catch (e) {
-      _error = e.toString();
+      _error = null; // Don't show error on bootstrap
     } finally {
       _loading = false;
       notifyListeners();
     }
+  }
+
+  /// Convert raw ApiException messages into user-friendly text
+  /// (matches the web app's toast messages exactly).
+  String _friendlyError(ApiException e) {
+    final msg = e.message.toLowerCase();
+    final code = e.statusCode;
+
+    // Account locked / too many attempts
+    if (code == 429 || msg.contains('locked') || msg.contains('too many')) {
+      return 'Account temporarily locked. Please try again later.';
+    }
+
+    // Invalid credentials
+    if (code == 401 || msg.contains('invalid') || msg.contains('incorrect')) {
+      return 'Invalid username or password. Students & Teachers: use your Roll # / Teacher ID and the password given by the Accountant.';
+    }
+
+    // Access blocked
+    if (msg.contains('blocked') || msg.contains('retired')) {
+      return 'Access blocked. Contact your administrator.';
+    }
+
+    // Network errors (statusCode == 0)
+    if (code == 0) {
+      return e.message; // Already user-friendly from api_client.dart
+    }
+
+    // Fallback — show the server message but clean it up
+    return e.message;
   }
 
   Future<bool> login(String identifier, String password) async {
@@ -57,12 +89,12 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } on ApiException catch (e) {
-      _error = e.message;
+      _error = _friendlyError(e);
       _busy = false;
       notifyListeners();
       return false;
     } catch (e) {
-      _error = 'Network error. Check your connection.';
+      _error = 'An unexpected error occurred. Please try again.';
       _busy = false;
       notifyListeners();
       return false;
@@ -71,20 +103,16 @@ class AuthProvider extends ChangeNotifier {
 
   /// Instant logout: clears local state + notifies listeners FIRST so the UI
   /// navigates to /login immediately, then fires the server logout call in
-  /// the background (fire-and-forget). This fixes the "I have to tap Sign Out
-  /// 4-5 times" issue — the old code awaited the network call before flipping
-  /// `_user`, so a slow/failing request made the button feel dead.
+  /// the background (fire-and-forget).
   Future<void> logout() async {
     if (_user == null) return;
     _user = null;
     _error = null;
     _busy = false;
     notifyListeners(); // immediate redirect to /login
-    // Wipe cached session locally right away.
     try {
       await AuthStorage.clear();
     } catch (_) {}
-    // Best-effort server-side logout — never block the UI on it.
     _api.logout().catchError((_) {});
   }
 
@@ -104,12 +132,12 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } on ApiException catch (e) {
-      _error = e.message;
+      _error = _friendlyError(e);
       _busy = false;
       notifyListeners();
       return false;
     } catch (e) {
-      _error = 'Network error.';
+      _error = 'An unexpected error occurred.';
       _busy = false;
       notifyListeners();
       return false;

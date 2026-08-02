@@ -2,6 +2,9 @@
 // Mirrors every endpoint in the web app's src/lib/server/handler.ts.
 //
 // Auth: Bearer token in the Authorization header, stored in SecureStorage.
+//
+// FIX: Proper error handling so 4xx/5xx responses are surfaced as
+// user-friendly ApiException messages, NOT raw DioException strings.
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -58,22 +61,6 @@ class ApiClient {
         }
         handler.next(options);
       },
-      onResponse: (response, handler) {
-        // Centralized error mapping for 4xx/5xx.
-        final status = response.statusCode ?? 0;
-        if (status >= 400) {
-          final msg = (response.data is Map)
-              ? (response.data['error'] ?? response.data['message'] ?? 'Request failed')
-              : 'Request failed ($status)';
-          _log.w('API ${response.requestOptions.method} ${response.requestOptions.path} → $status: $msg');
-          throw ApiException(status, msg.toString(), response.data);
-        }
-        handler.next(response);
-      },
-      onError: (e, handler) {
-        _log.e('Network error: ${e.message}');
-        handler.next(e);
-      },
     ));
   }
 
@@ -123,13 +110,35 @@ class ApiClient {
         queryParameters: query,
         data: body,
       );
-      // The onResponse interceptor throws on 4xx/5xx; if we get here it's 2xx.
+
+      // Check status code ourselves — convert 4xx/5xx to ApiException
+      final status = res.statusCode ?? 0;
+      if (status >= 400) {
+        final msg = (res.data is Map)
+            ? (res.data['error'] ?? res.data['message'] ?? 'Request failed')
+            : 'Request failed ($status)';
+        _log.w('API $method $path → $status: $msg');
+        throw ApiException(status, msg.toString(), res.data);
+      }
+
       if (res.data == null) return null;
       return res.data;
     } on ApiException {
       rethrow;
+    } on DioException catch (e) {
+      // DioException for connection errors, timeouts, etc.
+      _log.e('Network error: ${e.message}');
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        throw ApiException(0, 'Connection timed out. Please try again.');
+      } else if (e.type == DioExceptionType.connectionError) {
+        throw ApiException(0, 'Cannot connect to server. Check your internet connection.');
+      } else {
+        throw ApiException(0, 'Network error. Please check your connection.');
+      }
     } catch (e) {
-      throw ApiException(0, 'Network error: $e');
+      throw ApiException(0, 'Unexpected error: $e');
     }
   }
 
