@@ -88,3 +88,4 @@ gh-token.txt
 .github/workflows/
 build_log.txt
 *.apk
+concordia-college.apk

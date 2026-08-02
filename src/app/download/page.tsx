@@ -42,15 +42,15 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v3.0.0';
-const APK_UPDATED = 'August 3, 2025';
+const APK_VERSION = 'v2.1.0';
+const APK_UPDATED = 'August 3, 2026';
 const APK_SIZE = '~22 MB';
 
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'v3.0.0 — 100% Web App Match',
-    desc: 'The app now wraps the web app in a native shell. Every screen, every feature, every color is 100% identical to the web app\'s mobile preview — because it IS the web app.',
+    title: 'v2.1.0 — Clean New Icon',
+    desc: 'Updated app icon with a clean circular design — no rectangular background, just the Concordia shield on a sleek orange circle. Looks great on any home screen.',
   },
   {
     icon: Palette,
@@ -69,8 +69,8 @@ const whatsNew = [
   },
   {
     icon: BarChart3,
-    title: 'Proper App Icon',
-    desc: 'Concordia C4 monogram icon with adaptive icon support for all Android devices and launchers.',
+    title: 'Adaptive Icon Support',
+    desc: 'Proper adaptive icon with foreground and background layers — works beautifully on all Android devices and launchers.',
   },
   {
     icon: Zap,
