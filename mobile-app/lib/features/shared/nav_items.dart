@@ -14,7 +14,7 @@ import 'additional_modules.dart';
 
 // ── Per-portal tab enums (shared across nav + portal files) ──
 enum AdminTab { dashboard, students, fees, academic, announcements }
-enum AdmissionsTab { dashboard, newEnrollment, records, feeRecords }
+enum AdmissionsTab { dashboard, newEnrollment, records }
 enum AccountantTab { dashboard, students, fees, misc, logins }
 enum AcademicTab { dashboard, classes, timetable, exams, results }
 enum TeacherTab { dashboard, classes, attendance, results, announcements }
@@ -229,14 +229,6 @@ class NavItems {
       builder: (_) => const AdmissionsPortal(initialTab: AdmissionsTab.records),
     ),
     NavItem(
-      id: 'fee-records',
-      label: 'Fee Records',
-      shortLabel: 'Fees',
-      icon: Icons.account_balance_wallet_outlined,
-      activeIcon: Icons.account_balance_wallet,
-      builder: (_) => const AdmissionsPortal(initialTab: AdmissionsTab.feeRecords),
-    ),
-    NavItem(
       id: 'settings',
       label: 'Settings',
       shortLabel: 'Settings',
@@ -258,8 +250,8 @@ class NavItems {
     ),
     NavItem(
       id: 'students',
-      label: 'Students (Class-wise)',
-      shortLabel: 'Students',
+      label: 'Student Records',
+      shortLabel: 'Records',
       icon: Icons.people_outline,
       activeIcon: Icons.people,
       builder: (_) => const AccountantPortal(initialTab: AccountantTab.students),
