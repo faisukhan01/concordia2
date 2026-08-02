@@ -1,19 +1,23 @@
-// Concordia College — Premium shared UI primitives.
+// Concordia College — Shared UI primitives matching the web app exactly.
 //
 // A refined design-system layer used across every portal screen:
-//   • StatCard — gradient hero stat tiles with trend chips
-//   • GradientHero — full-bleed welcome / summary banner
-//   • PremiumCard — soft-shadowed content card
-//   • ListRow — avatar + title + subtitle + trailing row
-//   • SectionHeader — section title with optional action
-//   • StatusPill — colored status badge
-//   • LoadingList / LoadingGrid — shimmer skeletons
-//   • ErrorState / EmptyState — friendly fallbacks
+//   • ConcordiaCard — bg-card text-card-foreground rounded-xl border shadow-sm
+//   • ConcordiaButton — primary/destructive/outline/ghost variants
+//   • ConcordiaInput — h-10, border-[#FFE0CC], focus orange ring
+//   • ConcordiaBadge — inline-flex rounded-md border px-2 py-0.5 text-xs
+//   • StatCard — label/value/description KPI card
+//   • GradientHero — orange gradient hero card
+//   • SectionHeader — section title with orange accent line
+//   • AppAvatar — gradient bg with initials, ring-1 ring-gray-200
+//   • StatusChip — colored status badge
 //   • MiniBarChart / DonutChart — lightweight fl_chart visuals
-//   • formatMoney / formatMoneyFull — currency helpers
-//   • AppAvatar — colored initials avatar
+//   • LoadingList / LoadingGrid — shimmer placeholders
+//   • ErrorState / EmptyState — friendly fallbacks
+//   • SubTabBar / SubTabItem — admin sub-portal tabs
+//   • formatMoney / formatDate / initialsOf — helpers
 //
-// All components use the refined AppColors / AppShadows / AppRadii system.
+// All components use AppColors / AppShadows / AppRadii.
+// Uses withOpacity() for Flutter 3.24 compatibility.
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -21,11 +25,558 @@ import 'package:shimmer/shimmer.dart';
 import '../core/theme/app_theme.dart';
 
 // ════════════════════════════════════════════════════════════════
-// HERO BANNERS
+// CARD COMPONENT
 // ════════════════════════════════════════════════════════════════
+// bg-card text-card-foreground rounded-xl border shadow-sm
+// Border radius: 10px (xl)
+// Card header: px-6 gap-1.5
+// Card content: px-6
+// Card title: leading-none font-semibold
 
-/// Full-bleed gradient hero with title, subtitle, optional trailing stat.
-/// Restrained design: subtle shadow, clean typography — not "vibe coded".
+class ConcordiaCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets? padding;
+  final VoidCallback? onTap;
+  final Color? borderColor;
+  final String? title;
+  final Widget? headerTrailing;
+  final Widget? headerSubtitle;
+
+  const ConcordiaCard({
+    super.key,
+    required this.child,
+    this.padding,
+    this.onTap,
+    this.borderColor,
+    this.title,
+    this.headerTrailing,
+    this.headerSubtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding: padding ?? const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: borderColor ?? AppColors.border,
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (title != null || headerTrailing != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (title != null)
+                              Text(
+                                title!,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary,
+                                  height: 1.0,
+                                ),
+                              ),
+                            if (headerSubtitle != null)
+                              headerSubtitle!,
+                          ],
+                        ),
+                      ),
+                      if (headerTrailing != null) headerTrailing!,
+                    ],
+                  ),
+                ),
+              if (title != null)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 24),
+                  child: SizedBox(height: 6),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: child,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// BUTTON COMPONENT
+// ════════════════════════════════════════════════════════════════
+// Default: bg-[#F26522] text-white rounded-lg shadow-xs hover:bg-[#D4541E]
+// Destructive: bg-[#DC2626] text-white
+// Outline: border border-[#FFE0CC] bg-white
+// Ghost: hover:bg-[#FFF0E8]
+// Text: text-sm font-medium
+// Height: h-9 (36px), h-10 (40px) for large
+
+enum ConcordiaButtonVariant { primary, destructive, outline, ghost }
+
+class ConcordiaButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final ConcordiaButtonVariant variant;
+  final IconData? icon;
+  final bool large;
+  final bool loading;
+
+  const ConcordiaButton({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.variant = ConcordiaButtonVariant.primary,
+    this.icon,
+    this.large = false,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final height = large ? 40.0 : 36.0;
+    final textStyle = TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+      color: _textColor,
+    );
+
+    Widget child;
+    if (loading) {
+      child = SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: _textColor,
+        ),
+      );
+    } else if (icon != null) {
+      child = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: _textColor),
+          const SizedBox(width: 6),
+          Text(label, style: textStyle),
+        ],
+      );
+    } else {
+      child = Text(label, style: textStyle);
+    }
+
+    return SizedBox(
+      height: height,
+      child: Material(
+        color: _bgColor,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: loading ? null : onPressed,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: _decoration,
+            alignment: Alignment.center,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color get _bgColor {
+    switch (variant) {
+      case ConcordiaButtonVariant.primary:
+        return const Color(0xFFF26522);
+      case ConcordiaButtonVariant.destructive:
+        return const Color(0xFFDC2626);
+      case ConcordiaButtonVariant.outline:
+        return Colors.white;
+      case ConcordiaButtonVariant.ghost:
+        return Colors.transparent;
+    }
+  }
+
+  Color get _textColor {
+    switch (variant) {
+      case ConcordiaButtonVariant.primary:
+      case ConcordiaButtonVariant.destructive:
+        return Colors.white;
+      case ConcordiaButtonVariant.outline:
+        return AppColors.textPrimary;
+      case ConcordiaButtonVariant.ghost:
+        return AppColors.textPrimary;
+    }
+  }
+
+  BoxDecoration get _decoration {
+    switch (variant) {
+      case ConcordiaButtonVariant.primary:
+        return BoxDecoration(
+          color: _bgColor,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFF26522).withOpacity(0.18),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        );
+      case ConcordiaButtonVariant.destructive:
+        return BoxDecoration(
+          color: _bgColor,
+          borderRadius: BorderRadius.circular(8),
+        );
+      case ConcordiaButtonVariant.outline:
+        return BoxDecoration(
+          color: _bgColor,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFFFE0CC), width: 1),
+        );
+      case ConcordiaButtonVariant.ghost:
+        return BoxDecoration(
+          color: _bgColor,
+          borderRadius: BorderRadius.circular(8),
+        );
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// INPUT COMPONENT
+// ════════════════════════════════════════════════════════════════
+// Height: h-10 (40px)
+// Border: border-[#FFE0CC] rounded-lg
+// Focus: orange border + ring
+// Text: text-sm
+
+class ConcordiaInput extends StatelessWidget {
+  final String? hintText;
+  final String? label;
+  final TextEditingController? controller;
+  final bool obscureText;
+  final int maxLines;
+  final TextInputType? keyboardType;
+  final ValueChanged<String>? onChanged;
+  final FormFieldValidator<String>? validator;
+  final Widget? prefixIcon;
+  final Widget? suffixIcon;
+  final bool enabled;
+  final FocusNode? focusNode;
+
+  const ConcordiaInput({
+    super.key,
+    this.hintText,
+    this.label,
+    this.controller,
+    this.obscureText = false,
+    this.maxLines = 1,
+    this.keyboardType,
+    this.onChanged,
+    this.validator,
+    this.prefixIcon,
+    this.suffixIcon,
+    this.enabled = true,
+    this.focusNode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: maxLines == 1 ? 40 : null,
+      child: TextFormField(
+        controller: controller,
+        focusNode: focusNode,
+        obscureText: obscureText,
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        onChanged: onChanged,
+        validator: validator,
+        enabled: enabled,
+        style: const TextStyle(
+          fontSize: 14,
+          color: AppColors.textPrimary,
+        ),
+        decoration: InputDecoration(
+          hintText: hintText,
+          labelText: label,
+          prefixIcon: prefixIcon,
+          suffixIcon: suffixIcon,
+          filled: true,
+          fillColor: enabled ? Colors.white : AppColors.surfaceAlt,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFFFE0CC), width: 1),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFFFE0CC), width: 1),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+          ),
+          disabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.border, width: 1),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.danger, width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.danger, width: 1.5),
+          ),
+          hintStyle: const TextStyle(
+            fontSize: 14,
+            color: AppColors.textMuted,
+          ),
+          labelStyle: const TextStyle(
+            fontSize: 14,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// BADGE COMPONENT
+// ════════════════════════════════════════════════════════════════
+// inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium
+// Default: bg-[#F26522] text-white
+// Secondary: bg-[#FFF0E8] text-[#6B4423]
+
+enum ConcordiaBadgeVariant { primary, secondary }
+
+class ConcordiaBadge extends StatelessWidget {
+  final String label;
+  final ConcordiaBadgeVariant variant;
+
+  const ConcordiaBadge({
+    super.key,
+    required this.label,
+    this.variant = ConcordiaBadgeVariant.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final (bg, fg, border) = switch (variant) {
+      ConcordiaBadgeVariant.primary => (
+          const Color(0xFFF26522),
+          Colors.white,
+          const Color(0xFFF26522),
+        ),
+      ConcordiaBadgeVariant.secondary => (
+          const Color(0xFFFFF0E8),
+          const Color(0xFF6B4423),
+          const Color(0xFFFFE0CC),
+        ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: border, width: 1),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: fg,
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// STAT CARD — for dashboard KPIs
+// ════════════════════════════════════════════════════════════════
+// Label: text-[10px] uppercase tracking-wider font-bold text-gray-500
+// Value: text-2xl font-bold text-[#1A1A1A]
+// Description: text-xs text-gray-500
+
+class StatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String? description;
+  final IconData icon;
+  final Color? color;
+  final List<Color>? gradient;
+  final String? trend;
+  final bool? trendUp;
+  final VoidCallback? onTap;
+  final bool compact;
+
+  const StatCard({
+    super.key,
+    required this.label,
+    required this.value,
+    this.description,
+    required this.icon,
+    this.color,
+    this.gradient,
+    this.trend,
+    this.trendUp,
+    this.onTap,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ??
+        (gradient != null ? gradient!.first : AppColors.primary);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.all(compact ? 12 : 14),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: compact ? 30 : 36,
+                  height: compact ? 30 : 36,
+                  decoration: BoxDecoration(
+                    color: c.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, size: compact ? 16 : 18, color: c),
+                ),
+                const Spacer(),
+                if (trend != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: (trendUp ?? true
+                              ? AppColors.success
+                              : AppColors.danger)
+                          .withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          (trendUp ?? true)
+                              ? Icons.trending_up
+                              : Icons.trending_down,
+                          size: 10,
+                          color: (trendUp ?? true)
+                              ? AppColors.success
+                              : AppColors.danger,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          trend!,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: (trendUp ?? true)
+                                ? AppColors.success
+                                : AppColors.danger,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            SizedBox(height: compact ? 10 : 14),
+            // Value: text-2xl font-bold text-[#1A1A1A]
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: compact ? 18 : 24,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF1A1A1A),
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 2),
+            // Label: text-[10px] uppercase tracking-wider font-bold text-gray-500
+            Text(
+              label.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF6B7280),
+                letterSpacing: 0.8,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            // Description: text-xs text-gray-500
+            if (description != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                description!,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF6B7280),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// GRADIENT HERO — orange gradient hero card
+// ════════════════════════════════════════════════════════════════
+// Gradient: #F26522 → #D4541E
+// White text, rounded-xl
+
 class GradientHero extends StatelessWidget {
   final String title;
   final String? subtitle;
@@ -34,6 +585,7 @@ class GradientHero extends StatelessWidget {
   final List<Color> gradient;
   final Widget? trailing;
   final double height;
+
   const GradientHero({
     super.key,
     required this.title,
@@ -51,11 +603,15 @@ class GradientHero extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
       decoration: BoxDecoration(
-        gradient: appGradient(gradient),
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF26522), Color(0xFFD4541E)],
+        ),
+        borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
-            color: gradient.first.withOpacity(0.15),
+            color: const Color(0xFFF26522).withOpacity(0.15),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -115,7 +671,7 @@ class GradientHero extends StatelessWidget {
               height: 44,
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(AppRadii.md),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, size: 22, color: Colors.white),
             ),
@@ -127,11 +683,11 @@ class GradientHero extends StatelessWidget {
 }
 
 /// Compact summary card (e.g. "Pending Rs 50K | Collected Rs 120K").
-/// Renders as a subtle orange-tinted card with dark-orange values —
-/// professional and on-brand, not a loud multi-colored gradient.
+/// Renders as a subtle orange-tinted card with dark-orange values.
 class GradientSummary extends StatelessWidget {
   final List<_SummaryItem> items;
   final List<Color> gradient;
+
   const GradientSummary({
     super.key,
     required this.items,
@@ -161,7 +717,7 @@ class GradientSummary extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
         color: AppColors.primarySoft,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: AppColors.primary.withOpacity(0.16),
           width: 1,
@@ -184,9 +740,9 @@ class GradientSummary extends StatelessWidget {
                 children: [
                   Text(
                     items[i].label,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
-                      color: AppColors.secondaryText,
+                      color: AppColors.textSecondary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -217,134 +773,6 @@ class _SummaryItem {
 }
 
 // ════════════════════════════════════════════════════════════════
-// STAT CARD
-// ════════════════════════════════════════════════════════════════
-
-class StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color? color;
-  final List<Color>? gradient;
-  final String? trend;
-  final bool? trendUp;
-  final VoidCallback? onTap;
-  final bool compact;
-
-  const StatCard({
-    super.key,
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.color,
-    this.gradient,
-    this.trend,
-    this.trendUp,
-    this.onTap,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Unified professional look: always a WHITE card with a soft orange
-    // icon bubble. The gradient/color param only tints the icon — no
-    // full-card multi-colored gradients (per official Concordia brand).
-    final c = color ??
-        (gradient != null ? gradient!.first : AppColors.primary);
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.all(compact ? 12 : 14),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.border, width: 1),
-          boxShadow: AppShadows.subtle,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: compact ? 30 : 36,
-                  height: compact ? 30 : 36,
-                  decoration: BoxDecoration(
-                    color: c.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(AppRadii.sm),
-                  ),
-                  child: Icon(icon, size: compact ? 16 : 18, color: c),
-                ),
-                const Spacer(),
-                if (trend != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (trendUp ?? true
-                              ? AppColors.success
-                              : AppColors.danger)
-                          .withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(AppRadii.pill),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          (trendUp ?? true)
-                              ? Icons.trending_up
-                              : Icons.trending_down,
-                          size: 10,
-                          color: (trendUp ?? true)
-                              ? AppColors.success
-                              : AppColors.danger,
-                        ),
-                        const SizedBox(width: 2),
-                        Text(
-                          trend!,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: (trendUp ?? true)
-                                ? AppColors.success
-                                : AppColors.danger,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-            SizedBox(height: compact ? 10 : 14),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: compact ? 18 : 22,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary,
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
 // PREMIUM CARD & LIST ROW
 // ════════════════════════════════════════════════════════════════
 
@@ -353,6 +781,7 @@ class PremiumCard extends StatelessWidget {
   final EdgeInsets? padding;
   final VoidCallback? onTap;
   final Color? borderColor;
+
   const PremiumCard({
     super.key,
     required this.child,
@@ -365,19 +794,25 @@ class PremiumCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.card,
-      borderRadius: BorderRadius.circular(AppRadii.md),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Container(
           padding: padding ?? const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.md),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: borderColor ?? AppColors.border,
               width: 1,
             ),
-            boxShadow: AppShadows.subtle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 1),
+              ),
+            ],
           ),
           child: child,
         ),
@@ -426,14 +861,14 @@ class ListRow extends StatelessWidget {
     }
     return Material(
       color: AppColors.card,
-      borderRadius: BorderRadius.circular(AppRadii.md),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.md),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: AppColors.border, width: 1),
           ),
           child: Row(
@@ -498,12 +933,19 @@ class ListRow extends StatelessWidget {
   }
 }
 
-/// Colored initials avatar.
+// ════════════════════════════════════════════════════════════════
+// APP AVATAR — user avatar
+// ════════════════════════════════════════════════════════════════
+// Gradient bg: linear-gradient(135deg, #F26522, #D4541E)
+// White initials, text-xs font-bold
+// Ring: ring-1 ring-gray-200
+
 class AppAvatar extends StatelessWidget {
   final String initials;
   final Color color;
   final double size;
   final bool useGradient;
+
   const AppAvatar({
     super.key,
     required this.initials,
@@ -518,16 +960,26 @@ class AppAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: useGradient ? appGradient(AppColors.primaryGradient) : null,
+        gradient: useGradient
+            ? const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFF26522), Color(0xFFD4541E)],
+              )
+            : null,
         color: useGradient ? null : color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(size * 0.3),
+        border: Border.all(
+          color: const Color(0xFFE5E7EB),
+          width: 1,
+        ),
       ),
       child: Center(
         child: Text(
-          (initials.isEmpty ? '?' : initials[0]).toUpperCase(),
+          initials.isEmpty ? '?' : initials[0].toUpperCase(),
           style: TextStyle(
             fontSize: size * 0.42,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.bold,
             color: useGradient ? Colors.white : color,
           ),
         ),
@@ -537,8 +989,10 @@ class AppAvatar extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// SECTION HEADER & STATUS PILL
+// SECTION HEADER — section title with orange accent line
 // ════════════════════════════════════════════════════════════════
+// h-0.5 w-8 bg-[#F26522] rounded-full above title
+// Title: text-lg font-bold text-[#1A1A1A]
 
 class SectionHeader extends StatelessWidget {
   final String title;
@@ -546,6 +1000,7 @@ class SectionHeader extends StatelessWidget {
   final String? action;
   final VoidCallback? onAction;
   final EdgeInsets? padding;
+
   const SectionHeader({
     super.key,
     required this.title,
@@ -566,12 +1021,23 @@ class SectionHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Orange accent line: h-0.5 w-8 bg-[#F26522] rounded-full
+                Container(
+                  width: 32,
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF26522),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Title: text-lg font-bold text-[#1A1A1A]
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
+                    color: Color(0xFF1A1A1A),
                     letterSpacing: -0.2,
                   ),
                 ),
@@ -614,10 +1080,15 @@ class SectionHeader extends StatelessWidget {
   }
 }
 
+// ════════════════════════════════════════════════════════════════
+// STATUS CHIP — colored status badge
+// ════════════════════════════════════════════════════════════════
+
 class StatusChip extends StatelessWidget {
   final String text;
   final StatusType type;
   final bool compact;
+
   const StatusChip({
     super.key,
     required this.text,
@@ -665,6 +1136,7 @@ enum StatusType { success, warning, danger, info, purple, neutral }
 class LoadingList extends StatelessWidget {
   final int count;
   final double height;
+
   const LoadingList({super.key, this.count = 5, this.height = 72});
 
   @override
@@ -681,7 +1153,7 @@ class LoadingList extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
             color: AppColors.card,
-            borderRadius: BorderRadius.circular(AppRadii.md),
+            borderRadius: BorderRadius.circular(10),
           ),
         ),
       ),
@@ -691,6 +1163,7 @@ class LoadingList extends StatelessWidget {
 
 class LoadingGrid extends StatelessWidget {
   final int count;
+
   const LoadingGrid({super.key, this.count = 4});
 
   @override
@@ -711,7 +1184,7 @@ class LoadingGrid extends StatelessWidget {
           (_) => Container(
             decoration: BoxDecoration(
               color: AppColors.card,
-              borderRadius: BorderRadius.circular(AppRadii.md),
+              borderRadius: BorderRadius.circular(10),
             ),
           ),
         ),
@@ -724,6 +1197,7 @@ class ErrorState extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
   final IconData? icon;
+
   const ErrorState({
     super.key,
     required this.message,
@@ -750,9 +1224,9 @@ class ErrorState extends StatelessWidget {
                   size: 34, color: AppColors.danger),
             ),
             const SizedBox(height: 16),
-            Text(
+            const Text(
               'Something went wrong',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
@@ -790,6 +1264,7 @@ class EmptyState extends StatelessWidget {
   final String? subtitle;
   final String? actionLabel;
   final VoidCallback? onAction;
+
   const EmptyState({
     super.key,
     required this.icon,
@@ -857,6 +1332,7 @@ class EmptyState extends StatelessWidget {
 class MiniBarChart extends StatelessWidget {
   final List<BarData> bars;
   final double height;
+
   const MiniBarChart({super.key, required this.bars, this.height = 180});
 
   @override
@@ -943,6 +1419,7 @@ class DonutChart extends StatelessWidget {
   final String? centerSub;
   final List<Color>? gradient;
   final double size;
+
   const DonutChart({
     super.key,
     required this.percent,
@@ -1015,6 +1492,7 @@ class DonutChart extends StatelessWidget {
 // ════════════════════════════════════════════════════════════════
 // MONEY FORMATTERS
 // ════════════════════════════════════════════════════════════════
+
 String formatMoney(double amount) {
   final isNegative = amount < 0;
   final abs = amount.abs();
@@ -1076,13 +1554,12 @@ class SubTabItem {
 /// Horizontally-scrollable pill bar for switching sub-tabs.
 ///
 /// Premium segmented control: the active pill uses a Concordia-orange
-/// gradient with a soft glow, inactives are clean white cards. Shown for
-/// admins (who need it to switch a sub-portal's tasks); the portal's own
-/// role hides it because their bottom nav already covers the same items.
+/// gradient with a soft glow, inactives are clean white cards.
 class SubTabBar extends StatelessWidget {
   final List<SubTabItem> tabs;
   final int currentIndex;
   final ValueChanged<int> onTap;
+
   const SubTabBar({
     super.key,
     required this.tabs,

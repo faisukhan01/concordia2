@@ -1,16 +1,20 @@
 // Concordia College — Sign In
 //
-// Clean, focused, premium sign-in experience:
-//   • App icon (orange squircle) + app name + short subtitle
-//   • Single white elevated form card with comfortable padding
-//   • Focus-aware inputs with orange focus border + soft warm fill
-//   • Full-width Concordia orange sign-in button (no gradient)
-//   • Selector-based loading + error (no full-page rebuild → no refresh bug)
-//   • Subtle demo-login chip row (secondary, soft-orange pill chips)
-//   • Entrance animation (TweenAnimationBuilder) fade + slide up
+// Matches the web app's mobile sign-in page EXACTLY:
+//   • Full-page campus photograph background (assets/images/campus.jpg)
+//   • Gradient overlays: left-to-right dark gradient, bottom vignette
+//   • Centered frosted glass card (backdrop-blur-xl + backdrop-saturate-150)
+//   • Logo in white pill container
+//   • "Sign in" heading + subtitle
+//   • Username / Password inputs with UserIcon/Lock + eye toggle
+//   • Orange login button with ArrowRight icon
+//   • Student/Teacher hint text
+//   • Copyright footer
 //
-// Auth is delegated to AuthProvider.login(). On success the go_router
-// redirect in app.dart moves the user into their role portal.
+// Uses ClipRRect + BackdropFilter from dart:ui for the frosted glass.
+// Uses withOpacity() for Flutter 3.24 compatibility.
+
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -29,11 +33,22 @@ class _LoginPageState extends State<LoginPage> {
   final _password = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscure = true;
+  final _identifierFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _identifierFocus.addListener(() => setState(() {}));
+    _passwordFocus.addListener(() => setState(() {}));
+  }
 
   @override
   void dispose() {
     _identifier.dispose();
     _password.dispose();
+    _identifierFocus.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
@@ -45,307 +60,417 @@ class _LoginPageState extends State<LoginPage> {
         );
   }
 
-  void _quickFill(String id, String pw) {
-    _identifier.text = id;
-    _password.text = pw;
-    setState(() => _obscure = false);
-  }
-
   @override
   Widget build(BuildContext context) {
     final bottomPad = MediaQuery.of(context).viewInsets.bottom;
+    final size = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Colors.black,
       resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.only(bottom: bottomPad + 24),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.0, end: 1.0),
-            duration: const Duration(milliseconds: 650),
-            curve: Curves.easeOutCubic,
-            builder: (context, t, child) {
-              return Opacity(
-                opacity: t,
-                child: Transform.translate(
-                  offset: Offset(0, 18 * (1 - t)),
-                  child: child,
-                ),
-              );
-            },
-            child: Form(
-              key: _formKey,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(height: 60),
-                    // ── App icon (orange squircle with soft shadow) ──
-                    Center(
-                      child: Container(
-                        width: 88,
-                        height: 88,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(22),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primary.withOpacity(0.15),
-                              blurRadius: 24,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(22),
-                          child: Image.asset(
-                            'assets/images/app-icon.png',
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    // ── App name ──
-                    const Text(
-                      'Concordia College',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    // ── Subtitle ──
-                    const Text(
-                      'Sign in to continue',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                    const SizedBox(height: 36),
-                    // ── Form card ──
-                    _FormCard(
-                      identifierController: _identifier,
-                      passwordController: _password,
-                      obscure: _obscure,
-                      onToggleObscure: () =>
-                          setState(() => _obscure = !_obscure),
-                      onSubmit: _submit,
-                    ),
-                    const SizedBox(height: 28),
-                    // ── Demo logins (subtle) ──
-                    _DemoSection(onQuickFill: _quickFill),
-                    const SizedBox(height: 24),
-                    // ── Footer ──
-                    const Center(
-                      child: Text(
-                        '© 2025 Concordia College',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textMuted,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Form card ────────────────────────────────────────────────────
-class _FormCard extends StatelessWidget {
-  final TextEditingController identifierController;
-  final TextEditingController passwordController;
-  final bool obscure;
-  final VoidCallback onToggleObscure;
-  final VoidCallback onSubmit;
-
-  const _FormCard({
-    required this.identifierController,
-    required this.passwordController,
-    required this.obscure,
-    required this.onToggleObscure,
-    required this.onSubmit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.06),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          // ── Identifier ──
-          const _FieldLabel('Email or ID'),
-          const SizedBox(height: 7),
-          _TextField(
-            controller: identifierController,
-            hint: 'admin@concordia.edu.pk',
-            icon: Icons.alternate_email_rounded,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.next,
-            validator: (v) => (v == null || v.trim().isEmpty)
-                ? 'Enter your email or ID'
-                : null,
+          // ── Full-page campus photograph background ──
+          Image.asset(
+            'assets/images/campus.jpg',
+            fit: BoxFit.cover,
+            width: size.width,
+            height: size.height,
           ),
-          const SizedBox(height: 16),
-          // ── Password ──
-          const _FieldLabel('Password'),
-          const SizedBox(height: 7),
-          _TextField(
-            controller: passwordController,
-            hint: 'Enter your password',
-            icon: Icons.lock_outline_rounded,
-            obscure: obscure,
-            textInputAction: TextInputAction.done,
-            suffix: GestureDetector(
-              onTap: onToggleObscure,
-              child: Icon(
-                obscure
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined,
-                size: 20,
-                color: AppColors.textMuted,
+
+          // ── Left-to-right dark gradient ──
+          // bg-gradient-to-r from-black/15 via-transparent to-transparent
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Colors.black.withOpacity(0.15),
+                  Colors.transparent,
+                  Colors.transparent,
+                ],
+                stops: const [0.0, 0.4, 1.0],
               ),
             ),
-            validator: (v) =>
-                (v == null || v.isEmpty) ? 'Enter your password' : null,
-            onSubmitted: (_) => onSubmit(),
           ),
-          const SizedBox(height: 20),
-          // ── Error banner (only rebuilds when error changes) ──
-          Selector<AuthProvider, String?>(
-            selector: (_, a) => a.error,
-            builder: (_, error, __) {
-              return AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                child: error == null
-                    ? const SizedBox.shrink()
-                    : Container(
-                        key: const ValueKey('error-banner'),
-                        margin: const EdgeInsets.only(bottom: 14),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 11),
-                        decoration: BoxDecoration(
-                          color: AppColors.dangerSoft,
-                          borderRadius: BorderRadius.circular(AppRadii.sm),
-                          border: Border.all(
-                              color:
-                                  AppColors.danger.withOpacity(0.22)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error_outline_rounded,
-                                size: 17, color: AppColors.danger),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                error,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.danger,
-                                  fontWeight: FontWeight.w500,
-                                  height: 1.35,
+
+          // ── Bottom vignette ──
+          // bg-gradient-to-t from-black/60 to-transparent, h-32
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 128,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.60),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Main content ──
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 0,
+                bottom: bottomPad + 24,
+              ),
+              child: Center(
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.0, end: 1.0),
+                  duration: const Duration(milliseconds: 500),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, t, child) {
+                    return Opacity(
+                      opacity: t,
+                      child: Transform.translate(
+                        offset: Offset(0, 20 * (1 - t)),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ── Frosted glass card ──
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(AppRadii.xxl),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(
+                                sigmaX: 40,
+                                sigmaY: 40,
+                              ),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 32,
+                                  vertical: 40,
+                                ),
+                                decoration: BoxDecoration(
+                                  // rgba(255, 255, 255, 0.20)
+                                  color: Colors.white.withOpacity(0.20),
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadii.xxl),
+                                  // ring-1 ring-white/60
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.60),
+                                    width: 1,
+                                  ),
+                                  // shadow-2xl shadow-black/30
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.30),
+                                      blurRadius: 40,
+                                      offset: const Offset(0, 20),
+                                      spreadRadius: -4,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // ── Logo in white pill container ──
+                                    // rounded-xl bg-white px-5 py-3 shadow-lg shadow-black/10
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 32),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(
+                                            AppRadii.xl),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                Colors.black.withOpacity(0.10),
+                                            blurRadius: 16,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Image.asset(
+                                        'assets/images/concordia-logo.png',
+                                        height: 48,
+                                      ),
+                                    ),
+
+                                    // ── "Sign in" heading ──
+                                    // text-[26px] leading-tight font-bold text-white tracking-tight text-center drop-shadow-sm
+                                    const Text(
+                                      'Sign in',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 26,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                        letterSpacing: -0.3,
+                                        height: 1.2,
+                                        shadows: [
+                                          Shadow(
+                                            color: Colors.black54,
+                                            blurRadius: 4,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+
+                                    // ── Subtitle ──
+                                    // text-sm text-white/70 mt-1.5 text-center
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'Use your Concordia account to continue',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xB3FFFFFF),
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+
+                                    // ── Form ──
+                                    // mt-7 space-y-3.5
+                                    const SizedBox(height: 28),
+
+                                    // ── Username input ──
+                                    // h-12 pl-11 pr-4 rounded-xl border-white/20 bg-white/10 text-white text-sm
+                                    // focus: border-[#F26522] + ring-2 ring-[#F26522]/30
+                                    _GlassTextField(
+                                      controller: _identifier,
+                                      focusNode: _identifierFocus,
+                                      hint: 'Enter Username',
+                                      icon: Icons.person_outline,
+                                      textInputAction: TextInputAction.next,
+                                      validator: (v) => (v == null ||
+                                              v.trim().isEmpty)
+                                          ? 'Enter your username'
+                                          : null,
+                                    ),
+
+                                    const SizedBox(height: 14),
+
+                                    // ── Password input ──
+                                    // Same as username + eye toggle on right
+                                    _GlassTextField(
+                                      controller: _password,
+                                      focusNode: _passwordFocus,
+                                      hint: 'Enter Password',
+                                      icon: Icons.lock_outline,
+                                      obscure: _obscure,
+                                      textInputAction: TextInputAction.done,
+                                      suffix: GestureDetector(
+                                        onTap: () => setState(
+                                            () => _obscure = !_obscure),
+                                        child: Icon(
+                                          _obscure
+                                              ? Icons.visibility_off_outlined
+                                              : Icons.visibility_outlined,
+                                          size: 18,
+                                          color: Colors.white.withOpacity(0.50),
+                                        ),
+                                      ),
+                                      validator: (v) => (v == null ||
+                                              v.isEmpty)
+                                          ? 'Enter your password'
+                                          : null,
+                                      onSubmitted: (_) => _submit(),
+                                    ),
+
+                                    const SizedBox(height: 14),
+
+                                    // ── Error banner ──
+                                    Selector<AuthProvider, String?>(
+                                      selector: (_, a) => a.error,
+                                      builder: (_, error, __) {
+                                        if (error == null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Container(
+                                          margin:
+                                              const EdgeInsets.only(bottom: 14),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 11,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.dangerSoft
+                                                .withOpacity(0.15),
+                                            borderRadius: BorderRadius.circular(
+                                                AppRadii.sm),
+                                            border: Border.all(
+                                              color: AppColors.danger
+                                                  .withOpacity(0.40),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.error_outline_rounded,
+                                                size: 17,
+                                                color: Colors.white70,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  error,
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    color: Colors.white70,
+                                                    fontWeight: FontWeight.w500,
+                                                    height: 1.35,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+
+                                    // ── Login button ──
+                                    // w-full h-12 rounded-xl bg-[#F26522] text-white font-semibold text-sm
+                                    // shadow-lg shadow-[#F26522]/30
+                                    Selector<AuthProvider, bool>(
+                                      selector: (_, a) => a.busy,
+                                      builder: (_, busy, __) {
+                                        return Container(
+                                          width: double.infinity,
+                                          height: 48,
+                                          margin:
+                                              const EdgeInsets.only(top: 4),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.primary,
+                                            borderRadius: BorderRadius.circular(
+                                                AppRadii.xl),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: AppColors.primary
+                                                    .withOpacity(0.30),
+                                                blurRadius: 16,
+                                                offset: const Offset(0, 6),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              onTap:
+                                                  busy ? null : _submit,
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppRadii.xl),
+                                              child: Center(
+                                                child: AnimatedSwitcher(
+                                                  duration: const Duration(
+                                                      milliseconds: 200),
+                                                  child: busy
+                                                      ? const SizedBox(
+                                                          key: ValueKey(
+                                                              'spinner'),
+                                                          width: 20,
+                                                          height: 20,
+                                                          child:
+                                                              CircularProgressIndicator(
+                                                            color:
+                                                                Colors.white,
+                                                            strokeWidth: 2.5,
+                                                          ),
+                                                        )
+                                                      : const Row(
+                                                          key: ValueKey(
+                                                              'label'),
+                                                          mainAxisSize:
+                                                              MainAxisSize
+                                                                  .min,
+                                                          children: [
+                                                            Text(
+                                                              'Login',
+                                                              style: TextStyle(
+                                                                fontSize: 14,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                color: Colors
+                                                                    .white,
+                                                              ),
+                                                            ),
+                                                            SizedBox(width: 8),
+                                                            Icon(
+                                                              Icons
+                                                                  .arrow_forward_rounded,
+                                                              size: 16,
+                                                              color:
+                                                                  Colors.white,
+                                                            ),
+                                                          ],
+                                                        ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+
+                                    // ── Student/Teacher hint ──
+                                    // text-[11px] text-white/60 mt-3 text-center leading-relaxed
+                                    const SizedBox(height: 12),
+                                    const Text(
+                                      'Students & Teachers: sign in with your Roll # / Teacher ID and the password given by the Accountant.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0x99FFFFFF),
+                                        height: 1.5,
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-              );
-            },
-          ),
-          // ── Sign in button (only rebuilds when busy changes) ──
-          Selector<AuthProvider, bool>(
-            selector: (_, a) => a.busy,
-            builder: (_, busy, __) {
-              return Container(
-                width: double.infinity,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.primary.withOpacity(0.25),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: busy ? null : onSubmit,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    child: Center(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: busy
-                            ? const SizedBox(
-                                key: ValueKey('spinner'),
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5,
+                          ),
+
+                          // ── Copyright ──
+                          // text-[11px] text-white/70 mt-5 drop-shadow
+                          const SizedBox(height: 20),
+                          const Text(
+                            '© 2025 Concordia College · All rights reserved',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xB3FFFFFF),
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black54,
+                                  blurRadius: 4,
                                 ),
-                              )
-                            : const Row(
-                                key: ValueKey('label'),
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Sign In',
-                                    style: TextStyle(
-                                      fontSize: 15.5,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 0.3,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Icon(Icons.arrow_forward_rounded,
-                                      size: 19, color: Colors.white),
-                                ],
-                              ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ],
       ),
@@ -353,182 +478,120 @@ class _FormCard extends StatelessWidget {
   }
 }
 
-// ── Field label ──────────────────────────────────────────────────
-class _FieldLabel extends StatelessWidget {
-  final String text;
-  const _FieldLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: AppColors.textPrimary,
-      ),
-    );
-  }
-}
-
-// ── Text field ───────────────────────────────────────────────────
-class _TextField extends StatelessWidget {
+// ── Frosted glass text field ────────────────────────────────────
+// Matches the web app's input styling:
+//   h-12 pl-11 pr-4 rounded-xl border-white/20 bg-white/10 text-white text-sm
+//   focus: border-[#F26522] bg-white/20 ring-2 ring-[#F26522]/30
+//   UserIcon/Lock on left, eye toggle on right for password
+class _GlassTextField extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode focusNode;
   final String hint;
   final IconData icon;
   final bool obscure;
   final Widget? suffix;
-  final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
-  final ValueChanged<String>? onSubmitted;
   final String? Function(String?)? validator;
+  final ValueChanged<String>? onSubmitted;
 
-  const _TextField({
+  const _GlassTextField({
     required this.controller,
+    required this.focusNode,
     required this.hint,
     required this.icon,
     this.obscure = false,
     this.suffix,
-    this.keyboardType,
     this.textInputAction,
-    this.onSubmitted,
     this.validator,
+    this.onSubmitted,
   });
 
   @override
   Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      keyboardType: keyboardType,
-      textInputAction: textInputAction,
-      onFieldSubmitted: onSubmitted,
-      validator: validator,
-      style: const TextStyle(
-        fontSize: 15,
-        color: AppColors.textPrimary,
-        fontWeight: FontWeight.w500,
+    final hasFocus = focusNode.hasFocus;
+
+    // border-white/20 bg-white/10 → focus: border-[#F26522] bg-white/20 ring-2 ring-[#F26522]/30
+    final borderColor = hasFocus
+        ? AppColors.primary
+        : Colors.white.withOpacity(0.20);
+    final fillColor = hasFocus
+        ? Colors.white.withOpacity(0.20)
+        : Colors.white.withOpacity(0.10);
+
+    return Container(
+      height: 48,
+      decoration: BoxDecoration(
+        color: fillColor,
+        borderRadius: BorderRadius.circular(AppRadii.xl),
+        border: Border.all(color: borderColor, width: 1),
+        // focus ring
+        boxShadow: hasFocus
+            ? [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.30),
+                  blurRadius: 8,
+                  spreadRadius: 2,
+                ),
+              ]
+            : [],
       ),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(
-          fontSize: 15,
-          color: AppColors.textMuted,
-          fontWeight: FontWeight.w400,
-        ),
-        prefixIcon: Icon(icon, size: 20, color: AppColors.textMuted),
-        suffixIcon: suffix,
-        filled: true,
-        fillColor: AppColors.surfaceAlt,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: AppColors.danger, width: 1),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: AppColors.danger, width: 1.5),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Demo logins section ──────────────────────────────────────────
-class _DemoSection extends StatelessWidget {
-  final void Function(String id, String pw) onQuickFill;
-  const _DemoSection({required this.onQuickFill});
-
-  @override
-  Widget build(BuildContext context) {
-    final demos = <(String, IconData, String)>[
-      ('Admin', Icons.shield_outlined, 'admin@concordia.edu.pk'),
-      ('Accountant', Icons.calculate_outlined, 'accountant@concordia.edu.pk'),
-      ('Teacher', Icons.school_outlined, 'teacher@concordia.edu.pk'),
-      ('Student', Icons.person_outline, 'student@concordia.edu.pk'),
-    ];
-    return Column(
-      children: [
-        Text(
-          'Quick Demo Access',
-          style: TextStyle(
-            fontSize: 11,
-            color: AppColors.textMuted.withOpacity(0.8),
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0.4,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          alignment: WrapAlignment.center,
-          children: demos
-              .map((d) => _DemoChip(
-                    label: d.$1,
-                    icon: d.$2,
-                    onTap: () => onQuickFill(d.$3, 'concordia123'),
-                  ))
-              .toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _DemoChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  const _DemoChip(
-      {required this.label, required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadii.pill),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: AppColors.primarySoft,
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(
-              color: AppColors.primary.withOpacity(0.15),
+      child: Row(
+        children: [
+          // Left icon — pl-11 equivalent (44px from left edge, icon at ~14px)
+          Padding(
+            padding: const EdgeInsets.only(left: 14, right: 0),
+            child: Icon(
+              icon,
+              size: 18,
+              color: Colors.white.withOpacity(0.50),
             ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 14, color: AppColors.primary),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primaryDark,
+          // Text field
+          Expanded(
+            child: TextFormField(
+              controller: controller,
+              focusNode: focusNode,
+              obscureText: obscure,
+              textInputAction: textInputAction,
+              onFieldSubmitted: onSubmitted,
+              validator: validator,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.white,
+                fontWeight: FontWeight.w400,
+              ),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: TextStyle(
+                  fontSize: 14,
+                  color: Colors.white.withOpacity(0.50),
+                  fontWeight: FontWeight.w400,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.only(
+                  left: 10,
+                  right: 16,
+                  top: 14,
+                  bottom: 14,
+                ),
+                errorStyle: const TextStyle(
+                  fontSize: 0,
+                  height: 0,
                 ),
               ),
-            ],
+            ),
           ),
-        ),
+          // Right suffix (eye toggle)
+          if (suffix != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: suffix,
+            ),
+        ],
       ),
     );
   }

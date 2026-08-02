@@ -32,65 +32,42 @@ class _AcademicPortalState extends State<AcademicPortal> {
   @override
   void initState() {
     super.initState();
-    // Admin-portal cleanup: admins must never land on a sub-portal dashboard.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final role = context.read<AuthProvider>().user?.role;
       final isAdmin = role == 'admin' || role == 'super-admin';
       if (isAdmin && _tab == AcademicTab.dashboard) {
-        _switchTo(AcademicTab.classes);
+        setState(() => _tab = AcademicTab.classes);
       }
     });
   }
 
-  void _switchTo(AcademicTab t) => setState(() => _tab = t);
+  void _switchTo(AcademicTab t) {
+    if (_tab == t) return;
+    setState(() => _tab = t);
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Admins need this tab bar to switch a sub-portal's tasks; the portal's
-    // own role already has the same items in the bottom nav, so we hide it
-    // there to avoid redundancy.
-    //
-    // IMPORTANT (admin-portal cleanup): when an ADMIN opens a sub-portal, the
-    // sub-portal's own Dashboard is intentionally HIDDEN from the tab bar.
-    // The admin already has his own Admin Dashboard — sub-portal dashboards
-    // are for the portal's own role only. This mirrors the web app, where the
-    // admin sidebar's sub-portal dropdowns contain only working modules.
-    final role = context.read<AuthProvider>().user!.role;
-    final showTabs = role == 'admin' || role == 'super-admin';
-    final allLabels = <String>['Dashboard', 'Classes & Teachers', 'Timetable', 'Exams & Date Sheets', 'Results'];
-    final allIcons = <IconData>[
-      Icons.dashboard_outlined,
-      Icons.class_outlined,
-      Icons.calendar_today_outlined,
-      Icons.assignment_outlined,
-      Icons.description_outlined,
-    ];
-    final allValues = AcademicTab.values.toList();
-    final idx = List<int>.generate(allLabels.length, (i) => i);
-    final visibleIdx = showTabs
-        ? idx.where((i) => allValues[i] != AcademicTab.dashboard).toList()
-        : idx;
-    final visibleTabs = [
-      for (final i in visibleIdx) SubTabItem(label: allLabels[i], icon: allIcons[i]),
-    ];
-    final currentVisible = visibleIdx.indexOf(
-      visibleIdx.firstWhere((i) => allValues[i] == _tab, orElse: () => visibleIdx.first),
-    );
     return Column(
       children: [
-        if (showTabs)
-          SubTabBar(
-            tabs: visibleTabs,
-            currentIndex: currentVisible,
-            onTap: (i) => _switchTo(allValues[visibleIdx[i]]),
-          ),
-        Expanded(child: _buildTab()),
+        SubTabBar(
+          tabs: const [
+            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
+            SubTabItem(label: 'Classes', icon: Icons.class_outlined),
+            SubTabItem(label: 'Timetable', icon: Icons.calendar_today_outlined),
+            SubTabItem(label: 'Exams', icon: Icons.assignment_outlined),
+            SubTabItem(label: 'Results', icon: Icons.description_outlined),
+          ],
+          currentIndex: _tab.index,
+          onTap: (i) => _switchTo(AcademicTab.values[i]),
+        ),
+        Expanded(child: _tabBody),
       ],
     );
   }
 
-  Widget _buildTab() {
+  Widget get _tabBody {
     switch (_tab) {
       case AcademicTab.dashboard:
         return const _AcDashboard();
@@ -109,6 +86,7 @@ class _AcademicPortalState extends State<AcademicPortal> {
 // ════════════════════════════════════════════════════════════════
 // DASHBOARD
 // ════════════════════════════════════════════════════════════════
+
 class _AcDashboard extends StatefulWidget {
   const _AcDashboard();
 
@@ -118,8 +96,7 @@ class _AcDashboard extends StatefulWidget {
 
 class _AcDashboardState extends State<_AcDashboard> {
   DashboardStats? _stats;
-  List<SchoolClass> _classes = const [];
-  List<Exam> _exams = const [];
+  List<Announcement> _announcements = [];
   bool _loading = true;
   String? _error;
 
@@ -135,206 +112,188 @@ class _AcDashboardState extends State<_AcDashboard> {
       _error = null;
     });
     try {
-      final auth = context.read<AuthProvider>();
-      final api = ApiClient();
-      final branchId = auth.user!.branchId;
-      // Parallel fetch: stats, classes, exams — cuts perceived load
-      // time from 3 sequential round-trips down to a single window.
       final results = await parallelFetch<dynamic>([
-        () => api.scopedStats(branchId: branchId),
-        () => api.listClasses(branchId: branchId),
-        () => api.listExams(branchId: branchId),
+        () => ApiClient().scopedStats(),
+        () => ApiClient().listAnnouncements(),
       ]);
-      _stats = (results[0] as DashboardStats?) ?? DashboardStats();
-      _classes = (results[1] as List<SchoolClass>?) ?? const <SchoolClass>[];
-      _exams = (results[2] as List<Exam>?) ?? const <Exam>[];
-    } on ApiException catch (e) {
-      _error = e.message;
-    } catch (_) {
-      _error = 'Failed to load';
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (!mounted) return;
+      setState(() {
+        _stats = results[0] as DashboardStats?;
+        _announcements = (results[1] as List<Announcement>?) ?? [];
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = context.read<AuthProvider>().user!;
-    if (_loading) {
-      return ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            height: 132,
-            decoration: BoxDecoration(
-              color: AppColors.card,
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const LoadingGrid(count: 4),
-          const SizedBox(height: 12),
-          const LoadingList(count: 4, height: 64),
-        ],
-      );
-    }
+    if (_loading) return const LoadingGrid(count: 4);
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
-
-    final s = _stats ?? DashboardStats();
-    final firstName = user.name.split(' ').first;
-
-    // Top 6 classes by student count for the bar chart.
-    final topClasses = _classes.toList()
-      ..sort((a, b) =>
-          (b.studentCount ?? 0).compareTo(a.studentCount ?? 0));
-    final chartBars = topClasses
-        .take(6)
-        .where((c) => (c.studentCount ?? 0) > 0)
-        .map((c) => BarData(
-              label: c.name,
-              value: (c.studentCount ?? 0).toDouble(),
-              gradient: AppColors.primaryGradient,
-            ))
-        .toList();
 
     return RefreshIndicator(
       onRefresh: _load,
+      color: AppColors.primary,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
         children: [
           GradientHero(
-            eyebrow: 'Academic Office',
-            title: 'Welcome back, $firstName',
-            subtitle: user.branchName ?? 'Concordia College',
-            icon: Icons.school_rounded,
-            gradient: AppColors.purpleGradient,
+            title: 'Academic Office',
+            subtitle: 'Manage classes, timetable, exams, and results.',
+            icon: Icons.school_outlined,
           ),
-          const SizedBox(height: 18),
-          // 2x2 stat grid
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 1.12,
-            children: [
-              StatCard(
-                label: 'Total Classes',
-                value: '${s.totalClasses}',
-                icon: Icons.class_rounded,
-                gradient: AppColors.primaryGradient,
-                onTap: () => _pushTab(AcademicTab.classes),
-              ),
-              StatCard(
-                label: 'Active Exams',
-                value: '${_exams.length}',
-                icon: Icons.assignment_rounded,
-                gradient: AppColors.warningGradient,
-                onTap: () => _pushTab(AcademicTab.exams),
-              ),
-              StatCard(
-                label: 'Students Enrolled',
-                value: '${s.totalStudents}',
-                icon: Icons.people_alt_rounded,
-                color: AppColors.info,
-                trend: '${s.totalClasses} cls',
-                trendUp: true,
-                onTap: () => _pushTab(AcademicTab.results),
-              ),
-              StatCard(
-                label: 'Teachers',
-                value: '${s.totalTeachers}',
-                icon: Icons.person_rounded,
-                color: AppColors.success,
-                trend: 'Active',
-                trendUp: true,
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          // Compact summary pair
-          GradientSummary.pair(
-            label1: 'Classes',
-            value1: '${s.totalClasses}',
-            label2: 'Exams',
-            value2: '${_exams.length}',
-            gradient: AppColors.infoGradient,
-          ),
-          // Chart card — students per class
-          if (chartBars.isNotEmpty) ...[
-            const SectionHeader(
-              title: 'Students per Class',
-              subtitle: 'Top ${6} by enrollment',
-            ),
-            PremiumCard(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
-              child: MiniBarChart(
-                bars: chartBars,
-                height: 180,
-              ),
-            ),
-          ],
-          // Quick actions
-          const SectionHeader(title: 'Quick Actions'),
-          ListRow(
-            title: 'Manage Classes',
-            subtitle: '${s.totalClasses} classes · ${s.totalStudents} students',
-            eyebrow: 'Classes',
-            icon: Icons.class_rounded,
-            accentColor: AppColors.primary,
-            onTap: () => _pushTab(AcademicTab.classes),
-          ),
-          const SizedBox(height: 8),
-          ListRow(
-            title: 'Weekly Timetable',
-            subtitle: 'Schedule periods & rooms',
-            eyebrow: 'Timetable',
-            icon: Icons.calendar_month_rounded,
-            accentColor: AppColors.info,
-            onTap: () => _pushTab(AcademicTab.timetable),
-          ),
-          const SizedBox(height: 8),
-          ListRow(
-            title: 'Exams',
-            subtitle: '${_exams.length} exam sessions configured',
-            eyebrow: 'Exams',
-            icon: Icons.assignment_rounded,
-            accentColor: AppColors.warning,
-            onTap: () => _pushTab(AcademicTab.exams),
-          ),
-          const SizedBox(height: 8),
-          ListRow(
-            title: 'Results & Reports',
-            subtitle: 'Generate report cards',
-            eyebrow: 'Results',
-            icon: Icons.description_rounded,
-            accentColor: AppColors.success,
-            onTap: () => _pushTab(AcademicTab.results),
-          ),
+          const SizedBox(height: 16),
+          _buildStatGrid(),
+          const SizedBox(height: 20),
+          _buildQuickActions(),
+          const SizedBox(height: 20),
+          _buildAnnouncements(),
         ],
       ),
     );
   }
 
-  void _pushTab(AcademicTab tab) {
-    // RoleShell drives tab switches via a Notification — but for in-tab
-    // navigation we just swap our own state by replacing the route.
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => AcademicPortal(initialTab: tab),
-        transitionsBuilder: (_, a, __, child) => FadeTransition(
-          opacity: a,
-          child: child,
+  Widget _buildStatGrid() {
+    final s = _stats;
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: 1.15,
+      children: [
+        StatCard(
+          label: 'Total Students',
+          value: '${s?.totalStudents ?? 0}',
+          icon: Icons.school_outlined,
+          color: AppColors.primary,
         ),
-      ),
+        StatCard(
+          label: 'Total Teachers',
+          value: '${s?.totalTeachers ?? 0}',
+          icon: Icons.people_outline,
+          color: AppColors.info,
+        ),
+        StatCard(
+          label: 'Total Classes',
+          value: '${s?.totalClasses ?? 0}',
+          icon: Icons.class_outlined,
+          color: AppColors.warning,
+        ),
+        StatCard(
+          label: 'Announcements',
+          value: '${s?.activeAnnouncements ?? 0}',
+          icon: Icons.campaign_outlined,
+          color: AppColors.success,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Quick Actions'),
+        Row(
+          children: [
+            Expanded(
+              child: _QuickActionCard(
+                icon: Icons.class_outlined,
+                label: 'Manage Classes',
+                color: AppColors.primary,
+                onTap: () => _switchTo(AcademicTab.classes),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _QuickActionCard(
+                icon: Icons.calendar_today_outlined,
+                label: 'Timetable',
+                color: AppColors.info,
+                onTap: () => _switchTo(AcademicTab.timetable),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _QuickActionCard(
+                icon: Icons.assignment_outlined,
+                label: 'Exams',
+                color: AppColors.warning,
+                onTap: () => _switchTo(AcademicTab.exams),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _QuickActionCard(
+                icon: Icons.description_outlined,
+                label: 'Result Cards',
+                color: AppColors.success,
+                onTap: () => _switchTo(AcademicTab.results),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _switchTo(AcademicTab t) {
+    // Find the parent AcademicPortal state and switch tabs
+    final state = context.findAncestorStateOfType<_AcademicPortalState>();
+    state?._switchTo(t);
+  }
+
+  Widget _buildAnnouncements() {
+    final recent = _announcements.take(3).toList();
+    if (recent.isEmpty) {
+      return const EmptyState(
+        icon: Icons.campaign_outlined,
+        title: 'No Announcements',
+        subtitle: 'Create announcements to inform students and teachers.',
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Recent Announcements'),
+        ...recent.map((a) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: ListRow(
+                title: a.title,
+                subtitle: a.message.length > 60
+                    ? '${a.message.substring(0, 60)}...'
+                    : a.message,
+                initials: a.title[0],
+                trailing: Text(
+                  formatDate(a.createdAt),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              ),
+            )),
+      ],
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// CLASSES
+// CLASSES & TEACHERS
 // ════════════════════════════════════════════════════════════════
+
 class _AcClasses extends StatefulWidget {
   const _AcClasses();
 
@@ -343,11 +302,10 @@ class _AcClasses extends StatefulWidget {
 }
 
 class _AcClassesState extends State<_AcClasses> {
-  List<SchoolClass> _classes = const [];
-  List<User> _teachers = const [];
+  List<SchoolClass> _classes = [];
+  List<User> _teachers = [];
   bool _loading = true;
   String? _error;
-  String _viewMode = 'classes'; // 'classes' or 'teachers'
 
   @override
   void initState() {
@@ -361,150 +319,302 @@ class _AcClassesState extends State<_AcClasses> {
       _error = null;
     });
     try {
-      final auth = context.read<AuthProvider>();
-      final api = ApiClient();
       final results = await parallelFetch<dynamic>([
-        () => api.listClasses(branchId: auth.user!.branchId),
-        () => api.listUsers(role: 'teacher', branchId: auth.user!.branchId),
+        () => ApiClient().listClasses(),
+        () => ApiClient().listUsers(role: 'teacher'),
       ]);
-      _classes = (results[0] as List<SchoolClass>?) ?? const [];
-      _teachers = (results[1] as List<User>?) ?? [];
-    } on ApiException catch (e) {
-      _error = e.message;
-    } catch (_) {
-      _error = 'Failed to load';
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (!mounted) return;
+      setState(() {
+        _classes = (results[0] as List<SchoolClass>?) ?? [];
+        _teachers = (results[1] as List<User>?) ?? [];
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
-  Future<void> _create() async {
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const LoadingList(count: 6);
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: AppColors.primary,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ConcordiaButton(
+                  label: 'Add Class',
+                  icon: Icons.add_outlined,
+                  onPressed: () => _showCreateClassDialog(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ConcordiaButton(
+                  label: 'Add Teacher',
+                  icon: Icons.person_add_outlined,
+                  variant: ConcordiaButtonVariant.outline,
+                  onPressed: () => _showCreateTeacherDialog(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const SectionHeader(title: 'Classes'),
+          if (_classes.isEmpty)
+            const EmptyState(
+              icon: Icons.class_outlined,
+              title: 'No Classes',
+              subtitle: 'Add a class to get started.',
+            )
+          else
+            ..._classes.map((c) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ListRow(
+                    title: c.name,
+                    subtitle:
+                        'Section ${c.section} • ${c.studentCount ?? 0} students • ${c.teacherName ?? 'No teacher'}',
+                    initials: c.name[0],
+                    onTap: () => _showClassDetail(c),
+                    trailing: GestureDetector(
+                      onTap: () => _confirmDeleteClass(c),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: AppColors.dangerSoft,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Icon(Icons.delete_outline,
+                            size: 16, color: AppColors.danger),
+                      ),
+                    ),
+                  ),
+                )),
+          const SizedBox(height: 8),
+          const SectionHeader(title: 'Teachers'),
+          if (_teachers.isEmpty)
+            const EmptyState(
+              icon: Icons.people_outline,
+              title: 'No Teachers',
+              subtitle: 'Add a teacher to get started.',
+            )
+          else
+            ..._teachers.map((t) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ListRow(
+                    title: t.name,
+                    subtitle:
+                        '${t.title ?? 'Teacher'} • ${t.displayId}',
+                    initials: initialsOf(t.name),
+                    onTap: () => _showTeacherDetail(t),
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateClassDialog() {
     final nameCtrl = TextEditingController();
     final sectionCtrl = TextEditingController(text: 'A');
-    final teacherCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    final ok = await showDialog<bool>(
+    String? selectedTeacherId;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          title: const Text('Add Class'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ConcordiaInput(
+                label: 'Class Name',
+                controller: nameCtrl,
+                hintText: 'e.g. Class 9',
+              ),
+              const SizedBox(height: 12),
+              ConcordiaInput(
+                label: 'Section',
+                controller: sectionCtrl,
+                hintText: 'A, B, C...',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedTeacherId,
+                decoration: InputDecoration(
+                  labelText: 'Class Teacher',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFFFE0CC)),
+                  ),
+                ),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('No Teacher')),
+                  ..._teachers.map((t) => DropdownMenuItem(
+                        value: t.id,
+                        child: Text(t.name),
+                      )),
+                ],
+                onChanged: (v) => setDialogState(() => selectedTeacherId = v),
+              ),
+            ],
+          ),
+          actions: [
+            ConcordiaButton(
+              label: 'Cancel',
+              variant: ConcordiaButtonVariant.ghost,
+              onPressed: () => Navigator.pop(ctx),
+            ),
+            ConcordiaButton(
+              label: 'Create',
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await ApiClient().createClass({
+                    'name': nameCtrl.text.trim(),
+                    'section': sectionCtrl.text.trim().isEmpty ? 'A' : sectionCtrl.text.trim(),
+                    if (selectedTeacherId != null)
+                      'teacherId': selectedTeacherId,
+                  });
+                  ApiClient().invalidate('classes');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Class created!'),
+                        backgroundColor: AppColors.success,
+                      ),
+                    );
+                    _load();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: AppColors.danger),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCreateTeacherDialog() {
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController();
+    final titleCtrl = TextEditingController();
+    showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Create Class'),
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg)),
-        content: Form(
-          key: formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Class Name', hintText: 'e.g. Class 9'),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: sectionCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Section', hintText: 'e.g. A'),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: teacherCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Class Teacher', hintText: 'Optional'),
-                ),
-              ],
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text('Add Teacher'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConcordiaInput(
+              label: 'Full Name',
+              controller: nameCtrl,
+              hintText: 'Enter teacher name',
             ),
-          ),
+            const SizedBox(height: 12),
+            ConcordiaInput(
+              label: 'Email',
+              controller: emailCtrl,
+              hintText: 'teacher@example.com',
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 12),
+            ConcordiaInput(
+              label: 'Title',
+              controller: titleCtrl,
+              hintText: 'e.g. Lecturer, Professor',
+            ),
+            const SizedBox(height: 12),
+            ConcordiaInput(
+              label: 'Password',
+              controller: passwordCtrl,
+              hintText: 'Leave blank for auto-generated',
+              obscureText: true,
+            ),
+          ],
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState?.validate() != true) return;
-              Navigator.pop(ctx, true);
+          ConcordiaButton(
+            label: 'Cancel',
+            variant: ConcordiaButtonVariant.ghost,
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          ConcordiaButton(
+            label: 'Create',
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ApiClient().createUser({
+                  'name': nameCtrl.text.trim(),
+                  'email': emailCtrl.text.trim(),
+                  'title': titleCtrl.text.trim(),
+                  'role': 'teacher',
+                  if (passwordCtrl.text.isNotEmpty)
+                    'password': passwordCtrl.text.trim(),
+                });
+                ApiClient().invalidate('platform/users');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Teacher created!'),
+                      backgroundColor: AppColors.success,
+                    ),
+                  );
+                  _load();
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: AppColors.danger),
+                  );
+                }
+              }
             },
-            child: const Text('Create'),
           ),
         ],
       ),
     );
-    if (ok != true) return;
-    if (!mounted) return;
-    try {
-      final auth = context.read<AuthProvider>();
-      await ApiClient().createClass({
-        'name': nameCtrl.text.trim(),
-        'section': sectionCtrl.text.trim().isEmpty
-            ? 'A'
-            : sectionCtrl.text.trim(),
-        'teacherName': teacherCtrl.text.trim(),
-        'branchId': auth.user!.branchId,
-        'instituteId': auth.user!.instituteId,
-        'createdBy': auth.user!.id,
-      });
-      ApiClient().invalidate('classes');
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: AppColors.danger));
-      }
-    }
   }
 
-  Future<void> _delete(SchoolClass c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete class?'),
-        content: Text(
-            'Are you sure you want to delete Class ${c.name} — ${c.section}? This cannot be undone.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await ApiClient().deleteClass(c.id);
-      ApiClient().invalidate('classes');
-      _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Class ${c.name} — ${c.section} deleted'),
-          backgroundColor: AppColors.success,
-        ));
-      }
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: AppColors.danger));
-      }
-    }
-  }
-
-  void _showDetail(SchoolClass c) {
+  void _showClassDetail(SchoolClass c) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -513,502 +623,43 @@ class _AcClassesState extends State<_AcClasses> {
               child: Container(
                 width: 40,
                 height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: AppColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            Row(
-              children: [
-                AppAvatar(
-                  initials: c.name.isNotEmpty ? c.name[0] : '?',
-                  color: AppColors.primary,
-                  size: 56,
-                  useGradient: true,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Class ${c.name} — ${c.section}',
-                          style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text(
-                          'Teacher: ${c.teacherName?.isNotEmpty == true ? c.teacherName : 'Not assigned'}',
-                          style: const TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: _DetailTile(
-                    label: 'Students',
-                    value: '${c.studentCount ?? 0}',
-                    icon: Icons.people_alt_rounded,
-                    color: AppColors.info,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _DetailTile(
-                    label: 'Section',
-                    value: c.section,
-                    icon: Icons.group_work_rounded,
-                    color: AppColors.purple,
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 16),
-            const Text('Quick Actions',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            ListRow(
-              title: 'View Weekly Timetable',
-              subtitle: 'See periods for this class',
-              icon: Icons.calendar_month_rounded,
-              accentColor: AppColors.primary,
-              onTap: () => Navigator.pop(ctx),
+            Text(
+              c.name,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
             ),
-            const SizedBox(height: 8),
-            ListRow(
-              title: 'Delete this class',
-              subtitle: 'Permanently remove',
-              icon: Icons.delete_outline_rounded,
-              accentColor: AppColors.danger,
-              onTap: () {
-                Navigator.pop(ctx);
-                _delete(c);
-              },
-            ),
+            const SizedBox(height: 12),
+            _detailRow('Section', c.section),
+            _detailRow('Students', '${c.studentCount ?? 0}'),
+            _detailRow('Class Teacher', c.teacherName ?? 'Not assigned'),
+            _detailRow('Class ID', c.id),
+            const SizedBox(height: 20),
           ],
         ),
       ),
-    );
-  }
-
-  Future<void> _addTeacher() async {
-    final nameCtrl = TextEditingController();
-    final rollNoCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
-    final passwordCtrl = TextEditingController();
-    final titleCtrl = TextEditingController();
-    final subjectCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    bool busy = false;
-
-    await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Add Teacher'),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg)),
-          content: SingleChildScrollView(
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Full Name *', hintText: 'e.g. Ayesha Khan'),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: rollNoCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Teacher ID / Roll No *', hintText: 'e.g. T001'),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: emailCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Email (optional)', hintText: 'Auto-generated if blank'),
-                    keyboardType: TextInputType.emailAddress,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: passwordCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Password (optional)', helperText: 'Auto-generated if blank'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: titleCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Title (optional)', hintText: 'e.g. Lecturer, HOD'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: subjectCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Subject (optional)', hintText: 'e.g. Mathematics'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: busy ? null : () async {
-                if (formKey.currentState?.validate() != true) return;
-                setSt(() => busy = true);
-                try {
-                  final auth = context.read<AuthProvider>();
-                  final rollNoTrim = rollNoCtrl.text.trim();
-                  final plannedEmail = emailCtrl.text.trim().isEmpty
-                      ? '${rollNoTrim.toLowerCase()}@concordia.edu.pk'
-                      : emailCtrl.text.trim();
-                  final password = passwordCtrl.text.trim().isEmpty
-                      ? 'teacher${1000 + DateTime.now().millisecond % 9000}'
-                      : passwordCtrl.text.trim();
-                  await ApiClient().createUser({
-                    'name': nameCtrl.text.trim(),
-                    'email': plannedEmail,
-                    'rollNo': rollNoTrim,
-                    'password': password,
-                    'role': 'teacher',
-                    'status': 'Active',
-                    'title': titleCtrl.text.trim().isEmpty ? 'Teacher' : titleCtrl.text.trim(),
-                    'instituteId': auth.user!.instituteId,
-                    'branchId': auth.user!.branchId,
-                    'mustChangePassword': 1,
-                  });
-                  ApiClient().invalidate('platform/users');
-                  if (ctx.mounted) {
-                    Navigator.pop(ctx, true);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Teacher login created — ${nameCtrl.text.trim()}'),
-                        backgroundColor: AppColors.success,
-                      ),
-                    );
-                  }
-                  _load();
-                } on ApiException catch (e) {
-                  if (ctx.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
-                    );
-                  }
-                } finally {
-                  if (ctx.mounted) setSt(() => busy = false);
-                }
-              },
-              child: busy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Add Teacher'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: _loading
-            ? const LoadingList(count: 6, height: 72)
-            : _error != null
-                ? ErrorState(message: _error!, onRetry: _load)
-                : Column(
-                    children: [
-                      // View mode toggle: Classes / Teachers
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surfaceAlt,
-                                  borderRadius: BorderRadius.circular(AppRadii.pill),
-                                  border: Border.all(color: AppColors.border),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: GestureDetector(
-                                        onTap: () => setState(() => _viewMode = 'classes'),
-                                        child: AnimatedContainer(
-                                          duration: const Duration(milliseconds: 180),
-                                          padding: const EdgeInsets.symmetric(vertical: 10),
-                                          decoration: BoxDecoration(
-                                            gradient: _viewMode == 'classes'
-                                                ? appGradient(AppColors.primaryGradient)
-                                                : null,
-                                            borderRadius: BorderRadius.circular(AppRadii.pill),
-                                            boxShadow: _viewMode == 'classes' ? AppShadows.button : null,
-                                          ),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.class_outlined, size: 16,
-                                                  color: _viewMode == 'classes' ? Colors.white : AppColors.textSecondary),
-                                              const SizedBox(width: 6),
-                                              Text('Classes',
-                                                style: TextStyle(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: _viewMode == 'classes' ? Colors.white : AppColors.textSecondary,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: GestureDetector(
-                                        onTap: () => setState(() => _viewMode = 'teachers'),
-                                        child: AnimatedContainer(
-                                          duration: const Duration(milliseconds: 180),
-                                          padding: const EdgeInsets.symmetric(vertical: 10),
-                                          decoration: BoxDecoration(
-                                            gradient: _viewMode == 'teachers'
-                                                ? appGradient(AppColors.primaryGradient)
-                                                : null,
-                                            borderRadius: BorderRadius.circular(AppRadii.pill),
-                                            boxShadow: _viewMode == 'teachers' ? AppShadows.button : null,
-                                          ),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.person_outline, size: 16,
-                                                  color: _viewMode == 'teachers' ? Colors.white : AppColors.textSecondary),
-                                              const SizedBox(width: 6),
-                                              Text('Teachers',
-                                                style: TextStyle(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: _viewMode == 'teachers' ? Colors.white : AppColors.textSecondary,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Action buttons
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _ActionChip(
-                                label: 'Add Class',
-                                icon: Icons.add_rounded,
-                                gradient: AppColors.primaryGradient,
-                                onTap: _create,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _ActionChip(
-                                label: 'Add Teacher',
-                                icon: Icons.person_add_outlined,
-                                gradient: AppColors.infoGradient,
-                                onTap: _addTeacher,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      // Content
-                      Expanded(
-                        child: _viewMode == 'classes'
-                            ? _buildClassesList()
-                            : _buildTeachersList(),
-                      ),
-                    ],
-                  ),
-      ),
-    );
-  }
-
-  Widget _buildClassesList() {
-    if (_classes.isEmpty) {
-      return ListView(
-        children: [
-          const SizedBox(height: 80),
-          EmptyState(
-            icon: Icons.class_outlined,
-            title: 'No classes yet',
-            subtitle: 'Create your first class to start enrolling students',
-            actionLabel: 'Create Class',
-            onAction: _create,
-          ),
-        ],
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      itemCount: _classes.length + 1,
-      itemBuilder: (_, i) {
-        if (i == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${_classes.length} classes',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                StatusChip(
-                  text: '${_classes.fold<int>(0, (a, c) => a + (c.studentCount ?? 0))} students',
-                  type: StatusType.info,
-                  compact: true,
-                ),
-              ],
-            ),
-          );
-        }
-        final c = _classes[i - 1];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: ListRow(
-            title: 'Class ${c.name} — ${c.section}',
-            subtitle: '${c.studentCount ?? 0} students · ${c.teacherName?.isNotEmpty == true ? c.teacherName : 'No teacher yet'}',
-            eyebrow: c.section,
-            icon: Icons.class_rounded,
-            accentColor: AppColors.primary,
-            onTap: () => _showDetail(c),
-            trailing: GestureDetector(
-              onTap: () => _delete(c),
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppColors.dangerSoft,
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                ),
-                child: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildTeachersList() {
-    if (_teachers.isEmpty) {
-      return ListView(
-        children: [
-          const SizedBox(height: 80),
-          EmptyState(
-            icon: Icons.person_add_outlined,
-            title: 'No teachers yet',
-            subtitle: 'Add a teacher to assign them to classes',
-            actionLabel: 'Add Teacher',
-            onAction: _addTeacher,
-          ),
-        ],
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      itemCount: _teachers.length + 1,
-      itemBuilder: (_, i) {
-        if (i == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${_teachers.length} teachers',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                StatusChip(
-                  text: 'Active',
-                  type: StatusType.success,
-                  compact: true,
-                ),
-              ],
-            ),
-          );
-        }
-        final t = _teachers[i - 1];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: ListRow(
-            title: t.name,
-            subtitle: '${t.title ?? 'Teacher'} · ${t.email ?? t.displayId}',
-            eyebrow: t.rollNo ?? '',
-            leading: AppAvatar(
-              initials: t.name,
-              color: AppColors.info,
-              size: 40,
-              useGradient: true,
-            ),
-            accentColor: AppColors.info,
-            onTap: () => _showTeacherDetail(t),
-          ),
-        );
-      },
     );
   }
 
   void _showTeacherDetail(User t) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1017,130 +668,107 @@ class _AcClassesState extends State<_AcClasses> {
               child: Container(
                 width: 40,
                 height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: AppColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            Row(
-              children: [
-                AppAvatar(
-                  initials: t.name,
-                  color: AppColors.info,
-                  size: 56,
-                  useGradient: true,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(t.name,
-                          style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${t.title ?? 'Teacher'} · ${t.rollNo ?? ''}',
-                        style: const TextStyle(
-                            fontSize: 13, color: AppColors.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                StatusChip(
-                  text: t.blocked == 1 ? 'Blocked' : 'Active',
-                  type: t.blocked == 1 ? StatusType.danger : StatusType.success,
-                ),
-              ],
-            ),
             const SizedBox(height: 16),
-            PremiumCard(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                children: [
-                  _AcDetailRow('Email', t.email ?? '—'),
-                  _AcDetailRow('Teacher ID', t.rollNo ?? '—'),
-                  _AcDetailRow('Title', t.title ?? 'Teacher'),
-                ],
+            Text(
+              t.name,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
               ),
             ),
+            const SizedBox(height: 12),
+            _detailRow('Title', t.title ?? 'Teacher'),
+            _detailRow('Email', t.email ?? '—'),
+            _detailRow('ID', t.displayId),
+            _detailRow('Status', t.isActive ? 'Active' : 'Inactive'),
+            const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
-}
 
-// Action chip for Add Class / Add Teacher
-class _ActionChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final List<Color> gradient;
-  final VoidCallback onTap;
-  const _ActionChip({
-    required this.label,
-    required this.icon,
-    required this.gradient,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          gradient: appGradient(gradient),
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          boxShadow: AppShadows.button,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18, color: Colors.white),
-            const SizedBox(width: 6),
-            Text(
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
               label,
               style: const TextStyle(
                 fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w500,
               ),
             ),
-          ],
-        ),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
-}
 
-// Detail row for teacher detail sheet
-class _AcDetailRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _AcDetailRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(label, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+  void _confirmDeleteClass(SchoolClass c) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text('Delete Class?'),
+        content: Text(
+          'Delete ${c.name} (Section ${c.section})? This action cannot be undone.',
+        ),
+        actions: [
+          ConcordiaButton(
+            label: 'Cancel',
+            variant: ConcordiaButtonVariant.ghost,
+            onPressed: () => Navigator.pop(ctx),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-            ),
+          ConcordiaButton(
+            label: 'Delete',
+            variant: ConcordiaButtonVariant.destructive,
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ApiClient().deleteClass(c.id);
+                ApiClient().invalidate('classes');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Class deleted!'),
+                      backgroundColor: AppColors.success,
+                    ),
+                  );
+                  _load();
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: AppColors.danger),
+                  );
+                }
+              }
+            },
           ),
         ],
       ),
@@ -1151,6 +779,7 @@ class _AcDetailRow extends StatelessWidget {
 // ════════════════════════════════════════════════════════════════
 // TIMETABLE
 // ════════════════════════════════════════════════════════════════
+
 class _AcTimetable extends StatefulWidget {
   const _AcTimetable();
 
@@ -1159,18 +788,14 @@ class _AcTimetable extends StatefulWidget {
 }
 
 class _AcTimetableState extends State<_AcTimetable> {
-  List<TimetableEntry> _entries = const [];
-  List<SchoolClass> _classes = const [];
+  List<TimetableEntry> _entries = [];
+  List<SchoolClass> _classes = [];
+  int _selectedDayIndex = 0;
   bool _loading = true;
   String? _error;
-  String _day = 'Monday';
+
   static const _days = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
   ];
 
   @override
@@ -1185,337 +810,311 @@ class _AcTimetableState extends State<_AcTimetable> {
       _error = null;
     });
     try {
-      final auth = context.read<AuthProvider>();
-      final api = ApiClient();
-      final branchId = auth.user!.branchId;
-      // Parallel fetch: timetable entries + classes (for the add-entry picker)
       final results = await parallelFetch<dynamic>([
-        () => api.listTimetable(branchId: branchId),
-        () => api.listClasses(branchId: branchId),
+        () => ApiClient().listTimetable(),
+        () => ApiClient().listClasses(),
       ]);
-      _entries = (results[0] as List<TimetableEntry>?) ??
-          const <TimetableEntry>[];
-      _classes = (results[1] as List<SchoolClass>?) ?? const <SchoolClass>[];
-    } on ApiException catch (e) {
-      _error = e.message;
-    } catch (_) {
-      _error = 'Failed to load';
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _addEntry() async {
-    if (_classes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Create a class first'),
-        backgroundColor: AppColors.warning,
-      ));
-      return;
-    }
-    final formKey = GlobalKey<FormState>();
-    String? classId = _classes.first.id;
-    String day = _day;
-    final subjectCtrl = TextEditingController();
-    final periodCtrl = TextEditingController(text: '1');
-    final startCtrl = TextEditingController(text: '08:00');
-    final endCtrl = TextEditingController(text: '08:45');
-    final roomCtrl = TextEditingController();
-    final teacherCtrl = TextEditingController();
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Add Timetable Entry'),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg)),
-          content: SingleChildScrollView(
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    value: classId,
-                    decoration: const InputDecoration(labelText: 'Class'),
-                    items: _classes
-                        .map((c) => DropdownMenuItem(
-                              value: c.id,
-                              child: Text('${c.name} — ${c.section}'),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setSt(() => classId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: day,
-                    decoration: const InputDecoration(labelText: 'Day'),
-                    items: _days
-                        .map((d) =>
-                            DropdownMenuItem(value: d, child: Text(d)))
-                        .toList(),
-                    onChanged: (v) => setSt(() => day = v ?? day),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: subjectCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Subject', hintText: 'e.g. Mathematics'),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: periodCtrl,
-                          decoration: const InputDecoration(labelText: 'Period'),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextFormField(
-                          controller: startCtrl,
-                          decoration: const InputDecoration(labelText: 'Start'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextFormField(
-                          controller: endCtrl,
-                          decoration: const InputDecoration(labelText: 'End'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: roomCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Room', hintText: 'e.g. R-201'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: teacherCtrl,
-                    decoration: const InputDecoration(labelText: 'Teacher'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () {
-                if (formKey.currentState?.validate() != true) return;
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final selected =
-        _classes.firstWhere((c) => c.id == classId, orElse: () => _classes.first);
-    if (!mounted) return;
-    try {
-      final auth = context.read<AuthProvider>();
-      await ApiClient().saveTimetableEntry({
-        'branchId': auth.user!.branchId,
-        'instituteId': auth.user!.instituteId,
-        'classId': selected.id,
-        'className': selected.name,
-        'section': selected.section,
-        'day': day,
-        'period': int.tryParse(periodCtrl.text) ?? 1,
-        'startTime': startCtrl.text.trim(),
-        'endTime': endCtrl.text.trim(),
-        'subject': subjectCtrl.text.trim(),
-        'roomName': roomCtrl.text.trim(),
-        'teacherName': teacherCtrl.text.trim(),
-        'createdBy': auth.user!.id,
+      if (!mounted) return;
+      setState(() {
+        _entries = (results[0] as List<TimetableEntry>?) ?? [];
+        _classes = (results[1] as List<SchoolClass>?) ?? [];
+        _loading = false;
       });
-      ApiClient().invalidate('timetable');
-      setState(() => _day = day);
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: AppColors.danger));
-      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addEntry,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add Entry'),
-      ),
-      body: _loading
-          ? const LoadingList(count: 6, height: 80)
-          : _error != null
-              ? ErrorState(message: _error!, onRetry: _load)
-              : Column(
-                  children: [
-                    // Day selector chips — horizontal scroll
-                    Container(
-                      color: AppColors.background,
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-                      child: SizedBox(
-                        height: 44,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _days.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemBuilder: (_, i) {
-                            final d = _days[i];
-                            final active = d == _day;
-                            return GestureDetector(
-                              onTap: () => setState(() => _day = d),
-                              child: AnimatedContainer(
-                                duration:
-                                    const Duration(milliseconds: 180),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 18, vertical: 10),
-                                decoration: BoxDecoration(
-                                  gradient: active
-                                      ? appGradient(
-                                          AppColors.primaryGradient)
-                                      : null,
-                                  color: active
-                                      ? null
-                                      : AppColors.card,
-                                  borderRadius:
-                                      BorderRadius.circular(AppRadii.pill),
-                                  border: Border.all(
-                                    color: active
-                                        ? AppColors.primary
-                                        : AppColors.border,
-                                    width: active ? 1.2 : 1,
-                                  ),
-                                  boxShadow: active ? AppShadows.button : null,
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  d.substring(0, 3),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: active
-                                        ? Colors.white
-                                        : AppColors.textSecondary,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+    if (_loading) return const LoadingList(count: 6);
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+
+    final dayEntries = _entries
+        .where((e) => e.day == _days[_selectedDayIndex])
+        .toList()
+      ..sort((a, b) => a.period.compareTo(b.period));
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: AppColors.primary,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          // Day selector
+          _buildDaySelector(),
+          const SizedBox(height: 16),
+          // Add entry button
+          ConcordiaButton(
+            label: 'Add Entry',
+            icon: Icons.add_outlined,
+            onPressed: () => _showAddEntryDialog(),
+          ),
+          const SizedBox(height: 16),
+          if (dayEntries.isEmpty)
+            const EmptyState(
+              icon: Icons.calendar_today_outlined,
+              title: 'No Entries',
+              subtitle: 'Add timetable entries for this day.',
+            )
+          else
+            ...dayEntries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ListRow(
+                    title: e.subject,
+                    subtitle:
+                        'Period ${e.period} • ${e.startTime} – ${e.endTime} • ${e.className} ${e.section}',
+                    initials: e.subject[0],
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (e.teacherName != null)
+                          ConcordiaBadge(
+                            label: e.teacherName!,
+                            variant: ConcordiaBadgeVariant.secondary,
+                          ),
+                        const SizedBox(width: 6),
+                        GestureDetector(
+                          onTap: () => _confirmDeleteEntry(e),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerSoft,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Icon(Icons.delete_outline,
+                                size: 16, color: AppColors.danger),
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDaySelector() {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _days.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final active = i == _selectedDayIndex;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedDayIndex = i),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: active
+                    ? appGradient(AppColors.primaryGradient)
+                    : null,
+                color: active ? null : AppColors.card,
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                border: Border.all(
+                  color: active ? AppColors.primary : AppColors.border,
+                  width: 1,
+                ),
+              ),
+              child: Text(
+                _days[i].substring(0, 3),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: active ? Colors.white : AppColors.textSecondary,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAddEntryDialog() {
+    final subjectCtrl = TextEditingController();
+    final startTimeCtrl = TextEditingController();
+    final endTimeCtrl = TextEditingController();
+    final periodCtrl = TextEditingController();
+    String? selectedClassId;
+    String? selectedTeacherId;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          title: Text('Add Entry – ${_days[_selectedDayIndex]}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConcordiaInput(
+                  label: 'Subject',
+                  controller: subjectCtrl,
+                  hintText: 'e.g. Mathematics',
+                ),
+                const SizedBox(height: 12),
+                ConcordiaInput(
+                  label: 'Period',
+                  controller: periodCtrl,
+                  hintText: '1',
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ConcordiaInput(
+                        label: 'Start',
+                        controller: startTimeCtrl,
+                        hintText: '08:00',
                       ),
                     ),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: RefreshIndicator(
-                        onRefresh: _load,
-                        child: _entriesForDay().isEmpty
-                            ? ListView(
-                                children: [
-                                  const SizedBox(height: 80),
-                                  EmptyState(
-                                    icon: Icons.calendar_today_outlined,
-                                    title: 'No classes scheduled',
-                                    subtitle:
-                                        'Add a timetable entry for $_day to get started',
-                                  ),
-                                ],
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.fromLTRB(
-                                    16, 6, 16, 96),
-                                itemCount: _entriesForDay().length,
-                                itemBuilder: (_, i) {
-                                  final e = _entriesForDay()[i];
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: ListRow(
-                                      title: e.subject,
-                                      subtitle:
-                                          '${e.className} — ${e.section} · ${e.startTime} – ${e.endTime}',
-                                      eyebrow: 'Period ${e.period}',
-                                      leading: Container(
-                                        width: 44,
-                                        height: 44,
-                                        decoration: BoxDecoration(
-                                          gradient: appGradient(
-                                              AppColors.infoGradient),
-                                          borderRadius: BorderRadius.circular(
-                                              AppRadii.sm),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            'P${e.period}',
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w800,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      trailing: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (e.roomName != null &&
-                                              e.roomName!.isNotEmpty)
-                                            Text('Room ${e.roomName}',
-                                                style: const TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight:
-                                                        FontWeight.w700,
-                                                    color: AppColors
-                                                        .textSecondary)),
-                                          if (e.teacherName != null &&
-                                              e.teacherName!.isNotEmpty)
-                                            Text(e.teacherName!,
-                                                style: const TextStyle(
-                                                    fontSize: 11,
-                                                    color: AppColors
-                                                        .textMuted)),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
+                      child: ConcordiaInput(
+                        label: 'End',
+                        controller: endTimeCtrl,
+                        hintText: '08:45',
                       ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedClassId,
+                  decoration: InputDecoration(
+                    labelText: 'Class',
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFFFE0CC)),
+                    ),
+                  ),
+                  items: _classes
+                      .map((c) => DropdownMenuItem(
+                            value: c.id,
+                            child: Text('${c.name} (${c.section})'),
+                          ))
+                      .toList(),
+                  onChanged: (v) =>
+                      setDialogState(() => selectedClassId = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            ConcordiaButton(
+              label: 'Cancel',
+              variant: ConcordiaButtonVariant.ghost,
+              onPressed: () => Navigator.pop(ctx),
+            ),
+            ConcordiaButton(
+              label: 'Add',
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await ApiClient().saveTimetableEntry({
+                    'day': _days[_selectedDayIndex],
+                    'subject': subjectCtrl.text.trim(),
+                    'period': int.tryParse(periodCtrl.text.trim()) ?? 1,
+                    'startTime': startTimeCtrl.text.trim(),
+                    'endTime': endTimeCtrl.text.trim(),
+                    if (selectedClassId != null) 'classId': selectedClassId,
+                  });
+                  ApiClient().invalidate('timetable');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Entry added!'),
+                        backgroundColor: AppColors.success,
+                      ),
+                    );
+                    _load();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: AppColors.danger),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  List<TimetableEntry> _entriesForDay() {
-    return _entries
-        .where((e) => e.day == _day)
-        .toList()
-      ..sort((a, b) => a.period.compareTo(b.period));
+  void _confirmDeleteEntry(TimetableEntry e) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text('Delete Entry?'),
+        content: Text(
+          'Delete ${e.subject} (Period ${e.period}) on ${e.day}?',
+        ),
+        actions: [
+          ConcordiaButton(
+            label: 'Cancel',
+            variant: ConcordiaButtonVariant.ghost,
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          ConcordiaButton(
+            label: 'Delete',
+            variant: ConcordiaButtonVariant.destructive,
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ApiClient().deleteTimetableEntry(e.id);
+                ApiClient().invalidate('timetable');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Entry deleted!'),
+                      backgroundColor: AppColors.success,
+                    ),
+                  );
+                  _load();
+                }
+              } catch (err) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Error: $err'),
+                        backgroundColor: AppColors.danger),
+                  );
+                }
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// EXAMS
+// EXAMS & DATE SHEETS
 // ════════════════════════════════════════════════════════════════
+
 class _AcExams extends StatefulWidget {
   const _AcExams();
 
@@ -1524,7 +1123,7 @@ class _AcExams extends StatefulWidget {
 }
 
 class _AcExamsState extends State<_AcExams> {
-  List<Exam> _exams = const [];
+  List<Exam> _exams = [];
   bool _loading = true;
   String? _error;
 
@@ -1540,312 +1139,218 @@ class _AcExamsState extends State<_AcExams> {
       _error = null;
     });
     try {
-      final auth = context.read<AuthProvider>();
-      _exams = await ApiClient().listExams(branchId: auth.user!.branchId);
-    } on ApiException catch (e) {
-      _error = e.message;
-    } catch (_) {
-      _error = 'Failed to load';
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _create() async {
-    final nameCtrl = TextEditingController();
-    String type = 'Monthly Test';
-    final types = ['Monthly Test', 'Mid Term', 'Final Term', 'Quiz', 'Sessional'];
-    final formKey = GlobalKey<FormState>();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Create Exam'),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Form(
-                key: formKey,
-                child: TextFormField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Exam Name',
-                      hintText: 'e.g. Mid Term 2026'),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: type,
-                decoration: const InputDecoration(labelText: 'Type'),
-                items: types
-                    .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                    .toList(),
-                onChanged: (v) => setSt(() => type = v ?? type),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () {
-                if (formKey.currentState?.validate() != true) return;
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Create'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    if (!mounted) return;
-    try {
-      final auth = context.read<AuthProvider>();
-      await ApiClient().createExam({
-        'name': nameCtrl.text.trim(),
-        'branchId': auth.user!.branchId,
-        'instituteId': auth.user!.instituteId,
-        'type': type,
-        'createdBy': auth.user!.id,
+      final exams = await ApiClient().listExams();
+      if (!mounted) return;
+      setState(() {
+        _exams = exams;
+        _loading = false;
       });
-      ApiClient().invalidate('exams');
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: AppColors.danger));
-      }
-    }
-  }
-
-  Future<void> _delete(Exam e) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete exam?'),
-        content: Text('Delete "${e.name}"? This cannot be undone.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await ApiClient().deleteExam(e.id);
-      ApiClient().invalidate('exams');
-      _load();
-    } on ApiException catch (er) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(er.message), backgroundColor: AppColors.danger));
-      }
-    }
-  }
-
-  void _showDetail(Exam e) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Row(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: appGradient(AppColors.warningGradient),
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                  ),
-                  child: const Icon(Icons.assignment_rounded,
-                      color: Colors.white, size: 28),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(e.name,
-                          style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 4),
-                      StatusChip(text: e.type, type: _examType(e.type)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            const Text('Actions',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            ListRow(
-              title: 'Record Results',
-              subtitle: 'Enter marks for this exam',
-              icon: Icons.edit_note_rounded,
-              accentColor: AppColors.success,
-              onTap: () => Navigator.pop(ctx),
-            ),
-            const SizedBox(height: 8),
-            ListRow(
-              title: 'Delete exam',
-              subtitle: 'Permanently remove',
-              icon: Icons.delete_outline_rounded,
-              accentColor: AppColors.danger,
-              onTap: () {
-                Navigator.pop(ctx);
-                _delete(e);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  StatusType _examType(String type) {
-    switch (type) {
-      case 'Final Term':
-        return StatusType.danger;
-      case 'Mid Term':
-        return StatusType.warning;
-      case 'Quiz':
-        return StatusType.info;
-      case 'Sessional':
-        return StatusType.purple;
-      default:
-        return StatusType.info;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _create,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('New Exam'),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: _loading
-            ? const LoadingList(count: 6, height: 72)
-            : _error != null
-                ? ErrorState(message: _error!, onRetry: _load)
-                : _exams.isEmpty
-                    ? ListView(
-                        children: [
-                          const SizedBox(height: 120),
-                          EmptyState(
-                            icon: Icons.assignment_outlined,
-                            title: 'No exams yet',
-                            subtitle: 'Create an exam session to record results',
-                            actionLabel: 'Create Exam',
-                            onAction: _create,
-                          ),
-                        ],
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
-                        itemCount: _exams.length + 1,
-                        itemBuilder: (_, i) {
-                          if (i == 0) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      '${_exams.length} exam sessions',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.textSecondary,
-                                      ),
-                                    ),
-                                  ),
-                                  const StatusChip(
-                                    text: 'Active',
-                                    type: StatusType.success,
-                                    compact: true,
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                          final e = _exams[i - 1];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: ListRow(
-                              title: e.name,
-                              subtitle: e.type,
-                              eyebrow: 'Exam',
-                              leading: Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  gradient:
-                                      appGradient(AppColors.warningGradient),
-                                  borderRadius:
-                                      BorderRadius.circular(AppRadii.sm),
-                                ),
-                                child: const Icon(Icons.assignment_rounded,
-                                    color: Colors.white, size: 22),
-                              ),
-                              trailing: StatusChip(
-                                  text: e.type, type: _examType(e.type)),
-                              onTap: () => _showDetail(e),
+    if (_loading) return const LoadingList(count: 6);
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: AppColors.primary,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          ConcordiaButton(
+            label: 'Create Exam',
+            icon: Icons.add_outlined,
+            onPressed: () => _showCreateExamDialog(),
+          ),
+          const SizedBox(height: 16),
+          if (_exams.isEmpty)
+            const EmptyState(
+              icon: Icons.assignment_outlined,
+              title: 'No Exams',
+              subtitle: 'Create an exam to get started.',
+            )
+          else
+            ..._exams.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ListRow(
+                    title: e.name,
+                    subtitle: e.type,
+                    initials: e.name[0],
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ConcordiaBadge(
+                          label: e.type,
+                          variant: ConcordiaBadgeVariant.secondary,
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => _confirmDeleteExam(e),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerSoft,
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                          );
-                        },
+                            child: const Icon(Icons.delete_outline,
+                                size: 16, color: AppColors.danger),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateExamDialog() {
+    final nameCtrl = TextEditingController();
+    String type = 'Monthly Test';
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          title: const Text('Create Exam'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ConcordiaInput(
+                label: 'Exam Name',
+                controller: nameCtrl,
+                hintText: 'e.g. Mid-Term 2025',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: type,
+                decoration: InputDecoration(
+                  labelText: 'Exam Type',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFFFE0CC)),
+                  ),
+                ),
+                items: [
+                  'Monthly Test',
+                  'Mid-Term',
+                  'Final Exam',
+                  'Quiz',
+                  'Practical',
+                ].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                onChanged: (v) => setDialogState(() => type = v ?? 'Monthly Test'),
+              ),
+            ],
+          ),
+          actions: [
+            ConcordiaButton(
+              label: 'Cancel',
+              variant: ConcordiaButtonVariant.ghost,
+              onPressed: () => Navigator.pop(ctx),
+            ),
+            ConcordiaButton(
+              label: 'Create',
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await ApiClient().createExam({
+                    'name': nameCtrl.text.trim(),
+                    'type': type,
+                  });
+                  ApiClient().invalidate('exams');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Exam created!'),
+                        backgroundColor: AppColors.success,
                       ),
+                    );
+                    _load();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: AppColors.danger),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmDeleteExam(Exam e) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text('Delete Exam?'),
+        content: Text('Delete "${e.name}"? This action cannot be undone.'),
+        actions: [
+          ConcordiaButton(
+            label: 'Cancel',
+            variant: ConcordiaButtonVariant.ghost,
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          ConcordiaButton(
+            label: 'Delete',
+            variant: ConcordiaButtonVariant.destructive,
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ApiClient().deleteExam(e.id);
+                ApiClient().invalidate('exams');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Exam deleted!'),
+                      backgroundColor: AppColors.success,
+                    ),
+                  );
+                  _load();
+                }
+              } catch (err) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Error: $err'),
+                        backgroundColor: AppColors.danger),
+                  );
+                }
+              }
+            },
+          ),
+        ],
       ),
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// RESULTS
+// RESULT CARDS
 // ════════════════════════════════════════════════════════════════
+
 class _AcResults extends StatefulWidget {
   const _AcResults();
 
@@ -1854,11 +1359,9 @@ class _AcResults extends StatefulWidget {
 }
 
 class _AcResultsState extends State<_AcResults> {
-  List<ReportCard> _cards = const [];
+  List<ReportCard> _cards = [];
   bool _loading = true;
   String? _error;
-  ReportCard? _generated;
-  bool _generating = false;
 
   @override
   void initState() {
@@ -1872,223 +1375,44 @@ class _AcResultsState extends State<_AcResults> {
       _error = null;
     });
     try {
-      final auth = context.read<AuthProvider>();
-      _cards = await ApiClient()
-          .listReportCards(branchId: auth.user!.branchId);
-    } on ApiException catch (e) {
-      _error = e.message;
-    } catch (_) {
-      _error = 'Failed to load';
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _generate() async {
-    final auth0 = context.read<AuthProvider>();
-    List<User> students = const [];
-    try {
-      students = await ApiClient().listUsers(
-        role: 'student',
-        branchId: auth0.user!.branchId,
-      );
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: AppColors.danger));
-      }
-      return;
-    }
-    if (students.isEmpty) {
+      final cards = await ApiClient().listReportCards();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('No students found in this branch'),
-        backgroundColor: AppColors.warning,
-      ));
-      return;
+      setState(() {
+        _cards = cards;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
-    String? studentId = students.first.id;
-    String term = 'First Term';
-    final terms = ['First Term', 'Mid Term', 'Final Term', 'Monthly Test'];
-
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Generate Report Card'),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                value: studentId,
-                decoration: const InputDecoration(labelText: 'Student'),
-                items: students
-                    .map((s) => DropdownMenuItem(
-                          value: s.id,
-                          child: Text(
-                              '${s.name}${s.className != null ? ' · ${s.className}' : ''}'),
-                        ))
-                    .toList(),
-                onChanged: (v) => setSt(() => studentId = v),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: term,
-                decoration: const InputDecoration(labelText: 'Term'),
-                items: terms
-                    .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                    .toList(),
-                onChanged: (v) => setSt(() => term = v ?? term),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Generate'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true || studentId == null) return;
-    if (!mounted) return;
-    setState(() => _generating = true);
-    try {
-      final card = await ApiClient()
-          .generateReportCard(studentId!, term: term);
-      ApiClient().invalidate('report-cards');
-      setState(() => _generated = card);
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: AppColors.danger));
-      }
-    } finally {
-      if (mounted) setState(() => _generating = false);
-    }
-  }
-
-  StatusType _gradeType(String g) {
-    if (g.startsWith('A')) return StatusType.success;
-    if (g.startsWith('B')) return StatusType.info;
-    if (g.startsWith('C')) return StatusType.warning;
-    return StatusType.danger;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const LoadingList(count: 6, height: 72);
+    if (_loading) return const LoadingList(count: 6);
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
 
     return RefreshIndicator(
       onRefresh: _load,
+      color: AppColors.primary,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          const GradientHero(
-            eyebrow: 'Academic Performance',
-            title: 'Results & Reports',
-            subtitle: 'View report cards and generate new ones',
-            icon: Icons.description_rounded,
-            gradient: AppColors.successGradient,
+          ConcordiaButton(
+            label: 'Generate Report Card',
+            icon: Icons.description_outlined,
+            onPressed: () => _showGenerateDialog(),
           ),
-          const SizedBox(height: 18),
-          // Generate section
-          PremiumCard(
-            onTap: _generating ? null : _generate,
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    gradient: appGradient(AppColors.primaryGradient),
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    boxShadow: AppShadows.button,
-                  ),
-                  child: const Icon(Icons.auto_awesome_rounded,
-                      color: Colors.white, size: 24),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Generate Report Card',
-                          style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text(
-                          _generating
-                              ? 'Generating…'
-                              : 'Pick a student & term to compute grades',
-                          style: const TextStyle(
-                              fontSize: 12.5,
-                              color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ),
-                _generating
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.chevron_right_rounded,
-                        color: AppColors.textMuted, size: 22),
-              ],
-            ),
-          ),
-          // Generated report card preview
-          if (_generated != null) ...[
-            const SizedBox(height: 16),
-            const SectionHeader(title: 'Generated Report'),
-            _ReportCardView(card: _generated!),
-          ],
-          // Recent results
-          const SectionHeader(
-            title: 'Recent Results',
-            subtitle: '${0} report cards',
-          ),
+          const SizedBox(height: 16),
           if (_cards.isEmpty)
-            PremiumCard(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: const BoxDecoration(
-                      color: AppColors.primarySoft,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.description_outlined,
-                        color: AppColors.primary, size: 26),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('No report cards yet',
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
-                  const SizedBox(height: 4),
-                  const Text(
-                      'Generate a report card above to see it here',
-                      style: TextStyle(
-                          fontSize: 12.5, color: AppColors.textSecondary),
-                      textAlign: TextAlign.center),
-                ],
-              ),
+            const EmptyState(
+              icon: Icons.description_outlined,
+              title: 'No Report Cards',
+              subtitle: 'Generate report cards for students.',
             )
           else
             ..._cards.map((c) => Padding(
@@ -2096,88 +1420,179 @@ class _AcResultsState extends State<_AcResults> {
                   child: ListRow(
                     title: c.studentName,
                     subtitle:
-                        '${c.className} — ${c.section} · ${c.term} · ${c.examName}',
-                    eyebrow: c.term,
-                    icon: Icons.person_rounded,
-                    accentColor: AppColors.purple,
-                    trailing: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        StatusChip(
-                            text: c.grade.isEmpty ? '—' : c.grade,
-                            type: _gradeType(c.grade.isEmpty ? 'D' : c.grade)),
-                        const SizedBox(height: 4),
-                        Text('${c.obtainedMarks}/${c.totalMarks}',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textSecondary)),
-                      ],
+                        '${c.className} ${c.section} • ${c.examName} • ${c.percentage.toStringAsFixed(1)}%',
+                    initials: initialsOf(c.studentName),
+                    trailing: StatusChip(
+                      text: c.grade,
+                      type: _gradeType(c.grade),
+                      compact: true,
                     ),
-                    onTap: () {
-                      setState(() => _generated = c);
-                    },
+                    onTap: () => _showCardDetail(c),
                   ),
                 )),
         ],
       ),
     );
   }
-}
 
-// ════════════════════════════════════════════════════════════════
-// HELPERS
-// ════════════════════════════════════════════════════════════════
-class _DetailTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-  const _DetailTile({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
+  StatusType _gradeType(String grade) {
+    if (grade.startsWith('A')) return StatusType.success;
+    if (grade.startsWith('B')) return StatusType.info;
+    if (grade.startsWith('C')) return StatusType.warning;
+    return StatusType.danger;
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: color.withOpacity(0.18)),
+  void _showGenerateDialog() {
+    final studentIdCtrl = TextEditingController();
+    final termCtrl = TextEditingController();
+    final examCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text('Generate Report Card'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConcordiaInput(
+              label: 'Student ID',
+              controller: studentIdCtrl,
+              hintText: 'Enter student ID',
+            ),
+            const SizedBox(height: 12),
+            ConcordiaInput(
+              label: 'Term',
+              controller: termCtrl,
+              hintText: 'e.g. Term 1',
+            ),
+            const SizedBox(height: 12),
+            ConcordiaInput(
+              label: 'Exam Name',
+              controller: examCtrl,
+              hintText: 'e.g. Mid-Term',
+            ),
+          ],
+        ),
+        actions: [
+          ConcordiaButton(
+            label: 'Cancel',
+            variant: ConcordiaButtonVariant.ghost,
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          ConcordiaButton(
+            label: 'Generate',
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ApiClient().generateReportCard(
+                  studentIdCtrl.text.trim(),
+                  term: termCtrl.text.trim().isNotEmpty
+                      ? termCtrl.text.trim()
+                      : null,
+                  examName: examCtrl.text.trim().isNotEmpty
+                      ? examCtrl.text.trim()
+                      : null,
+                );
+                ApiClient().invalidate('report-cards');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Report card generated!'),
+                      backgroundColor: AppColors.success,
+                    ),
+                  );
+                  _load();
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: AppColors.danger),
+                  );
+                }
+              }
+            },
+          ),
+        ],
       ),
+    );
+  }
+
+  void _showCardDetail(ReportCard c) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              c.studentName,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _detailRow('Class', '${c.className} ${c.section}'),
+            _detailRow('Term', c.term),
+            _detailRow('Exam', c.examName),
+            _detailRow('Total Marks', '${c.totalMarks}'),
+            _detailRow('Obtained', '${c.obtainedMarks}'),
+            _detailRow('Percentage', '${c.percentage.toStringAsFixed(1)}%'),
+            _detailRow('Grade', c.grade),
+            if (c.remarks != null) _detailRow('Remarks', c.remarks!),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.18),
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-            ),
-            child: Icon(icon, color: color, size: 18),
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(value,
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: color)),
-              ],
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
             ),
           ),
         ],
@@ -2186,142 +1601,65 @@ class _DetailTile extends StatelessWidget {
   }
 }
 
-class _ReportCardView extends StatelessWidget {
-  final ReportCard card;
-  const _ReportCardView({required this.card});
+// ── Quick-action card ────────────────────────────────────────────
 
-  StatusType _gradeType(String g) {
-    if (g.startsWith('A')) return StatusType.success;
-    if (g.startsWith('B')) return StatusType.info;
-    if (g.startsWith('C')) return StatusType.warning;
-    return StatusType.danger;
-  }
+class _QuickActionCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _QuickActionCard({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final pct = card.percentage.clamp(0.0, 100.0);
-    return PremiumCard(
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Student header
-          Row(
-            children: [
-              AppAvatar(
-                initials: initialsOf(card.studentName),
-                color: AppColors.purple,
-                size: 48,
-                useGradient: true,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(card.studentName,
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary)),
-                    const SizedBox(height: 2),
-                    Text(
-                        'Class ${card.className} — ${card.section} · ${card.term}',
-                        style: const TextStyle(
-                            fontSize: 12.5,
-                            color: AppColors.textSecondary)),
-                  ],
-                ),
-              ),
-              StatusChip(
-                  text: card.grade.isEmpty ? '—' : card.grade,
-                  type: _gradeType(card.grade.isEmpty ? 'D' : card.grade)),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(AppRadii.md),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 1),
             ),
-            child: Row(
-              children: [
-                const Icon(Icons.assignment_rounded,
-                    size: 18, color: AppColors.textSecondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(card.examName,
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Marks progress
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text('${card.obtainedMarks}',
-                  style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
-                      letterSpacing: -0.5)),
-              const SizedBox(width: 4),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text('/ ${card.totalMarks}',
-                    style: const TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w600)),
-              ),
-              const Spacer(),
-              Text('${pct.toStringAsFixed(1)}%',
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: LinearProgressIndicator(
-              value: pct / 100,
-              minHeight: 8,
-              backgroundColor: AppColors.border,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                card.grade.startsWith('A')
-                    ? AppColors.success
-                    : card.grade.startsWith('B')
-                        ? AppColors.info
-                        : card.grade.startsWith('C')
-                            ? AppColors.warning
-                            : AppColors.danger,
-              ),
-            ),
-          ),
-          if (card.remarks != null && card.remarks!.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            const Text('Remarks',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textSecondary)),
-            const SizedBox(height: 4),
-            Text(card.remarks!,
-                style: const TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textPrimary,
-                    height: 1.4)),
           ],
-        ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 17, color: color),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }

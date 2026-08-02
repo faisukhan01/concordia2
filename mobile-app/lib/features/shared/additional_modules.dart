@@ -3,6 +3,10 @@
 // StatefulWidget that loads data from ApiClient and renders it in a
 // professional card/list layout with loading + error states.
 //
+// Uses the new design system: ConcordiaCard, ConcordiaButton, ConcordiaInput,
+// SectionHeader, AppAvatar, StatusChip, ListRow, StatCard, GradientHero, etc.
+// Uses withOpacity() for Flutter 3.24 compatibility.
+//
 // Used by nav_items.dart for modules not already covered by the main
 // portal tab widgets.
 
@@ -25,7 +29,8 @@ class _LoadingView extends StatelessWidget {
   Widget build(BuildContext context) => const Center(
         child: Padding(
           padding: EdgeInsets.all(40),
-          child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2.5),
+          child: CircularProgressIndicator(
+              color: AppColors.primary, strokeWidth: 2.5),
         ),
       );
 }
@@ -41,13 +46,20 @@ class _ErrorView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: AppColors.danger),
+              const Icon(Icons.error_outline,
+                  size: 48, color: AppColors.danger),
               const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+              Text(message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 14, color: AppColors.textSecondary)),
               if (onRetry != null) ...[
                 const SizedBox(height: 16),
-                ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
+                ConcordiaButton(
+                  label: 'Retry',
+                  variant: ConcordiaButtonVariant.outline,
+                  onPressed: onRetry,
+                ),
               ],
             ],
           ),
@@ -65,10 +77,13 @@ class _EmptyView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.inbox_outlined, size: 48, color: AppColors.textMuted),
+              const Icon(Icons.inbox_outlined,
+                  size: 48, color: AppColors.textMuted),
               const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: AppColors.textMuted)),
+              Text(message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 14, color: AppColors.textMuted)),
             ],
           ),
         ),
@@ -94,7 +109,8 @@ class SettingsScreen extends StatelessWidget {
 class AnnouncementsViewScreen extends StatefulWidget {
   const AnnouncementsViewScreen({super.key});
   @override
-  State<AnnouncementsViewScreen> createState() => _AnnouncementsViewScreenState();
+  State<AnnouncementsViewScreen> createState() =>
+      _AnnouncementsViewScreenState();
 }
 
 class _AnnouncementsViewScreenState extends State<AnnouncementsViewScreen> {
@@ -110,7 +126,10 @@ class _AnnouncementsViewScreenState extends State<AnnouncementsViewScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _items = await _api.listAnnouncements();
     } on ApiException catch (e) {
@@ -125,7 +144,9 @@ class _AnnouncementsViewScreenState extends State<AnnouncementsViewScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_items == null || _items!.isEmpty) return const _EmptyView('No announcements yet.');
+    if (_items == null || _items!.isEmpty) {
+      return const _EmptyView('No announcements yet.');
+    }
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
@@ -134,10 +155,9 @@ class _AnnouncementsViewScreenState extends State<AnnouncementsViewScreen> {
         itemCount: _items!.length,
         itemBuilder: (_, i) {
           final a = _items![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ConcordiaCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -147,22 +167,25 @@ class _AnnouncementsViewScreenState extends State<AnnouncementsViewScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(a.title,
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(a.message, style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
-                  if (a.targetRole.isNotEmpty || a.targetScope.isNotEmpty) ...[
+                  Text(a.message,
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.textSecondary)),
+                  if (a.targetRole.isNotEmpty ||
+                      a.targetScope.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.secondary,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(a.targetScope.isNotEmpty ? a.targetScope : a.targetRole,
-                          style: TextStyle(fontSize: 11, color: AppColors.secondaryText, fontWeight: FontWeight.w500)),
+                    ConcordiaBadge(
+                      label: a.targetScope.isNotEmpty
+                          ? a.targetScope
+                          : a.targetRole,
+                      variant: ConcordiaBadgeVariant.secondary,
                     ),
                   ],
                 ],
@@ -199,9 +222,17 @@ class _TimetableViewScreenState extends State<TimetableViewScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      _items = await _api.listTimetable();
+      if (widget.isTeacher) {
+        final auth = context.read<AuthProvider>();
+        _items = await _api.listTimetable(teacherId: auth.user?.id);
+      } else {
+        _items = await _api.listTimetable();
+      }
     } on ApiException catch (e) {
       _error = e.message;
     } catch (_) {
@@ -214,32 +245,108 @@ class _TimetableViewScreenState extends State<TimetableViewScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_items == null || _items!.isEmpty) return const _EmptyView('No timetable entries.');
+    if (_items == null || _items!.isEmpty) {
+      return const _EmptyView('No timetable entries.');
+    }
+    // Group by day
+    final byDay = <String, List<TimetableEntry>>{};
+    for (final t in _items!) {
+      final arr = byDay[t.day] ?? [];
+      arr.add(t);
+      byDay[t.day] = arr;
+    }
+    final days = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _items!.length,
-        itemBuilder: (_, i) {
-          final t = _items![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: AppColors.secondary,
-                child: Text(t.day.substring(0, 2).toUpperCase(),
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
-              ),
-              title: Text('${t.startTime} - ${t.endTime}',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text('${t.subject} • ${t.teacherName ?? ''}',
-                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-              trailing: Text(t.day,
-                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            ),
-          );
-        },
+        children: [
+          for (final day in days)
+            if (byDay.containsKey(day)) ...[
+              SectionHeader(title: day),
+              const SizedBox(height: 6),
+              ...byDay[day]!.map((t) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ConcordiaCard(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: AppColors.primarySoft,
+                              borderRadius:
+                                  BorderRadius.circular(AppRadii.lg),
+                              border: Border.all(
+                                  color:
+                                      AppColors.primary.withOpacity(0.2)),
+                            ),
+                            child: Center(
+                              child: Text(
+                                'P${t.period}',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  t.subject,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${t.startTime} - ${t.endTime}',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.textMuted),
+                                ),
+                                if (t.teacherName != null &&
+                                    t.teacherName!.isNotEmpty)
+                                  Text(
+                                    t.teacherName!,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color:
+                                            AppColors.textSecondary),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (t.roomName != null &&
+                              t.roomName!.isNotEmpty)
+                            ConcordiaBadge(
+                              label: t.roomName!,
+                              variant: ConcordiaBadgeVariant.secondary,
+                            ),
+                        ],
+                      ),
+                    ),
+                  )),
+              const SizedBox(height: 8),
+            ],
+        ],
       ),
     );
   }
@@ -268,7 +375,10 @@ class _ExamsScreenState extends State<ExamsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _items = await _api.listExams();
     } on ApiException catch (e) {
@@ -283,7 +393,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_items == null || _items!.isEmpty) return const _EmptyView('No exams scheduled.');
+    if (_items == null || _items!.isEmpty) {
+      return const _EmptyView('No exams scheduled.');
+    }
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
@@ -292,12 +404,45 @@ class _ExamsScreenState extends State<ExamsScreen> {
         itemCount: _items!.length,
         itemBuilder: (_, i) {
           final e = _items![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.primary, child: const Icon(Icons.assignment, color: Colors.white, size: 20)),
-              title: Text(e.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text(e.type, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ConcordiaCard(
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: appGradient(AppColors.primaryGradient),
+                      borderRadius: BorderRadius.circular(AppRadii.lg),
+                    ),
+                    child: const Icon(Icons.assignment,
+                        color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(e.name,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary)),
+                        const SizedBox(height: 2),
+                        Text(e.type,
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                  ConcordiaBadge(
+                    label: e.type,
+                    variant: ConcordiaBadgeVariant.secondary,
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -329,9 +474,13 @@ class _ReportCardsScreenState extends State<ReportCardsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      _items = await _api.listReportCards();
+      final auth = context.read<AuthProvider>();
+      _items = await _api.listReportCards(studentId: auth.user?.id);
     } on ApiException catch (e) {
       _error = e.message;
     } catch (_) {
@@ -344,7 +493,9 @@ class _ReportCardsScreenState extends State<ReportCardsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_items == null || _items!.isEmpty) return const _EmptyView('No report cards available.');
+    if (_items == null || _items!.isEmpty) {
+      return const _EmptyView('No report cards available.');
+    }
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
@@ -353,33 +504,62 @@ class _ReportCardsScreenState extends State<ReportCardsScreen> {
         itemCount: _items!.length,
         itemBuilder: (_, i) {
           final r = _items![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ConcordiaCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.description, size: 20, color: AppColors.primary),
+                      Icon(Icons.description,
+                          size: 20, color: AppColors.primary),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(r.term ?? 'Report Card',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                      Expanded(
+                        child: Text(r.term.isNotEmpty ? r.term : 'Report Card',
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary)),
+                      ),
+                      ConcordiaBadge(
+                        label: 'Grade ${r.grade}',
+                        variant: ConcordiaBadgeVariant.primary,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text('Exam: ${r.examName}', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                  Text('Total: ${r.totalMarks} • Obtained: ${r.obtainedMarks}', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
-                      child: Text('Grade: ${r.grade} (${r.percentage.toStringAsFixed(1)}%)',
-                          style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                  Text('Exam: ${r.examName}',
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.textSecondary)),
+                  Text(
+                      'Total: ${r.totalMarks} · Obtained: ${r.obtainedMarks}',
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.textSecondary)),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      gradient: appGradient(AppColors.primaryGradient),
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                    ),
+                    child: Text(
+                      '${r.percentage.toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700),
                     ),
                   ),
+                  if (r.remarks != null && r.remarks!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('Remarks: ${r.remarks}',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                            fontStyle: FontStyle.italic)),
+                  ],
                 ],
               ),
             ),
@@ -413,7 +593,10 @@ class _DateSheetsScreenState extends State<DateSheetsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _items = await _api.listExams();
     } on ApiException catch (e) {
@@ -428,7 +611,9 @@ class _DateSheetsScreenState extends State<DateSheetsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_items == null || _items!.isEmpty) return const _EmptyView('No date sheets available.');
+    if (_items == null || _items!.isEmpty) {
+      return const _EmptyView('No date sheets available.');
+    }
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
@@ -437,12 +622,43 @@ class _DateSheetsScreenState extends State<DateSheetsScreen> {
         itemCount: _items!.length,
         itemBuilder: (_, i) {
           final e = _items![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.secondary, child: Icon(Icons.calendar_today, color: AppColors.primary, size: 18)),
-              title: Text(e.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text(e.type, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ConcordiaCard(
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.secondary,
+                      borderRadius: BorderRadius.circular(AppRadii.lg),
+                      border: Border.all(
+                          color: AppColors.primary.withOpacity(0.2)),
+                    ),
+                    child: const Icon(Icons.calendar_today,
+                        color: AppColors.primary, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(e.name,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary)),
+                        const SizedBox(height: 2),
+                        Text(e.type,
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -474,7 +690,10 @@ class _StudentFeedbackScreenState extends State<StudentFeedbackScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _classes = await _api.teacherClasses();
     } on ApiException catch (e) {
@@ -489,7 +708,9 @@ class _StudentFeedbackScreenState extends State<StudentFeedbackScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_classes == null || _classes!.isEmpty) return const _EmptyView('No classes assigned yet.');
+    if (_classes == null || _classes!.isEmpty) {
+      return const _EmptyView('No classes assigned yet.');
+    }
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
@@ -498,18 +719,51 @@ class _StudentFeedbackScreenState extends State<StudentFeedbackScreen> {
         itemCount: _classes!.length,
         itemBuilder: (_, i) {
           final c = _classes![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.primary, child: const Icon(Icons.feedback, color: Colors.white, size: 18)),
-              title: Text(c.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text('${c.section} • ${c.studentCount ?? 0} students', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-              trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ConcordiaCard(
               onTap: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Feedback for ${c.name} — coming soon'), backgroundColor: AppColors.primary),
+                  SnackBar(
+                      content: Text('Feedback for ${c.name} — coming soon'),
+                      backgroundColor: AppColors.primary),
                 );
               },
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: appGradient(AppColors.primaryGradient),
+                      borderRadius: BorderRadius.circular(AppRadii.lg),
+                    ),
+                    child: const Icon(Icons.feedback,
+                        color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(c.name,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary)),
+                        const SizedBox(height: 2),
+                        Text(
+                            '${c.section} · ${c.studentCount ?? 0} students',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right,
+                      color: AppColors.textMuted, size: 20),
+                ],
+              ),
             ),
           );
         },
@@ -542,7 +796,10 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _overview = await _api.platformOverview();
       _classes = await _api.listClasses();
@@ -558,20 +815,25 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    final branches = int.tryParse('${_overview?['branches'] ?? 0}') ?? 0;
-    final classesNum = int.tryParse('${_overview?['classes'] ?? 0}') ?? 0;
-    final teachersNum = int.tryParse('${_overview?['teachers'] ?? 0}') ?? 0;
-    final studentsNum = int.tryParse('${_overview?['students'] ?? 0}') ?? 0;
+    final branches =
+        int.tryParse('${_overview?['branches'] ?? 0}') ?? 0;
+    final classesNum =
+        int.tryParse('${_overview?['classes'] ?? 0}') ?? 0;
+    final teachersNum =
+        int.tryParse('${_overview?['teachers'] ?? 0}') ?? 0;
+    final studentsNum =
+        int.tryParse('${_overview?['students'] ?? 0}') ?? 0;
     // Build chart bars for top classes by student count
     final chartBars = (_classes ?? <SchoolClass>[])
         .where((c) => (c.studentCount ?? 0) > 0)
         .toList()
-      ..sort((a, b) => (b.studentCount ?? 0).compareTo(a.studentCount ?? 0));
+      ..sort((a, b) =>
+          (b.studentCount ?? 0).compareTo(a.studentCount ?? 0));
     final bars = chartBars.take(6).map((c) => BarData(
-      label: c.name,
-      value: (c.studentCount ?? 0).toDouble(),
-      gradient: AppColors.primaryGradient,
-    )).toList();
+          label: c.name,
+          value: (c.studentCount ?? 0).toDouble(),
+          gradient: AppColors.primaryGradient,
+        )).toList();
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -579,7 +841,6 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Gradient hero
           const GradientHero(
             eyebrow: 'Super Admin',
             title: 'Branches & Classes',
@@ -588,7 +849,6 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
             gradient: AppColors.primaryGradient,
           ),
           const SizedBox(height: 18),
-          // 2x2 stat grid
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
@@ -597,17 +857,34 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
             crossAxisSpacing: 10,
             childAspectRatio: 1.12,
             children: [
-              StatCard(label: 'Branches', value: '$branches', icon: Icons.business_rounded, gradient: AppColors.primaryGradient),
-              StatCard(label: 'Classes', value: '$classesNum', icon: Icons.class_rounded, color: AppColors.info),
-              StatCard(label: 'Teachers', value: '$teachersNum', icon: Icons.person_rounded, gradient: AppColors.successGradient),
-              StatCard(label: 'Students', value: '$studentsNum', icon: Icons.people_alt_rounded, gradient: AppColors.warningGradient),
+              StatCard(
+                  label: 'Branches',
+                  value: '$branches',
+                  icon: Icons.business_rounded,
+                  gradient: AppColors.primaryGradient),
+              StatCard(
+                  label: 'Classes',
+                  value: '$classesNum',
+                  icon: Icons.class_rounded,
+                  color: AppColors.info),
+              StatCard(
+                  label: 'Teachers',
+                  value: '$teachersNum',
+                  icon: Icons.person_rounded,
+                  gradient: AppColors.successGradient),
+              StatCard(
+                  label: 'Students',
+                  value: '$studentsNum',
+                  icon: Icons.people_alt_rounded,
+                  gradient: AppColors.warningGradient),
             ],
           ),
           const SizedBox(height: 14),
-          // Students per class chart
           if (bars.isNotEmpty) ...[
-            const SectionHeader(title: 'Students per Class', subtitle: 'Top classes by enrollment'),
-            PremiumCard(
+            const SectionHeader(
+                title: 'Students per Class',
+                subtitle: 'Top classes by enrollment'),
+            ConcordiaCard(
               padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
               child: MiniBarChart(bars: bars, height: 180),
             ),
@@ -618,8 +895,9 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
           else
             for (final c in _classes!)
               ListRow(
-                title: c.name ?? 'Class',
-                subtitle: '${c.section ?? ''} • ${c.studentCount ?? 0} students',
+                title: c.name,
+                subtitle:
+                    '${c.section} · ${c.studentCount ?? 0} students',
                 icon: Icons.class_rounded,
                 accentColor: AppColors.primary,
               ),
@@ -652,10 +930,21 @@ class _SuperStaffScreenState extends State<SuperStaffScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _staff = await _api.listUsers();
-      _staff = _staff!.where((u) => ['admin', 'admissions', 'accountant', 'academic', 'super-admin'].contains(u.role)).toList();
+      _staff = _staff!
+          .where((u) => [
+                'admin',
+                'admissions',
+                'accountant',
+                'academic',
+                'super-admin'
+              ].contains(u.role))
+          .toList();
     } on ApiException catch (e) {
       _error = e.message;
     } catch (_) {
@@ -668,17 +957,21 @@ class _SuperStaffScreenState extends State<SuperStaffScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_staff == null || _staff!.isEmpty) return const _EmptyView('No staff found.');
+    if (_staff == null || _staff!.isEmpty) {
+      return const _EmptyView('No staff found.');
+    }
     // Count by role for chart
     final roleCount = <String, int>{};
     for (final u in _staff!) {
       roleCount[u.role] = (roleCount[u.role] ?? 0) + 1;
     }
-    final bars = roleCount.entries.map((e) => BarData(
-      label: e.key.length > 8 ? e.key.substring(0, 8) : e.key,
-      value: e.value.toDouble(),
-      gradient: AppColors.primaryGradient,
-    )).toList();
+    final bars = roleCount.entries
+        .map((e) => BarData(
+              label: e.key.length > 8 ? e.key.substring(0, 8) : e.key,
+              value: e.value.toDouble(),
+              gradient: AppColors.primaryGradient,
+            ))
+        .toList();
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -702,8 +995,9 @@ class _SuperStaffScreenState extends State<SuperStaffScreen> {
           ),
           const SizedBox(height: 14),
           if (bars.isNotEmpty) ...[
-            const SectionHeader(title: 'Staff by Role', subtitle: 'Distribution'),
-            PremiumCard(
+            const SectionHeader(
+                title: 'Staff by Role', subtitle: 'Distribution'),
+            ConcordiaCard(
               padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
               child: MiniBarChart(bars: bars, height: 160),
             ),
@@ -713,10 +1007,17 @@ class _SuperStaffScreenState extends State<SuperStaffScreen> {
             ListRow(
               title: u.name,
               subtitle: u.email ?? '',
-              leading: AppAvatar(initials: u.name, color: AppColors.primary, size: 40, useGradient: true),
+              leading: AppAvatar(
+                  initials: u.name,
+                  color: AppColors.primary,
+                  size: 40,
+                  useGradient: true),
               icon: Icons.person_rounded,
               accentColor: AppColors.primary,
-              trailing: StatusChip(text: u.role, type: StatusType.info, compact: true),
+              trailing: StatusChip(
+                  text: u.role,
+                  type: StatusType.info,
+                  compact: true),
             ),
         ],
       ),
@@ -747,7 +1048,10 @@ class _SuperTeachersScreenState extends State<SuperTeachersScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _teachers = await _api.listUsers(role: 'teacher');
     } on ApiException catch (e) {
@@ -762,7 +1066,9 @@ class _SuperTeachersScreenState extends State<SuperTeachersScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_teachers == null || _teachers!.isEmpty) return const _EmptyView('No teachers found.');
+    if (_teachers == null || _teachers!.isEmpty) {
+      return const _EmptyView('No teachers found.');
+    }
     final activeCount = _teachers!.where((t) => t.blocked == 0).length;
     return RefreshIndicator(
       onRefresh: _load,
@@ -786,8 +1092,16 @@ class _SuperTeachersScreenState extends State<SuperTeachersScreen> {
             crossAxisSpacing: 10,
             childAspectRatio: 1.12,
             children: [
-              StatCard(label: 'Total', value: '${_teachers!.length}', icon: Icons.people_alt_rounded, gradient: AppColors.primaryGradient),
-              StatCard(label: 'Active', value: '$activeCount', icon: Icons.check_circle_rounded, gradient: AppColors.successGradient),
+              StatCard(
+                  label: 'Total',
+                  value: '${_teachers!.length}',
+                  icon: Icons.people_alt_rounded,
+                  gradient: AppColors.primaryGradient),
+              StatCard(
+                  label: 'Active',
+                  value: '$activeCount',
+                  icon: Icons.check_circle_rounded,
+                  gradient: AppColors.successGradient),
             ],
           ),
           const SizedBox(height: 14),
@@ -796,7 +1110,11 @@ class _SuperTeachersScreenState extends State<SuperTeachersScreen> {
             ListRow(
               title: t.name,
               subtitle: t.title ?? t.email ?? 'Teacher',
-              leading: AppAvatar(initials: t.name, color: AppColors.info, size: 40, useGradient: true),
+              leading: AppAvatar(
+                  initials: t.name,
+                  color: AppColors.info,
+                  size: 40,
+                  useGradient: true),
               icon: Icons.person_rounded,
               accentColor: AppColors.info,
             ),
@@ -829,7 +1147,10 @@ class _SuperStudentsScreenState extends State<SuperStudentsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _students = await _api.listUsers(role: 'student');
     } on ApiException catch (e) {
@@ -844,7 +1165,9 @@ class _SuperStudentsScreenState extends State<SuperStudentsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_students == null || _students!.isEmpty) return const _EmptyView('No students found.');
+    if (_students == null || _students!.isEmpty) {
+      return const _EmptyView('No students found.');
+    }
     final activeCount = _students!.where((s) => s.blocked == 0).length;
     // Build chart by class
     final classCount = <String, int>{};
@@ -852,13 +1175,13 @@ class _SuperStudentsScreenState extends State<SuperStudentsScreen> {
       final cls = s.className ?? 'Unknown';
       classCount[cls] = (classCount[cls] ?? 0) + 1;
     }
-    final bars = classCount.entries.toList()
+    final sorted = classCount.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final chartBars = bars.take(6).map((e) => BarData(
-      label: e.key.length > 6 ? e.key.substring(0, 6) : e.key,
-      value: e.value.toDouble(),
-      gradient: AppColors.primaryGradient,
-    )).toList();
+    final chartBars = sorted.take(6).map((e) => BarData(
+          label: e.key.length > 6 ? e.key.substring(0, 6) : e.key,
+          value: e.value.toDouble(),
+          gradient: AppColors.primaryGradient,
+        )).toList();
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -882,16 +1205,36 @@ class _SuperStudentsScreenState extends State<SuperStudentsScreen> {
             crossAxisSpacing: 10,
             childAspectRatio: 1.12,
             children: [
-              StatCard(label: 'Total', value: '${_students!.length}', icon: Icons.people_alt_rounded, gradient: AppColors.primaryGradient),
-              StatCard(label: 'Active', value: '$activeCount', icon: Icons.check_circle_rounded, gradient: AppColors.successGradient),
-              StatCard(label: 'Classes', value: '${classCount.length}', icon: Icons.class_rounded, color: AppColors.info),
-              StatCard(label: 'Avg/Class', value: classCount.isEmpty ? '0' : '${(_students!.length / classCount.length).round()}', icon: Icons.people_outline, gradient: AppColors.warningGradient),
+              StatCard(
+                  label: 'Total',
+                  value: '${_students!.length}',
+                  icon: Icons.people_alt_rounded,
+                  gradient: AppColors.primaryGradient),
+              StatCard(
+                  label: 'Active',
+                  value: '$activeCount',
+                  icon: Icons.check_circle_rounded,
+                  gradient: AppColors.successGradient),
+              StatCard(
+                  label: 'Classes',
+                  value: '${classCount.length}',
+                  icon: Icons.class_rounded,
+                  color: AppColors.info),
+              StatCard(
+                  label: 'Avg/Class',
+                  value: classCount.isEmpty
+                      ? '0'
+                      : '${(_students!.length / classCount.length).round()}',
+                  icon: Icons.people_outline,
+                  gradient: AppColors.warningGradient),
             ],
           ),
           const SizedBox(height: 14),
           if (chartBars.isNotEmpty) ...[
-            const SectionHeader(title: 'Students per Class', subtitle: 'Distribution'),
-            PremiumCard(
+            const SectionHeader(
+                title: 'Students per Class',
+                subtitle: 'Distribution'),
+            ConcordiaCard(
               padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
               child: MiniBarChart(bars: chartBars, height: 180),
             ),
@@ -900,8 +1243,13 @@ class _SuperStudentsScreenState extends State<SuperStudentsScreen> {
           for (final s in _students!.take(100))
             ListRow(
               title: s.name,
-              subtitle: '${s.className ?? ''} ${s.section ?? ''} • ${s.rollNo ?? ''}',
-              leading: AppAvatar(initials: s.name, color: AppColors.primary, size: 40, useGradient: true),
+              subtitle:
+                  '${s.className ?? ''} ${s.section ?? ''} · ${s.rollNo ?? ''}',
+              leading: AppAvatar(
+                  initials: s.name,
+                  color: AppColors.primary,
+                  size: 40,
+                  useGradient: true),
               icon: Icons.school_rounded,
               accentColor: AppColors.primary,
             ),
@@ -935,7 +1283,10 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _finance = await _api.platformFinance();
       _invoices = await _api.listFeeInvoices(all: true);
@@ -951,12 +1302,20 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    final collected = double.tryParse('${_finance?['totalCollected'] ?? 0}') ?? 0;
-    final pending = double.tryParse('${_finance?['totalPending'] ?? 0}') ?? 0;
-    final invoiceCount = int.tryParse('${_finance?['invoiceCount'] ?? 0}') ?? 0;
-    final collectedPct = (collected + pending) > 0 ? (collected / (collected + pending)).clamp(0.0, 1.0) : 0.0;
-    final paidCount = _invoices?.where((i) => i.isPaid).length ?? 0;
-    final unpaidCount = _invoices?.where((i) => !i.isPaid).length ?? 0;
+    final collected = double.tryParse(
+            '${_finance?['totalCollected'] ?? 0}') ??
+        0;
+    final pending =
+        double.tryParse('${_finance?['totalPending'] ?? 0}') ?? 0;
+    final invoiceCount =
+        int.tryParse('${_finance?['invoiceCount'] ?? 0}') ?? 0;
+    final collectedPct = (collected + pending) > 0
+        ? (collected / (collected + pending)).clamp(0.0, 1.0)
+        : 0.0;
+    final paidCount =
+        _invoices?.where((i) => i.isPaid).length ?? 0;
+    final unpaidCount =
+        _invoices?.where((i) => !i.isPaid).length ?? 0;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -980,10 +1339,26 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
             crossAxisSpacing: 10,
             childAspectRatio: 1.12,
             children: [
-              StatCard(label: 'Collected', value: formatMoney(collected), icon: Icons.savings_outlined, gradient: AppColors.successGradient),
-              StatCard(label: 'Pending', value: formatMoney(pending), icon: Icons.pending_actions, gradient: AppColors.warningGradient),
-              StatCard(label: 'Invoices', value: '$invoiceCount', icon: Icons.receipt_long_rounded, color: AppColors.info),
-              StatCard(label: 'Paid', value: '$paidCount', icon: Icons.check_circle_rounded, gradient: AppColors.primaryGradient),
+              StatCard(
+                  label: 'Collected',
+                  value: formatMoney(collected),
+                  icon: Icons.savings_outlined,
+                  gradient: AppColors.successGradient),
+              StatCard(
+                  label: 'Pending',
+                  value: formatMoney(pending),
+                  icon: Icons.pending_actions,
+                  gradient: AppColors.warningGradient),
+              StatCard(
+                  label: 'Invoices',
+                  value: '$invoiceCount',
+                  icon: Icons.receipt_long_rounded,
+                  color: AppColors.info),
+              StatCard(
+                  label: 'Paid',
+                  value: '$paidCount',
+                  icon: Icons.check_circle_rounded,
+                  gradient: AppColors.primaryGradient),
             ],
           ),
           const SizedBox(height: 14),
@@ -996,13 +1371,14 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
           ),
           // Donut chart for collection rate
           const SectionHeader(title: 'Collection Rate'),
-          PremiumCard(
+          ConcordiaCard(
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
                 DonutChart(
                   percent: collectedPct,
-                  centerLabel: '${(collectedPct * 100).toStringAsFixed(0)}%',
+                  centerLabel:
+                      '${(collectedPct * 100).toStringAsFixed(0)}%',
                   centerSub: 'Collected',
                   gradient: AppColors.successGradient,
                   size: 100,
@@ -1012,9 +1388,15 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _MiniStatRow(color: AppColors.success, label: 'Paid', value: '$paidCount'),
+                      _MiniStatRow(
+                          color: AppColors.success,
+                          label: 'Paid',
+                          value: '$paidCount'),
                       const SizedBox(height: 8),
-                      _MiniStatRow(color: AppColors.warning, label: 'Unpaid', value: '$unpaidCount'),
+                      _MiniStatRow(
+                          color: AppColors.warning,
+                          label: 'Unpaid',
+                          value: '$unpaidCount'),
                     ],
                   ),
                 ),
@@ -1026,9 +1408,13 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
             for (final inv in _invoices!.take(20))
               ListRow(
                 title: inv.studentName,
-                subtitle: 'Rs ${inv.amount} • ${inv.status}',
-                icon: inv.status == 'paid' ? Icons.check_circle : Icons.pending,
-                accentColor: inv.status == 'paid' ? AppColors.success : AppColors.warning,
+                subtitle: 'Rs ${inv.amount} · ${inv.status}',
+                icon: inv.status == 'Paid'
+                    ? Icons.check_circle
+                    : Icons.pending,
+                accentColor: inv.status == 'Paid'
+                    ? AppColors.success
+                    : AppColors.warning,
               ),
         ],
       ),
@@ -1043,7 +1429,8 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
 class SuperAttendanceScreen extends StatefulWidget {
   const SuperAttendanceScreen({super.key});
   @override
-  State<SuperAttendanceScreen> createState() => _SuperAttendanceScreenState();
+  State<SuperAttendanceScreen> createState() =>
+      _SuperAttendanceScreenState();
 }
 
 class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
@@ -1059,7 +1446,10 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _records = await _api.listAttendance();
     } on ApiException catch (e) {
@@ -1074,7 +1464,9 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_records == null || _records!.isEmpty) return const _EmptyView('No attendance records.');
+    if (_records == null || _records!.isEmpty) {
+      return const _EmptyView('No attendance records.');
+    }
     int totalEntries = 0;
     int presentEntries = 0;
     for (final r in _records!) {
@@ -1083,8 +1475,12 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
         if (status == 'present') presentEntries++;
       }
     }
-    final rate = totalEntries > 0 ? (presentEntries * 100 / totalEntries).round() : 0;
-    final ratePct = totalEntries > 0 ? (presentEntries / totalEntries).clamp(0.0, 1.0) : 0.0;
+    final rate = totalEntries > 0
+        ? (presentEntries * 100 / totalEntries).round()
+        : 0;
+    final ratePct = totalEntries > 0
+        ? (presentEntries / totalEntries).clamp(0.0, 1.0)
+        : 0.0;
     final absentEntries = totalEntries - presentEntries;
 
     return RefreshIndicator(
@@ -1109,16 +1505,32 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
             crossAxisSpacing: 10,
             childAspectRatio: 1.12,
             children: [
-              StatCard(label: 'Sessions', value: '${_records!.length}', icon: Icons.calendar_today_rounded, gradient: AppColors.primaryGradient),
-              StatCard(label: 'Total Entries', value: '$totalEntries', icon: Icons.people_alt_rounded, color: AppColors.info),
-              StatCard(label: 'Present', value: '$presentEntries', icon: Icons.check_circle_rounded, gradient: AppColors.successGradient),
-              StatCard(label: 'Rate', value: '$rate%', icon: Icons.trending_up_rounded, gradient: AppColors.warningGradient),
+              StatCard(
+                  label: 'Sessions',
+                  value: '${_records!.length}',
+                  icon: Icons.calendar_today_rounded,
+                  gradient: AppColors.primaryGradient),
+              StatCard(
+                  label: 'Total Entries',
+                  value: '$totalEntries',
+                  icon: Icons.people_alt_rounded,
+                  color: AppColors.info),
+              StatCard(
+                  label: 'Present',
+                  value: '$presentEntries',
+                  icon: Icons.check_circle_rounded,
+                  gradient: AppColors.successGradient),
+              StatCard(
+                  label: 'Rate',
+                  value: '$rate%',
+                  icon: Icons.trending_up_rounded,
+                  gradient: AppColors.warningGradient),
             ],
           ),
           const SizedBox(height: 14),
           // Donut chart for attendance rate
           const SectionHeader(title: 'Attendance Rate'),
-          PremiumCard(
+          ConcordiaCard(
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
@@ -1134,9 +1546,15 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _MiniStatRow(color: AppColors.success, label: 'Present', value: '$presentEntries'),
+                      _MiniStatRow(
+                          color: AppColors.success,
+                          label: 'Present',
+                          value: '$presentEntries'),
                       const SizedBox(height: 8),
-                      _MiniStatRow(color: AppColors.danger, label: 'Absent', value: '$absentEntries'),
+                      _MiniStatRow(
+                          color: AppColors.danger,
+                          label: 'Absent',
+                          value: '$absentEntries'),
                     ],
                   ),
                 ),
@@ -1180,7 +1598,10 @@ class _SuperResultsScreenState extends State<SuperResultsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _results = await _api.listResults();
     } on ApiException catch (e) {
@@ -1195,11 +1616,14 @@ class _SuperResultsScreenState extends State<SuperResultsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_results == null || _results!.isEmpty) return const _EmptyView('No results found.');
+    if (_results == null || _results!.isEmpty) {
+      return const _EmptyView('No results found.');
+    }
     // Build chart bars for results
     final bars = _results!.take(6).map((r) {
       final avg = r.records.isNotEmpty
-          ? (r.records.values.reduce((a, b) => a + b) / r.records.length)
+          ? (r.records.values.reduce((a, b) => a + b) /
+              r.records.length)
           : 0.0;
       return BarData(
         label: r.exam.length > 6 ? r.exam.substring(0, 6) : r.exam,
@@ -1230,8 +1654,10 @@ class _SuperResultsScreenState extends State<SuperResultsScreen> {
           ),
           const SizedBox(height: 14),
           if (bars.isNotEmpty) ...[
-            const SectionHeader(title: 'Average Score by Exam', subtitle: 'Top exams'),
-            PremiumCard(
+            const SectionHeader(
+                title: 'Average Score by Exam',
+                subtitle: 'Top exams'),
+            ConcordiaCard(
               padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
               child: MiniBarChart(bars: bars, height: 180),
             ),
@@ -1240,14 +1666,20 @@ class _SuperResultsScreenState extends State<SuperResultsScreen> {
           for (final r in _results!.take(50))
             ListRow(
               title: r.exam,
-              subtitle: '${r.records.length} students • Max: ${r.totalMarks}',
+              subtitle:
+                  '${r.records.length} students · Max: ${r.totalMarks}',
               icon: Icons.assignment_rounded,
               accentColor: AppColors.primary,
               trailing: Text(
                 r.records.isNotEmpty
-                    ? (r.records.values.reduce((a, b) => a + b) / r.records.length).toStringAsFixed(1)
+                    ? (r.records.values.reduce((a, b) => a + b) /
+                            r.records.length)
+                        .toStringAsFixed(1)
                     : '0',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary),
               ),
             ),
         ],
@@ -1263,10 +1695,12 @@ class _SuperResultsScreenState extends State<SuperResultsScreen> {
 class SuperAnnouncementsScreen extends StatefulWidget {
   const SuperAnnouncementsScreen({super.key});
   @override
-  State<SuperAnnouncementsScreen> createState() => _SuperAnnouncementsScreenState();
+  State<SuperAnnouncementsScreen> createState() =>
+      _SuperAnnouncementsScreenState();
 }
 
-class _SuperAnnouncementsScreenState extends State<SuperAnnouncementsScreen> {
+class _SuperAnnouncementsScreenState
+    extends State<SuperAnnouncementsScreen> {
   final _api = ApiClient();
   List<Announcement>? _items;
   bool _loading = true;
@@ -1279,7 +1713,10 @@ class _SuperAnnouncementsScreenState extends State<SuperAnnouncementsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       _items = await _api.listAnnouncements();
     } on ApiException catch (e) {
@@ -1294,7 +1731,9 @@ class _SuperAnnouncementsScreenState extends State<SuperAnnouncementsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
-    if (_items == null || _items!.isEmpty) return const _EmptyView('No announcements yet.');
+    if (_items == null || _items!.isEmpty) {
+      return const _EmptyView('No announcements yet.');
+    }
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
@@ -1318,11 +1757,44 @@ class _SuperAnnouncementsScreenState extends State<SuperAnnouncementsScreen> {
           const SizedBox(height: 14),
           const SectionHeader(title: 'All Announcements'),
           for (final a in _items!)
-            ListRow(
-              title: a.title,
-              subtitle: a.message,
-              icon: Icons.campaign_rounded,
-              accentColor: AppColors.primary,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: ConcordiaCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.campaign,
+                            size: 18, color: AppColors.primary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(a.title,
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(a.message,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary)),
+                    if (a.targetRole.isNotEmpty ||
+                        a.targetScope.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      ConcordiaBadge(
+                        label: a.targetScope.isNotEmpty
+                            ? a.targetScope
+                            : a.targetRole,
+                        variant: ConcordiaBadgeVariant.secondary,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
         ],
       ),
@@ -1335,21 +1807,33 @@ class _MiniStatRow extends StatelessWidget {
   final Color color;
   final String label;
   final String value;
-  const _MiniStatRow({required this.color, required this.label, required this.value});
+  const _MiniStatRow({
+    required this.color,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Container(
-          width: 10, height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          width: 10,
+          height: 10,
+          decoration:
+              BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary)),
         ),
-        Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        Text(value,
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary)),
       ],
     );
   }
