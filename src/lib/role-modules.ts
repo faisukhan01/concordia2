@@ -113,10 +113,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'admissions:admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
     ]},
     { group: 'Accountant', items: [
-      { id: 'accountant:accountant-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant:accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
       { id: 'accountant:accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
-      { id: 'accountant:accountant-logins', name: 'Create Logins', icon: KeyRound, color: PRIMARY },
+      { id: 'accountant:accountant-logins', name: 'Create Student Logins', icon: KeyRound, color: PRIMARY },
     ]},
     { group: 'Academic Office', items: [
       { id: 'academic:academic-announcements', name: 'Announcements', icon: Megaphone, color: PRIMARY },
@@ -152,10 +151,9 @@ export const ROLE_MODULES: RoleModules = {
   'accountant': [
     { group: 'Finance', items: [
       { id: 'accountant-overview', name: 'Dashboard', icon: LayoutDashboard, color: PRIMARY },
-      { id: 'accountant-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
       { id: 'accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
-      { id: 'accountant-logins', name: 'Create Logins', icon: KeyRound, color: PRIMARY },
+      { id: 'accountant-logins', name: 'Create Student Logins', icon: KeyRound, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
