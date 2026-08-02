@@ -42,40 +42,40 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v2.0.0';
+const APK_VERSION = 'v3.0.0';
 const APK_UPDATED = 'August 3, 2025';
-const APK_SIZE = '~26 MB';
+const APK_SIZE = '~22 MB';
 
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'v2.0.0 — Login Fixed & UI Refined',
-    desc: 'Critical login bug fixed! No more raw technical errors. User-friendly error messages now match the web portal. Sign in works perfectly.',
+    title: 'v3.0.0 — 100% Web App Match',
+    desc: 'The app now wraps the web app in a native shell. Every screen, every feature, every color is 100% identical to the web app\'s mobile preview — because it IS the web app.',
   },
   {
     icon: Palette,
-    title: 'Frosted Glass Sign-in',
-    desc: 'The sign-in page features a stunning campus photo background with frosted glass card — exactly like the web portal. Premium feel from the first tap.',
+    title: 'Perfect Sign-in Page',
+    desc: 'The sign-in page is now EXACTLY the web app\'s frosted glass sign-in — campus photo background, frosted card, Concordia logo, everything.',
   },
   {
     icon: ShieldCheck,
-    title: 'Proper App Icon',
-    desc: 'The Concordia C4 monogram icon now displays correctly on all Android devices with adaptive icon support for modern launchers.',
+    title: 'All Features Work',
+    desc: 'Admin, Admissions, Accountant, Academic, Teacher, Student — every portal works exactly as on the web. Login with admin@concordia.edu.pk / concordia123.',
   },
   {
     icon: Layers,
-    title: 'Sidebar Navigation',
-    desc: 'Slide-in sidebar with brand header, grouped navigation, and smooth animations — matching the web portal\'s sidebar pattern exactly.',
+    title: 'Native App Shell',
+    desc: 'Native splash screen with Concordia branding, back button navigation, external links in browser, offline detection with retry.',
   },
   {
     icon: BarChart3,
-    title: 'Dashboard Analytics',
-    desc: 'Every portal has a dashboard with KPI stat cards, gradient heroes, bar charts, donut charts, and quick actions — all matching the web.',
+    title: 'Proper App Icon',
+    desc: 'Concordia C4 monogram icon with adaptive icon support for all Android devices and launchers.',
   },
   {
     icon: Zap,
-    title: 'Bottom Nav with Labels',
-    desc: 'Quick access bottom navigation with page names. Active state uses Concordia orange with dot indicator. Sidebar for full navigation.',
+    title: 'Lightweight & Fast',
+    desc: 'Only 22 MB — smaller than before. Loads the web app instantly with full JavaScript support.',
   },
 ];
 
