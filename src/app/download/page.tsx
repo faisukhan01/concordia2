@@ -42,8 +42,8 @@ const APK_SIZE = '~26 MB';
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'Brand-new app icon',
-    desc: 'A bold orange squircle with a white Concordia logomark — clean, modern, and instantly recognizable on any home screen.',
+    title: 'v1.4.0 — Teacher Management',
+    desc: 'Academic Office can now add teachers directly from the mobile app. Create teacher accounts, assign subjects, and manage faculty — all from your phone.',
   },
   {
     icon: Layers,
@@ -59,11 +59,6 @@ const whatsNew = [
     icon: Zap,
     title: 'Bulk Misc Charges',
     desc: 'Apply a charge to every student in a Part — or a single department — in one tap. What used to take an hour now takes five seconds.',
-  },
-  {
-    icon: Users,
-    title: 'Student Records in Accountant',
-    desc: 'The Accountant portal now has the same hierarchy Student Records page as Admissions: Department → Part → Class → Section → Student.',
   },
   {
     icon: ShieldCheck,
