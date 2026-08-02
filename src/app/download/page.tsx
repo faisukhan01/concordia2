@@ -42,40 +42,40 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v1.4.0';
-const APK_UPDATED = 'August 2, 2025';
-const APK_SIZE = '~26 MB';
+const APK_VERSION = 'v1.5.0';
+const APK_UPDATED = 'August 3, 2025';
+const APK_SIZE = '~25 MB';
 
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'Teacher Management',
-    desc: 'Academic Office can now add teachers directly from the mobile app. Create teacher accounts, assign subjects, and manage faculty — all from your phone.',
-  },
-  {
-    icon: Layers,
-    title: 'Every web feature, now mobile',
-    desc: 'Admissions, Accountant, Academic, Teacher, Student, Parent — every module from the web portal is now in the Android app. Nothing left behind.',
-  },
-  {
-    icon: FileText,
-    title: 'Documents on the go',
-    desc: 'Upload, list, download, and delete student documents right from Admissions or Accountant. No more running back to a desktop.',
-  },
-  {
-    icon: Zap,
-    title: 'Bulk Misc Charges',
-    desc: 'Apply a charge to every student in a Part — or a single department — in one tap. What used to take an hour now takes five seconds.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Cleaner sign-in',
-    desc: 'The sign-in screen was rebuilt from scratch — less clutter, more focus, same premium feel. Your login is preserved on update.',
+    title: 'Complete UI Overhaul',
+    desc: 'The entire app has been redesigned from scratch to match the web portal\'s mobile preview pixel-perfectly. Every screen, every color, every detail.',
   },
   {
     icon: Palette,
-    title: 'Single-color theme',
-    desc: 'The whole app is now strictly Concordia orange. No more multi-color cards — one premium brand, end to end.',
+    title: 'Frosted Glass Sign-in',
+    desc: 'The sign-in page now features a stunning campus photo background with frosted glass card — exactly like the web portal. Premium feel from the first tap.',
+  },
+  {
+    icon: Layers,
+    title: 'Sidebar Navigation',
+    desc: 'New slide-in sidebar with brand header, grouped navigation, and smooth animations — matching the web portal\'s sidebar pattern exactly.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Dashboard Analytics',
+    desc: 'Every portal now has a dashboard with KPI stat cards, gradient heroes, bar charts, donut charts, and quick actions — all matching the web.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Web-Matched Design System',
+    desc: 'Colors, radii, shadows, typography — every design token has been calibrated to match the web portal\'s mobile preview 99.99%.',
+  },
+  {
+    icon: Zap,
+    title: 'Bottom Nav with Labels',
+    desc: 'Quick access bottom navigation with page names. Active state uses Concordia orange with dot indicator. Sidebar for full navigation.',
   },
 ];
 
