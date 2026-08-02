@@ -1,7 +1,7 @@
 name: concordia_college
-description: Concordia College — Management Portal mobile app. Admin, accountant, admissions, academic, teacher, student & parent portals in one app.
+description: Concordia College — Management Portal mobile app. 100% identical to the web app's mobile preview.
 publish_to: 'none'
-version: 2.0.0+7
+version: 3.0.0+8
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -10,31 +10,16 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # ── HTTP & networking ──
-  dio: ^5.4.0
-  connectivity_plus: ^5.0.2
+  # ── WebView (core — wraps the web app for pixel-perfect match) ──
+  webview_flutter: ^4.9.0
+  webview_flutter_android: ^3.16.0
+  webview_flutter_wkwebview: ^3.13.0
 
-  # ── State management ──
-  provider: ^6.1.1
-
-  # ── Storage ──
-  shared_preferences: ^2.2.2
-
-  # ── Routing ──
-  go_router: ^13.0.0
-
-  # ── UI helpers ──
-  cupertino_icons: ^1.0.6
-  google_fonts: ^6.2.1
-  flutter_svg: ^2.0.9
-  cached_network_image: ^3.3.0
-  shimmer: ^3.0.0
-  fl_chart: ^0.66.0
-  intl: ^0.19.0
-
-  # ── Utilities ──
+  # ── URL launcher ──
   url_launcher: ^6.2.2
-  file_picker: ^8.0.0
+
+  # ── Icons ──
+  cupertino_icons: ^1.0.6
 
 dev_dependencies:
   flutter_test:
@@ -46,5 +31,3 @@ flutter:
 
   assets:
     - assets/images/
-    - assets/icons/
-
