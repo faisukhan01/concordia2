@@ -43,9 +43,6 @@ import {
   SimplePieChart,
   ChartCard,
 } from '@/components/portal/shared/concordia-charts';
-// Reuse the EXACT same Student Records page (hierarchy + search + document
-// manager + edit sheet) as the Admission Office — single source of truth.
-import { StudentRecordsView } from './admissions-portal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -522,19 +519,7 @@ export function AccountantPortal({ activeModule, user }: Props) {
     });
 
   let content: React.ReactNode;
-  if (activeModule === 'accountant-students')
-    content = (
-      <StudentRecordsView
-        user={user}
-        students={students}
-        classes={classes}
-        loading={loading}
-        error={error}
-        onRefresh={refresh}
-        onLocalUpsert={upsertStudent}
-      />
-    );
-  else if (
+  if (
     activeModule === 'accountant-challans' ||
     activeModule === 'accountant-collect' ||
     activeModule === 'accountant-installments'

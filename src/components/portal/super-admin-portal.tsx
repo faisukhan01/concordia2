@@ -70,6 +70,8 @@ import {
   Loader2, Lock, Unlock, Edit, KeyRound, Trash2, ChevronRight, AlertCircle,
   Inbox, BookOpen, Send, TrendingUp, Crown,
 } from 'lucide-react';
+import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
+import { DEPARTMENTS } from './shared/concordia-hierarchy';
 
 type Props = { activeModule: string; user: any };
 
@@ -385,6 +387,26 @@ function SuperAdminDashboard({
     [users],
   );
 
+  // ── Chart data ──
+  const studentsByProgram = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of DEPARTMENTS) map[d] = 0;
+    for (const s of students) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+  }, [students]);
+
+  const usersByRole = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const u of users) {
+      const r = u.role || 'unknown';
+      map[r] = (map[r] || 0) + 1;
+    }
+    return Object.entries(map).map(([label, value]) => ({ label, value }));
+  }, [users]);
+
   const quickActions = [
     {
       icon: UserCog,
@@ -490,6 +512,48 @@ function SuperAdminDashboard({
           />
         </div>
       )}
+
+      {/* ── Analytics charts ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <ChartCard
+          title="Students per Program"
+          subtitle="Enrollment across the 6 Concordia departments"
+          className="lg:col-span-2"
+        >
+          {loading ? (
+            <div className="h-[260px] w-full rounded-lg bg-gray-100 animate-pulse" />
+          ) : students.length === 0 ? (
+            <EmptyState
+              icon={TrendingUp}
+              title="No enrollment data yet"
+              desc="Students will appear here once the Admissions Office enrolls them."
+            />
+          ) : (
+            <SimpleBarChart
+              data={studentsByProgram}
+              height={260}
+              yLabel="Students"
+              formatValue={(v) => `${v} student${v === 1 ? '' : 's'}`}
+            />
+          )}
+        </ChartCard>
+        <ChartCard
+          title="Users by Role"
+          subtitle="Distribution across all accounts"
+        >
+          {loading ? (
+            <div className="h-[260px] w-full rounded-lg bg-gray-100 animate-pulse" />
+          ) : users.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No user data yet"
+              desc="Users will appear here once accounts are created."
+            />
+          ) : (
+            <SimplePieChart data={usersByRole} height={260} donut />
+          )}
+        </ChartCard>
+      </div>
 
       {/* ── Two-column: recent announcements + recent users ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

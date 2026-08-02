@@ -228,8 +228,6 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
         onLocalUpsert={upsertLocal}
       />
     );
-  else if (activeModule === 'admissions-base-fee')
-    content = <ComingSoon title="Fee Records" />;
   else
     content = (
       <OverviewView
