@@ -18,6 +18,7 @@ import '../../core/theme/app_theme.dart';
 import '../../widgets/shared_widgets.dart';
 import '../auth/auth_provider.dart';
 import '../shared/nav_items.dart';
+import '../shared/student_records_list.dart';
 
 class AccountantPortal extends StatefulWidget {
   final AccountantTab initialTab;
@@ -96,7 +97,7 @@ class _AccountantPortalState extends State<AccountantPortal> {
       case AccountantTab.dashboard:
         return _Dashboard(onNavigate: _switchTo);
       case AccountantTab.students:
-        return _StudentsView();
+        return const _StudentRecordsView();
       case AccountantTab.fees:
         return _FeeInstallmentsView();
       case AccountantTab.misc:
@@ -542,275 +543,13 @@ class _QuickAction extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// STUDENTS (class-wise)
+// STUDENT RECORDS — shared StudentRecordsList (mirrors Admissions)
 // ════════════════════════════════════════════════════════════════
-class _StudentsView extends StatefulWidget {
-  @override
-  State<_StudentsView> createState() => _StudentsViewState();
-}
-
-class _StudentsViewState extends State<_StudentsView> {
-  List<User> _students = [];
-  bool _loading = true;
-  String? _error;
-  String _query = '';
-  String _classFilter = 'All';
+class _StudentRecordsView extends StatelessWidget {
+  const _StudentRecordsView();
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
-    try {
-      final auth = context.read<AuthProvider>();
-      _students = await ApiClient().listUsers(role: 'student', branchId: auth.user!.branchId);
-    } on ApiException catch (e) {
-      _error = e.message;
-    } catch (_) {
-      _error = 'Failed to load students';
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  List<String> get _classes {
-    final set = <String>{};
-    for (final s in _students) {
-      final c = (s.className ?? '').trim();
-      if (c.isNotEmpty) set.add(c);
-    }
-    final list = set.toList()..sort();
-    return ['All', ...list];
-  }
-
-  List<User> get _filtered {
-    return _students.where((s) {
-      if (_classFilter != 'All') {
-        if ((s.className ?? '').trim() != _classFilter) return false;
-      }
-      if (_query.isEmpty) return true;
-      final q = _query.toLowerCase();
-      return s.name.toLowerCase().contains(q) ||
-          (s.rollNo ?? '').toLowerCase().contains(q) ||
-          (s.className ?? '').toLowerCase().contains(q);
-    }).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const LoadingList(count: 7);
-    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
-
-    final filtered = _filtered;
-
-    return Column(
-      children: [
-        // Search field
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-          child: TextField(
-            onChanged: (v) => setState(() => _query = v),
-            decoration: const InputDecoration(
-              hintText: 'Search by name, roll #, class…',
-              prefixIcon: Icon(Icons.search, size: 20),
-              isDense: true,
-            ),
-          ),
-        ),
-        // Class filter chips (horizontal scroll)
-        SizedBox(
-          height: 38,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _classes.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (_, i) {
-              final c = _classes[i];
-              final active = c == _classFilter;
-              return GestureDetector(
-                onTap: () => setState(() => _classFilter = c),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: active ? AppColors.primary : AppColors.card,
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                    border: Border.all(
-                      color: active ? AppColors.primary : AppColors.border,
-                    ),
-                    boxShadow: active ? AppShadows.button : null,
-                  ),
-                  child: Text(
-                    c,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: active ? Colors.white : AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 6),
-        // Summary line
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Text(
-                '${filtered.length} student${filtered.length == 1 ? '' : 's'}',
-                style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, fontWeight: FontWeight.w600),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: _load,
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.refresh, size: 14, color: AppColors.primary),
-                    SizedBox(width: 4),
-                    Text('Refresh', style: TextStyle(fontSize: 12.5, color: AppColors.primary, fontWeight: FontWeight.w700)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: filtered.isEmpty
-              ? const EmptyState(
-                  icon: Icons.people_outline,
-                  title: 'No students found',
-                  subtitle: 'Try a different search or class filter',
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  itemCount: filtered.length,
-                  itemBuilder: (_, i) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: ListRow(
-                      title: filtered[i].name,
-                      subtitle:
-                          '${filtered[i].rollNo ?? '—'}  •  ${filtered[i].className ?? 'No class'} ${filtered[i].section ?? ''}',
-                      initials: filtered[i].name,
-                      accentColor: AppColors.primary,
-                      trailing: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (filtered[i].baseFee != null)
-                            Text(
-                              formatMoney(filtered[i].baseFee!),
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          const SizedBox(height: 4),
-                          StatusChip(
-                            text: filtered[i].isActive ? 'Active' : 'Blocked',
-                            type: filtered[i].isActive ? StatusType.success : StatusType.danger,
-                            compact: true,
-                          ),
-                        ],
-                      ),
-                      onTap: () => _showDetail(context, filtered[i]),
-                    ),
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-
-  void _showDetail(BuildContext context, User s) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: AppColors.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header row with avatar
-              Row(
-                children: [
-                  AppAvatar(
-                    initials: s.name,
-                    color: AppColors.primary,
-                    size: 56,
-                    useGradient: true,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          s.name,
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          s.roleLabel,
-                          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  StatusChip(
-                    text: s.isActive ? 'Active' : 'Blocked',
-                    type: s.isActive ? StatusType.success : StatusType.danger,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              PremiumCard(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  children: [
-                    _DetailRow('Roll No', s.rollNo ?? '—'),
-                    _DetailRow('Class', '${s.className ?? '—'} ${s.section ?? ''}'),
-                    _DetailRow('Email', s.email ?? '—'),
-                    _DetailRow('Father', s.fatherName ?? '—'),
-                    _DetailRow('Guardian Phone', s.guardianPhone ?? '—'),
-                    _DetailRow('Base Fee', s.baseFee != null ? formatMoneyFull(s.baseFee!) : '—'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(ctx),
-                  icon: const Icon(Icons.check),
-                  label: const Text('Done'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const StudentRecordsList();
 }
 
 class _DetailRow extends StatelessWidget {
@@ -1442,85 +1181,80 @@ class _MiscChargesViewState extends State<_MiscChargesView> {
 
     final total = _charges.fold(0.0, (a, c) => a + c.amount);
 
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-          child: GradientSummary.pair(
-            label1: 'Total Charges',
-            value1: formatMoney(total),
-            label2: 'Count',
-            value2: '${_charges.length}',
-            gradient: AppColors.infoGradient,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _GradientButton(
-            label: 'Add New Charge',
-            icon: Icons.add,
-            gradient: AppColors.infoGradient,
-            onPressed: () => _showAdd(context),
-          ),
+        // ── Bulk-charge card (always visible at the top) ──
+        _BulkChargeCard(onApplied: _load),
+        const SizedBox(height: 18),
+        GradientSummary.pair(
+          label1: 'Total Charges',
+          value1: formatMoney(total),
+          label2: 'Count',
+          value2: '${_charges.length}',
+          gradient: AppColors.primaryGradient,
         ),
         const SizedBox(height: 12),
-        Expanded(
-          child: _charges.isEmpty
-              ? const EmptyState(
-                  icon: Icons.add_circle_outline,
-                  title: 'No charges yet',
-                  subtitle: 'Add exam, trip, or custom charges',
-                  actionLabel: 'Add Charge',
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  itemCount: _charges.length,
-                  itemBuilder: (_, i) {
-                    final c = _charges[i];
-                    final accent = switch (c.type) {
-                      'admission' => AppColors.purple,
-                      'exam' => AppColors.warning,
-                      'trip' => AppColors.info,
-                      _ => AppColors.primary,
-                    };
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: ListRow(
-                        title: c.studentName,
-                        subtitle: '${c.type[0].toUpperCase()}${c.type.substring(1)}  •  ${c.description ?? '—'}',
-                        eyebrow: formatDate(c.createdAt),
-                        leading: AppAvatar(initials: c.studentName, color: accent, size: 40),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              formatMoneyFull(c.amount),
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.textPrimary,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            GestureDetector(
-                              onTap: () => _deleteCharge(c),
-                              child: Container(
-                                width: 32, height: 32,
-                                decoration: BoxDecoration(
-                                  color: AppColors.dangerSoft,
-                                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                                ),
-                                child: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+        _GradientButton(
+          label: 'Add Per-Student Charge',
+          icon: Icons.add,
+          gradient: AppColors.primaryGradient,
+          onPressed: () => _showAdd(context),
         ),
+        const SizedBox(height: 18),
+        if (_charges.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 24),
+            child: EmptyState(
+              icon: Icons.add_circle_outline,
+              title: 'No charges yet',
+              subtitle: 'Use the bulk card above or add a per-student charge',
+            ),
+          )
+        else
+          ..._charges.map((c) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _buildChargeRow(c),
+              )),
       ],
+    );
+  }
+
+  Widget _buildChargeRow(MiscCharge c) {
+    return ListRow(
+      title: c.studentName,
+      subtitle:
+          '${c.type[0].toUpperCase()}${c.type.substring(1)}  •  ${c.description ?? '—'}',
+      eyebrow: formatDate(c.createdAt),
+      leading: AppAvatar(
+          initials: c.studentName, color: AppColors.primary, size: 40),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            formatMoneyFull(c.amount),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _deleteCharge(c),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: AppColors.dangerSoft,
+                borderRadius: BorderRadius.circular(AppRadii.sm),
+              ),
+              child: const Icon(Icons.delete_outline,
+                  size: 18, color: AppColors.danger),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1534,6 +1268,320 @@ class _MiscChargesViewState extends State<_MiscChargesView> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
       ),
       builder: (_) => _AddChargeSheet(onSaved: _load),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// BULK CHARGE CARD — apply a misc charge to every student in a Part
+// (optionally filtered by department). Mirrors web "Add Bulk Charge".
+// ════════════════════════════════════════════════════════════════
+class _BulkChargeCard extends StatefulWidget {
+  final VoidCallback onApplied;
+  const _BulkChargeCard({required this.onApplied});
+
+  @override
+  State<_BulkChargeCard> createState() => _BulkChargeCardState();
+}
+
+class _BulkChargeCardState extends State<_BulkChargeCard> {
+  String _part = '1'; // '1' or '2'
+  String _dept = 'All'; // 'All' or one of the 6 departments
+  final _type = TextEditingController();
+  final _amount = TextEditingController();
+  final _desc = TextEditingController();
+  bool _busy = false;
+
+  static const List<String> _departments = [
+    'FSC Pre Med',
+    'FSC Pre Eng',
+    'ICS Phy',
+    'ICS Stats',
+    'FA',
+    'FA IT',
+  ];
+
+  @override
+  void dispose() {
+    _type.dispose();
+    _amount.dispose();
+    _desc.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply() async {
+    final t = _type.text.trim();
+    if (t.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a charge type'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
+    final v = double.tryParse(_amount.text.trim());
+    if (v == null || v <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a valid amount'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final auth = context.read<AuthProvider>();
+      final res = await ApiClient().bulkAddMiscCharges({
+        'part': _part,
+        'program': _dept == 'All' ? null : _dept,
+        'branchId': auth.user!.branchId,
+        'type': t,
+        'amount': v,
+        'description': _desc.text.trim(),
+      });
+      ApiClient().invalidate('misc-charges');
+      final createdNum = res['created'];
+      final created = (createdNum is num)
+          ? createdNum.toInt()
+          : int.tryParse('${createdNum ?? 0}') ?? 0;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Applied "$t" of Rs ${v.toStringAsFixed(0)} to $created students (Part ${_part}).',
+            ),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+      _type.clear();
+      _amount.clear();
+      _desc.clear();
+      widget.onApplied();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(e.message), backgroundColor: AppColors.danger),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not apply: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primarySoft.withValues(alpha: 0.40),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.30)),
+        boxShadow: AppShadows.floating,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  gradient: appGradient(AppColors.primaryGradient),
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                ),
+                child: const Icon(Icons.bolt_rounded,
+                    color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Add Bulk Charge',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Apply to every student in a Part, optionally by department.',
+                      style: TextStyle(
+                          fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Part toggle
+          Row(
+            children: [
+              const Text(
+                'Part  ',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              Expanded(
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: '1', label: Text('Part 1')),
+                    ButtonSegment(value: '2', label: Text('Part 2')),
+                  ],
+                  selected: {_part},
+                  onSelectionChanged: (s) => setState(() => _part = s.first),
+                  style: SegmentedButton.styleFrom(
+                    selectedBackgroundColor: AppColors.primary,
+                    selectedForegroundColor: Colors.white,
+                    backgroundColor: AppColors.surfaceAlt,
+                    foregroundColor: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Department dropdown
+          DropdownButtonFormField<String>(
+            value: _dept,
+            decoration: const InputDecoration(
+              labelText: 'Department (optional)',
+              prefixIcon: Icon(Icons.school_outlined, size: 20),
+            ),
+            items: [
+              const DropdownMenuItem(
+                  value: 'All', child: Text('All Departments')),
+              ..._departments
+                  .map((d) => DropdownMenuItem(value: d, child: Text(d))),
+            ],
+            onChanged: (v) => setState(() => _dept = v ?? 'All'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _type,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Charge Type *',
+              hintText: 'e.g. Exam Fee, Lab Fee, Fine',
+              prefixIcon: Icon(Icons.category_outlined, size: 20),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amount,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Amount (PKR) *',
+              prefixIcon: Icon(Icons.currency_rupee, size: 20),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _desc,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Description (optional)',
+              hintText: 'e.g. Annual board registration — March 2025',
+              prefixIcon: Icon(Icons.notes, size: 20),
+            ),
+          ),
+          const SizedBox(height: 14),
+          // Helper text
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline,
+                    size: 14, color: AppColors.primaryDark),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Applies to every student in Part $_part'
+                    '${_dept != 'All' ? ' · $_dept' : ''}.',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.primaryDark,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Apply button
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: appGradient(AppColors.primaryGradient),
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                boxShadow: AppShadows.button,
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  onTap: _busy ? null : _apply,
+                  child: Center(
+                    child: _busy
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2.5,
+                            ),
+                          )
+                        : const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.bolt_rounded,
+                                  color: Colors.white, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'Apply to All Students',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -436,6 +436,37 @@ class ApiClient {
     await _req('DELETE', 'misc-charges/$id');
   }
 
+  /// Bulk-add a misc charge to every student in a Part (optionally filtered
+  /// by program/department). Mirrors web `api.bulkAddMiscCharges`.
+  Future<Map<String, dynamic>> bulkAddMiscCharges(Map<String, dynamic> body) async {
+    return await _req('POST', 'misc-charges/bulk', body: body) as Map<String, dynamic>;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // STUDENT DOCUMENTS
+  // (Admissions → Student Records → View & Add Docs; also Accountant)
+  // ════════════════════════════════════════════════════════════════
+
+  Future<List<Map<String, dynamic>>> listStudentDocuments(String studentId) async {
+    final data = await _req('GET', 'student-documents', query: {
+      'studentId': studentId,
+    });
+    final list = (data as List? ?? []) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> uploadStudentDocument(Map<String, dynamic> body) async {
+    return await _req('POST', 'student-documents', body: body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> downloadStudentDocument(String id) async {
+    return await _req('GET', 'student-documents/$id/download') as Map<String, dynamic>;
+  }
+
+  Future<void> deleteStudentDocument(String id) async {
+    await _req('DELETE', 'student-documents/$id');
+  }
+
   // ════════════════════════════════════════════════════════════════
   // TIMETABLE
   // ════════════════════════════════════════════════════════════════

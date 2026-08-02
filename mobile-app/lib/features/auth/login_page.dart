@@ -1,13 +1,13 @@
 // Concordia College — Sign In
 //
-// Premium, branded sign-in experience:
-//   • Curved orange gradient hero with logo badge + welcome headline
-//   • White elevated form card overlapping the hero (layered depth)
+// Clean, focused, premium sign-in experience:
+//   • App icon (orange squircle) + app name + short subtitle
+//   • Single white elevated form card with comfortable padding
 //   • Focus-aware inputs with orange focus border + soft warm fill
 //   • Full-width Concordia orange gradient sign-in button with arrow + glow
 //   • Selector-based loading + error (no full-page rebuild → no refresh bug)
-//   • Elegant outlined demo-login pills
-//   • Subtle entrance animation (TweenAnimationBuilder) + AnimatedSwitcher
+//   • Subtle demo-login chip row (secondary, soft-orange pill chips)
+//   • Entrance animation (TweenAnimationBuilder) fade + slide up
 //
 // Auth is delegated to AuthProvider.login(). On success the go_router
 // redirect in app.dart moves the user into their role portal.
@@ -84,204 +84,84 @@ class _LoginPageState extends State<LoginPage> {
             },
             child: Form(
               key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── Hero header (curved orange gradient) ──
-                  const _HeroHeader(),
-                  // ── Form card (overlaps hero by 34px) ──
-                  // Transform.translate only affects painting, so the 34px
-                  // shift produces a natural breathing gap before the demo
-                  // section below — no manual spacer needed.
-                  Transform.translate(
-                    offset: const Offset(0, -34),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _FormCard(
-                        identifierController: _identifier,
-                        passwordController: _password,
-                        obscure: _obscure,
-                        onToggleObscure: () =>
-                            setState(() => _obscure = !_obscure),
-                        onSubmit: _submit,
-                      ),
-                    ),
-                  ),
-                  // ── Demo logins ──
-                  _DemoSection(onQuickFill: _quickFill),
-                  const SizedBox(height: 28),
-                  // ── Footer ──
-                  const Center(
-                    child: Text(
-                      '© 2025 Concordia College',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.textMuted,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Hero header ──────────────────────────────────────────────────
-class _HeroHeader extends StatelessWidget {
-  const _HeroHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 300,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        gradient: appGradient(
-          AppColors.primaryGradient,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(36),
-          bottomRight: Radius.circular(36),
-        ),
-      ),
-      child: Stack(
-        children: [
-          // Decorative translucent blobs for depth
-          Positioned(
-            right: -52,
-            top: -42,
-            child: Container(
-              width: 176,
-              height: 176,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.10),
-              ),
-            ),
-          ),
-          Positioned(
-            left: -38,
-            bottom: 28,
-            child: Container(
-              width: 98,
-              height: 98,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.07),
-              ),
-            ),
-          ),
-          // Content
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 38, 24, 40),
-              child: Column(
-                children: [
-                  // Logo badge — white rounded card on the gradient
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 11),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(15),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.16),
-                          blurRadius: 22,
-                          offset: const Offset(0, 8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 60),
+                    // ── App icon (orange squircle with soft shadow) ──
+                    Center(
+                      child: Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: AppShadows.floating,
                         ),
-                      ],
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(24),
+                          child: Image.asset(
+                            'assets/images/app-icon.png',
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
                     ),
-                    child: Image.asset(
-                      'assets/images/concordia-logo.png',
-                      height: 40,
-                      fit: BoxFit.contain,
+                    const SizedBox(height: 20),
+                    // ── App name ──
+                    const Text(
+                      'Concordia College',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                        letterSpacing: -0.3,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  // Welcome headline
-                  const Text(
-                    'Welcome back',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: -0.5,
-                      height: 1.15,
+                    const SizedBox(height: 6),
+                    // ── Subtitle ──
+                    const Text(
+                      'Sign in to continue',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w400,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Your campus, one tap away.',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      color: Colors.white70,
-                      height: 1.4,
+                    const SizedBox(height: 36),
+                    // ── Form card ──
+                    _FormCard(
+                      identifierController: _identifier,
+                      passwordController: _password,
+                      obscure: _obscure,
+                      onToggleObscure: () =>
+                          setState(() => _obscure = !_obscure),
+                      onSubmit: _submit,
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  // Feature credibility row
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _FeaturePill(
-                          icon: Icons.check_circle_outline_rounded,
-                          label: 'Attendance'),
-                      SizedBox(width: 8),
-                      _FeaturePill(
-                          icon: Icons.account_balance_wallet_outlined,
-                          label: 'Fees'),
-                      SizedBox(width: 8),
-                      _FeaturePill(
-                          icon: Icons.insights_rounded, label: 'Results'),
-                    ],
-                  ),
-                ],
+                    const SizedBox(height: 24),
+                    // ── Demo logins (subtle) ──
+                    _DemoSection(onQuickFill: _quickFill),
+                    const SizedBox(height: 20),
+                    // ── Footer ──
+                    const Center(
+                      child: Text(
+                        '© 2025 Concordia College',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FeaturePill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _FeaturePill({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: Colors.white),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -306,7 +186,7 @@ class _FormCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(22, 26, 22, 24),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppRadii.xl),
@@ -573,6 +453,10 @@ class _TextField extends StatelessWidget {
 }
 
 // ── Demo logins section ──────────────────────────────────────────
+// Subtle: small muted label + a centered Wrap of compact soft-orange
+// pill chips. Wrap keeps the row on one line when it fits and wraps
+// cleanly on narrow screens (more robust than a horizontal scroll view
+// for 4 short labels).
 class _DemoSection extends StatelessWidget {
   final void Function(String id, String pw) onQuickFill;
   const _DemoSection({required this.onQuickFill});
@@ -585,43 +469,31 @@ class _DemoSection extends StatelessWidget {
       ('Teacher', Icons.school_outlined, 'teacher@concordia.edu.pk'),
       ('Student', Icons.person_outline, 'student@concordia.edu.pk'),
     ];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(width: 24, height: 1, color: AppColors.border),
-              const SizedBox(width: 10),
-              const Text(
-                'DEMO LOGINS',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: AppColors.textMuted,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(width: 24, height: 1, color: AppColors.border),
-            ],
+    return Column(
+      children: [
+        const Text(
+          'Demo logins',
+          style: TextStyle(
+            fontSize: 11,
+            color: AppColors.textMuted,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.4,
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: demos
-                .map((d) => _DemoChip(
-                      label: d.$1,
-                      icon: d.$2,
-                      onTap: () => onQuickFill(d.$3, 'concordia123'),
-                    ))
-                .toList(),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children: demos
+              .map((d) => _DemoChip(
+                    label: d.$1,
+                    icon: d.$2,
+                    onTap: () => onQuickFill(d.$3, 'concordia123'),
+                  ))
+              .toList(),
+        ),
+      ],
     );
   }
 }
@@ -636,28 +508,28 @@ class _DemoChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(AppRadii.pill),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.pill),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
+            color: AppColors.primarySoft,
             borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(color: AppColors.border),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: AppColors.primary),
-              const SizedBox(width: 6),
+              Icon(icon, size: 13, color: AppColors.primary),
+              const SizedBox(width: 5),
               Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+                  color: AppColors.primaryDark,
                 ),
               ),
             ],

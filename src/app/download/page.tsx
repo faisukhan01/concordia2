@@ -23,7 +23,10 @@ import {
   GraduationCap,
   HeartHandshake,
   Sparkles,
-  Check,
+  Smartphone,
+  Zap,
+  Layers,
+  Palette,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -32,34 +35,45 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v1.2.0';
+const APK_VERSION = 'v1.3.0';
 const APK_UPDATED = 'August 2, 2026';
 const APK_SIZE = '~26 MB';
 
 const whatsNew = [
   {
-    title: 'Admin portal: own dashboard only',
-    desc: 'Admin now keeps just his own Admin Dashboard — the Admissions / Accountant / Academic dashboards no longer appear inside the admin portal. Each sub-portal keeps its own dashboard for its own role.',
+    icon: Sparkles,
+    title: 'Brand-new app icon',
+    desc: 'A bold orange squircle with a white Concordia logomark — clean, modern, and instantly recognizable on any home screen.',
   },
   {
-    title: 'Sub-portal tab bar: no Dashboard pill',
-    desc: 'When an admin opens Admissions / Accountant / Academic Office, the sub-portal tab bar drops the Dashboard pill and lands directly on the first working module — New Enrollment, Students, Classes.',
+    icon: Layers,
+    title: 'Every web feature, now mobile',
+    desc: 'Admissions, Accountant, Academic, Teacher, Student, Parent — every module from the web portal is now in the Android app. Nothing left behind.',
   },
   {
-    title: 'Sub-portals keep their own Dashboard',
-    desc: 'Logging in as Admissions, Accountant, or Academic Office still opens that role\u2019s dedicated Dashboard as the first tab — untouched, exactly as before.',
+    icon: FileText,
+    title: 'Documents on the go',
+    desc: 'Upload, list, download, and delete student documents right from Admissions or Accountant. No more running back to a desktop.',
   },
   {
-    title: 'Instant sign-out',
-    desc: 'Sign Out clears your session immediately — no more tapping 4-5 times waiting for it to respond.',
+    icon: Zap,
+    title: 'Bulk Misc Charges',
+    desc: 'Apply a charge to every student in a Part — or a single department — in one tap. What used to take an hour now takes five seconds.',
   },
   {
-    title: 'No more sign-in flash',
-    desc: 'The router is created once, so logging in no longer rebuilds the whole screen.',
+    icon: Users,
+    title: 'Student Records in Accountant',
+    desc: 'The Accountant portal now has the same hierarchy Student Records page as Admissions: Department → Part → Class → Section → Student.',
   },
   {
-    title: 'Cleaner side drawer',
-    desc: 'Removed dead links, added Notifications / Change Password / Settings / Send Feedback. Download App is now Update App.',
+    icon: ShieldCheck,
+    title: 'Cleaner sign-in',
+    desc: 'The sign-in screen was rebuilt from scratch — less clutter, more focus, same premium feel. Your login is preserved on update.',
+  },
+  {
+    icon: Palette,
+    title: 'Single-color theme',
+    desc: 'The whole app is now strictly Concordia orange. No more multi-color cards — one premium brand, end to end.',
   },
 ];
 
@@ -172,35 +186,49 @@ export default function DownloadPage() {
           <div className="absolute top-24 right-0 h-[400px] w-[400px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.10),_transparent_65%)] blur-2xl" />
         </div>
 
-        <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 md:py-24 lg:grid-cols-2">
+        {/* Subtle dotted grid for texture */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.35]"
+          style={{
+            backgroundImage:
+              'radial-gradient(circle, rgba(242,101,34,0.10) 1px, transparent 1px)',
+            backgroundSize: '22px 22px',
+          }}
+        />
+
+        <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 md:py-24 lg:grid-cols-[1.1fr_0.9fr]">
           {/* Left: copy + CTAs */}
           <motion.div
             initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           >
+            {/* Eyebrow */}
             <div className="inline-flex items-center gap-2 rounded-full border border-orange-200/70 bg-white/70 px-3.5 py-1.5 backdrop-blur-sm">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#F26522] opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-[#F26522]" />
               </span>
               <span className="text-xs font-semibold uppercase tracking-wide text-[#F26522]">
-                Now Available
+                Now Available · {APK_VERSION}
               </span>
             </div>
 
-            <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-[#1A1A1A] sm:text-5xl md:text-6xl">
+            {/* Headline */}
+            <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-[#1A1A1A] sm:text-5xl md:text-6xl">
               Concordia College
-              <span className="block bg-gradient-to-r from-[#F26522] to-[#FF8C42] bg-clip-text text-transparent">
+              <span className="block bg-gradient-to-r from-[#F26522] via-[#F26522] to-[#FF8C42] bg-clip-text text-transparent">
                 in your pocket
               </span>
             </h1>
 
+            {/* Subtitle */}
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-gray-600">
               Manage your school, branches, staff, and students from anywhere. The complete
-              Concordia College management platform — now native on Android.
+              Concordia College management platform — every web feature, now native on Android.
             </p>
 
+            {/* CTA + meta */}
             <div className="mt-8 flex flex-col items-start gap-3">
               <a
                 href={APK_DOWNLOAD_URL}
@@ -215,35 +243,32 @@ export default function DownloadPage() {
                   ? `${APK_SIZE} · Installs over current version · Free`
                   : `${APK_SIZE} · Android 5.0+ · Free`}
               </p>
-              {/* Version badge */}
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-200/70 bg-white/80 px-3 py-1 font-semibold text-[#F26522] backdrop-blur-sm">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  {APK_VERSION} · Latest
-                </span>
-                <span className="rounded-full border border-orange-100 bg-white/70 px-3 py-1 text-gray-600 backdrop-blur-sm">
-                  Updated {APK_UPDATED}
-                </span>
-              </div>
             </div>
 
-            {/* App thumbnail banner + QR card — matching the official app-store thumbnail:
-                navy gradient + glassmorphism + orange squircle icon + white wordmark +
-                a viewfinder/scan reticle on the right. */}
+            {/* Badges row */}
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-200/70 bg-white/80 px-3 py-1 text-xs font-semibold text-[#F26522] backdrop-blur-sm">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#F26522]" />
+                {APK_VERSION} · Latest
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-100 bg-white/70 px-3 py-1 text-xs text-gray-600 backdrop-blur-sm">
+                Updated {APK_UPDATED}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-100 bg-white/70 px-3 py-1 text-xs text-gray-600 backdrop-blur-sm">
+                <Smartphone className="h-3 w-3 text-[#F26522]" />
+                Android 5.0+
+              </span>
+            </div>
+
+            {/* App icon showcase + QR card */}
             <div className="mt-8 flex flex-wrap items-stretch gap-3">
-              {/* ── App thumbnail banner ── */}
-              <div className="relative flex min-w-[260px] flex-1 items-center gap-4 overflow-hidden rounded-2xl p-4 shadow-[0_12px_32px_-12px_rgba(30,58,95,0.45)] sm:p-5">
-                {/* Navy gradient background */}
-                <div className="absolute inset-0 bg-gradient-to-br from-[#5B7FA5] via-[#3A5A7C] to-[#1E3A5F]" />
-                {/* Frosted glass overlay */}
-                <div className="absolute inset-0 bg-white/10 backdrop-blur-md" />
-                {/* Subtle top sheen */}
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/10 to-transparent" />
-                {/* Decorative orbit glow behind icon */}
-                <div className="pointer-events-none absolute left-2 top-1/2 h-32 w-32 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,_rgba(255,140,66,0.35),_transparent_65%)] blur-xl" />
+              {/* App icon showcase card — clean white + orange, replaces the old navy banner */}
+              <div className="relative flex min-w-[280px] flex-1 items-center gap-4 overflow-hidden rounded-2xl border border-orange-200/60 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(242,101,34,0.25)] sm:p-5">
+                {/* Soft orange glow behind icon */}
+                <div className="pointer-events-none absolute -left-8 top-1/2 h-40 w-40 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,_rgba(255,140,66,0.18),_transparent_65%)] blur-xl" />
 
                 {/* Orange squircle app icon */}
-                <div className="relative z-10 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[22%] bg-gradient-to-br from-[#FF9A4B] to-[#F26522] shadow-[0_8px_20px_-6px_rgba(242,101,34,0.6)] ring-1 ring-white/20 sm:h-[72px] sm:w-[72px]">
+                <div className="relative z-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[24%] bg-gradient-to-br from-[#FF9A4B] to-[#F26522] shadow-[0_10px_24px_-8px_rgba(242,101,34,0.6)] ring-1 ring-white/40">
                   <Image
                     src="/app-icon-512.png"
                     alt="Concordia College app icon"
@@ -252,51 +277,34 @@ export default function DownloadPage() {
                     priority
                   />
                 </div>
+
                 {/* Wordmark */}
                 <div className="relative z-10 min-w-0 flex-1">
-                  <p className="text-base font-semibold tracking-tight text-white sm:text-lg">
+                  <p className="text-base font-bold tracking-tight text-[#1A1A1A] sm:text-lg">
                     Concordia College
                   </p>
-                  <p className="mt-0.5 text-xs font-medium text-blue-100/80 sm:text-sm">
-                    Management Portal
+                  <p className="mt-0.5 text-xs font-medium text-gray-500 sm:text-sm">
+                    Management Portal · {APK_VERSION}
                   </p>
-                </div>
-
-                {/* Viewfinder / scan reticle (decorative) */}
-                <div className="relative z-10 hidden shrink-0 items-center justify-center sm:flex">
-                  <svg
-                    viewBox="0 0 48 48"
-                    fill="none"
-                    className="h-9 w-9 text-blue-100/70"
-                    aria-hidden
-                  >
-                    {/* corner brackets */}
-                    <path d="M8 14 V10 a2 2 0 0 1 2-2 H14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                    <path d="M34 8 H38 a2 2 0 0 1 2 2 V14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                    <path d="M40 34 V38 a2 2 0 0 1 -2 2 H34" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                    <path d="M14 40 H10 a2 2 0 0 1 -2 -2 V34" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                    {/* center location pin */}
-                    <path
-                      d="M24 18 a5 5 0 0 0 -5 5 c0 3.5 5 8 5 8 s5-4.5 5-8 a5 5 0 0 0 -5-5 Z"
-                      fill="currentColor"
-                      fillOpacity="0.9"
-                    />
-                    <circle cx="24" cy="23" r="1.8" fill="#1E3A5F" />
-                  </svg>
+                  <div className="mt-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#FFE8D9] px-2.5 py-0.5 text-[10px] font-bold text-[#D4541E]">
+                      <Sparkles className="h-2.5 w-2.5" /> New icon
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* ── QR code card ── */}
-              <div className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-orange-100 bg-white p-3 shadow-sm">
+              {/* QR code card */}
+              <div className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-orange-200/60 bg-white p-3 shadow-[0_8px_24px_-12px_rgba(242,101,34,0.25)]">
                 {/* QR code from api.qrserver.com — using a plain <img> to avoid configuring next/image remote patterns */}
                 <img
                   src={QR_CODE_URL}
                   alt="Scan to download the Concordia College Android app"
-                  width={88}
-                  height={88}
-                  className="rounded-md"
+                  width={92}
+                  height={92}
+                  className="rounded-lg"
                 />
-                <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#F26522]">
                   Scan to download
                 </p>
               </div>
@@ -349,8 +357,8 @@ export default function DownloadPage() {
             {whatsNew.map((item, i) => (
               <Reveal key={item.title} delay={i * 0.06}>
                 <div className="group h-full rounded-2xl border border-orange-100/70 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_12px_28px_-12px_rgba(242,101,34,0.25)]">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE8DC] to-[#FFD3B8] ring-1 ring-orange-200/50">
-                    <Check className="h-5 w-5 text-[#F26522]" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE8DC] to-[#FFD3B8] ring-1 ring-orange-200/50 transition-transform duration-300 group-hover:scale-105">
+                    <item.icon className="h-5 w-5 text-[#F26522]" />
                   </div>
                   <h3 className="mt-4 text-base font-bold text-[#1A1A1A]">{item.title}</h3>
                   <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{item.desc}</p>
@@ -374,8 +382,8 @@ export default function DownloadPage() {
                   <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-xs text-[#F26522]">
                     github.com/faisukhan01/concordia2
                   </code>
-                  . Every install gets the same {APK_VERSION} ({APK_SIZE}) premium build — white
-                  icon, redesigned portals, and the faster cache.
+                  . Every install gets the same {APK_VERSION} ({APK_SIZE}) premium build — new
+                  orange icon, redesigned portals, and the faster cache.
                 </p>
               </div>
             </div>
