@@ -2,7 +2,7 @@
 // Premium, refined design system matching the web portal's brand:
 //   • Concordia orange #F26522 on warm off-white #FCFBF9
 //   • Soft layered shadows for depth
-//   • Generous radii (12–20px) for friendly, modern feel
+//   • Radii matching web app exactly (sm=6, md=8, lg=10, xl=14, 2xl=16, pill=999)
 //   • Inter font family (matches web)
 //   • Forced LIGHT theme — never system/dark (the web portal is light-only)
 
@@ -13,7 +13,7 @@ import 'package:google_fonts/google_fonts.dart';
 class AppColors {
   // Primary brand
   static const Color primary = Color(0xFFF26522);
-  static const Color primaryDark = Color(0xFFD4541E);
+  static const Color primaryDark = Color(0xFFD4541E); // hover
   static const Color primaryLight = Color(0xFFFF8C42);
   static const Color primarySoft = Color(0xFFFFE8D9); // very light orange tint
 
@@ -24,15 +24,15 @@ class AppColors {
   static const Color surfaceAlt = Color(0xFFFAF6F2); // subtle warm card alt
 
   // Text
-  static const Color textPrimary = Color(0xFF1A1A1A);
-  static const Color textSecondary = Color(0xFF4A5568);
-  static const Color textMuted = Color(0xFF9CA3AF);
+  static const Color textPrimary = Color(0xFF1A1A1A); // foreground
+  static const Color textSecondary = Color(0xFF6B4423); // secondary text
+  static const Color textMuted = Color(0xFF4A5568); // muted text
   static const Color textInverse = Color(0xFFFFFFFF);
 
   // Accents
   static const Color secondary = Color(0xFFFFF0E8);
-  static const Color secondaryText = Color(0xFF6B4423);
-  static const Color border = Color(0xFFF0E6DD); // softer warm border
+  static const Color border = Color(0xFFFFE0CC); // input border
+  static const Color softBorder = Color(0xFFF0E6DD); // softer warm border
   static const Color borderStrong = Color(0xFFE5D8CC);
   static const Color ring = Color(0xFFF26522);
 
@@ -57,12 +57,7 @@ class AppColors {
   static const Color chart6 = Color(0xFF16A34A);
 
   // ── Brand gradients ────────────────────────────────────────────
-  // All gradients are unified to the official Concordia orange palette.
-  // The legacy names (success/info/warning/purple/sunset) are kept as
-  // semantic aliases so existing call-sites keep compiling, but every
-  // one now resolves to a Concordia-orange tone — no multi-colored
-  // "vibe coded" rainbow. Solid semantic colors (success/warning/danger)
-  // are still used for StatusChip badges where differentiation matters.
+  // Avatar gradient: linear-gradient(135deg, #F26522, #D4541E)
   static const List<Color> primaryGradient = [Color(0xFFF26522), Color(0xFFD4541E)];
   static const List<Color> warmGradient = [Color(0xFFFF8C42), Color(0xFFF26522)];
   // Aliases — all resolve to Concordia orange so the app is single-brand.
@@ -145,12 +140,13 @@ class AppShadows {
   ];
 }
 
-// ── Radius presets ─────────────────────────────────────────────
+// ── Radius presets (matching web app exactly) ──────────────────
 class AppRadii {
-  static const double sm = 10;
-  static const double md = 14;
-  static const double lg = 18;
-  static const double xl = 22;
+  static const double sm = 6;
+  static const double md = 8;
+  static const double lg = 10;
+  static const double xl = 14;
+  static const double xxl = 16; // 2xl in Tailwind
   static const double pill = 999;
 }
 
@@ -162,7 +158,7 @@ class AppTheme {
         primary: AppColors.primary,
         onPrimary: Colors.white,
         secondary: AppColors.secondary,
-        onSecondary: AppColors.secondaryText,
+        onSecondary: AppColors.textSecondary,
         surface: AppColors.card,
         onSurface: AppColors.textPrimary,
         error: AppColors.danger,
@@ -248,7 +244,7 @@ class AppTheme {
         showUnselectedLabels: true,
       ),
       dividerTheme: const DividerThemeData(
-        color: AppColors.border,
+        color: AppColors.softBorder,
         thickness: 1,
         space: 1,
       ),
@@ -257,7 +253,7 @@ class AppTheme {
         labelStyle: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: AppColors.secondaryText,
+          color: AppColors.textSecondary,
         ),
         side: BorderSide.none,
         shape: RoundedRectangleBorder(

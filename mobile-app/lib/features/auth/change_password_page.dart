@@ -68,7 +68,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     Expanded(
                       child: Text(
                         'For your security, please set a new password before continuing.',
-                        style: TextStyle(fontSize: 13, color: AppColors.secondaryText),
+                        style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                       ),
                     ),
                   ],

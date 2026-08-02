@@ -2,6 +2,9 @@
 // (src/lib/role-modules.ts) exactly. Every module in the web app is
 // represented here. For roles with >5 modules, the RoleShell shows
 // the first 4 + a "More" tab that opens a bottom sheet with the rest.
+//
+// The `group` field matches the web app's sidebar section headers so the
+// mobile sidebar can render them identically.
 
 import 'package:flutter/material.dart';
 import '../admin/admin_portal.dart';
@@ -26,6 +29,7 @@ class NavItem {
   final String shortLabel;
   final IconData icon;
   final IconData? activeIcon;
+  final String? group; // Sidebar section header (matches web app groups)
   final Widget Function(BuildContext) builder;
 
   const NavItem({
@@ -34,6 +38,7 @@ class NavItem {
     required this.shortLabel,
     required this.icon,
     this.activeIcon,
+    this.group,
     required this.builder,
   });
 }
@@ -61,7 +66,8 @@ class NavItems {
     }
   }
 
-  // ── Super Admin — full college oversight (10 modules) ──
+  // ── Super Admin — PRODUCT OWNER for the whole college (10 modules) ──
+  // Groups: Main, College, Oversight, Account
   static final _superAdmin = [
     NavItem(
       id: 'dashboard',
@@ -69,6 +75,7 @@ class NavItems {
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'Main',
       builder: (_) => const AdminPortal(),
     ),
     NavItem(
@@ -77,6 +84,7 @@ class NavItems {
       shortLabel: 'Branches',
       icon: Icons.business_outlined,
       activeIcon: Icons.business,
+      group: 'College',
       builder: (_) => const SuperBranchesScreen(),
     ),
     NavItem(
@@ -85,6 +93,7 @@ class NavItems {
       shortLabel: 'Staff',
       icon: Icons.manage_accounts_outlined,
       activeIcon: Icons.manage_accounts,
+      group: 'College',
       builder: (_) => const SuperStaffScreen(),
     ),
     NavItem(
@@ -93,6 +102,7 @@ class NavItems {
       shortLabel: 'Teachers',
       icon: Icons.people_outline,
       activeIcon: Icons.people,
+      group: 'College',
       builder: (_) => const SuperTeachersScreen(),
     ),
     NavItem(
@@ -101,6 +111,7 @@ class NavItems {
       shortLabel: 'Students',
       icon: Icons.school_outlined,
       activeIcon: Icons.school,
+      group: 'College',
       builder: (_) => const SuperStudentsScreen(),
     ),
     NavItem(
@@ -109,6 +120,7 @@ class NavItems {
       shortLabel: 'Announce',
       icon: Icons.campaign_outlined,
       activeIcon: Icons.campaign,
+      group: 'Oversight',
       builder: (_) => const SuperAnnouncementsScreen(),
     ),
     NavItem(
@@ -117,6 +129,7 @@ class NavItems {
       shortLabel: 'Fees',
       icon: Icons.account_balance_wallet_outlined,
       activeIcon: Icons.account_balance_wallet,
+      group: 'Oversight',
       builder: (_) => const SuperFeesScreen(),
     ),
     NavItem(
@@ -125,6 +138,7 @@ class NavItems {
       shortLabel: 'Attend',
       icon: Icons.check_circle_outline,
       activeIcon: Icons.check_circle,
+      group: 'Oversight',
       builder: (_) => const SuperAttendanceScreen(),
     ),
     NavItem(
@@ -133,6 +147,7 @@ class NavItems {
       shortLabel: 'Results',
       icon: Icons.emoji_events_outlined,
       activeIcon: Icons.emoji_events,
+      group: 'Oversight',
       builder: (_) => const SuperResultsScreen(),
     ),
     NavItem(
@@ -141,51 +156,122 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];
 
-  // ── Admin — oversees all sub-portals (mirrors web app sidebar) ──
-  // 5 clean tabs: Dashboard, Admissions, Accountant, Academic, Settings.
-  // Each sub-portal tab opens the FULL respective portal so the admin
-  // can perform every task of that role (just like the web app).
+  // ── Admin — oversees all sub-portals (mirrors web app sidebar exactly) ──
+  // The admin sidebar now shows ALL modules from every sub-portal, just like
+  // the web app. Groups: Main, Admission Office, Accountant, Academic Office, Account
   static final _admin = [
     NavItem(
-      id: 'dashboard',
-      label: 'Dashboard',
+      id: 'admin-dashboard',
+      label: 'Admin Dashboard',
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'Main',
       builder: (_) => const AdminPortal(),
     ),
     NavItem(
-      id: 'admissions',
-      label: 'Admissions Office',
-      shortLabel: 'Admissions',
+      id: 'admissions-new',
+      label: 'New Enrollment',
+      shortLabel: 'Enroll',
       icon: Icons.person_add_outlined,
       activeIcon: Icons.person_add,
+      group: 'Admission Office',
       builder: (_) => const AdmissionsPortal(
           initialTab: AdmissionsTab.newEnrollment),
     ),
     NavItem(
-      id: 'accountant',
-      label: 'Accountant',
-      shortLabel: 'Accountant',
-      icon: Icons.account_balance_wallet_outlined,
-      activeIcon: Icons.account_balance_wallet,
-      // Admin opens Accountant at its first WORKING module (Fees),
-      // never at the Accountant dashboard.
+      id: 'admissions-students',
+      label: 'Student Records',
+      shortLabel: 'Records',
+      icon: Icons.people_outline,
+      activeIcon: Icons.people,
+      group: 'Admission Office',
+      builder: (_) => const AdmissionsPortal(
+          initialTab: AdmissionsTab.records),
+    ),
+    NavItem(
+      id: 'accountant-challans',
+      label: 'Fee & Installments',
+      shortLabel: 'Fees',
+      icon: Icons.receipt_long_outlined,
+      activeIcon: Icons.receipt_long,
+      group: 'Accountant',
       builder: (_) => const AccountantPortal(
           initialTab: AccountantTab.fees),
     ),
     NavItem(
-      id: 'academic',
-      label: 'Academic Office',
-      shortLabel: 'Academic',
+      id: 'accountant-misc',
+      label: 'Misc Charges',
+      shortLabel: 'Charges',
+      icon: Icons.add_circle_outline,
+      activeIcon: Icons.add_circle,
+      group: 'Accountant',
+      builder: (_) => const AccountantPortal(
+          initialTab: AccountantTab.misc),
+    ),
+    NavItem(
+      id: 'accountant-logins',
+      label: 'Create Student Logins',
+      shortLabel: 'Logins',
+      icon: Icons.vpn_key_outlined,
+      activeIcon: Icons.vpn_key,
+      group: 'Accountant',
+      builder: (_) => const AccountantPortal(
+          initialTab: AccountantTab.logins),
+    ),
+    NavItem(
+      id: 'academic-announcements',
+      label: 'Announcements',
+      shortLabel: 'Announce',
+      icon: Icons.campaign_outlined,
+      activeIcon: Icons.campaign,
+      group: 'Academic Office',
+      builder: (_) => const AnnouncementsViewScreen(),
+    ),
+    NavItem(
+      id: 'academic-classes',
+      label: 'Classes & Teachers',
+      shortLabel: 'Classes',
       icon: Icons.class_outlined,
       activeIcon: Icons.class_,
+      group: 'Academic Office',
       builder: (_) => const AcademicPortal(
           initialTab: AcademicTab.classes),
+    ),
+    NavItem(
+      id: 'timetable',
+      label: 'Timetable',
+      shortLabel: 'Timetable',
+      icon: Icons.calendar_today_outlined,
+      activeIcon: Icons.calendar_today,
+      group: 'Academic Office',
+      builder: (_) => const AcademicPortal(
+          initialTab: AcademicTab.timetable),
+    ),
+    NavItem(
+      id: 'academic-exams',
+      label: 'Exams & Date Sheets',
+      shortLabel: 'Exams',
+      icon: Icons.assignment_outlined,
+      activeIcon: Icons.assignment,
+      group: 'Academic Office',
+      builder: (_) => const AcademicPortal(
+          initialTab: AcademicTab.exams),
+    ),
+    NavItem(
+      id: 'report-cards',
+      label: 'Result Cards',
+      shortLabel: 'Results',
+      icon: Icons.description_outlined,
+      activeIcon: Icons.description,
+      group: 'Academic Office',
+      builder: (_) => const AcademicPortal(
+          initialTab: AcademicTab.results),
     ),
     NavItem(
       id: 'settings',
@@ -193,11 +279,13 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];
 
   // ── Admissions Office ──
+  // Groups: Enrollment, Account
   static final _admissions = [
     NavItem(
       id: 'dashboard',
@@ -205,6 +293,7 @@ class NavItems {
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'Enrollment',
       builder: (_) => const AdmissionsPortal(),
     ),
     NavItem(
@@ -213,6 +302,7 @@ class NavItems {
       shortLabel: 'Enroll',
       icon: Icons.person_add_outlined,
       activeIcon: Icons.person_add,
+      group: 'Enrollment',
       builder: (_) => const AdmissionsPortal(initialTab: AdmissionsTab.newEnrollment),
     ),
     NavItem(
@@ -221,6 +311,7 @@ class NavItems {
       shortLabel: 'Records',
       icon: Icons.people_outline,
       activeIcon: Icons.people,
+      group: 'Enrollment',
       builder: (_) => const AdmissionsPortal(initialTab: AdmissionsTab.records),
     ),
     NavItem(
@@ -229,11 +320,13 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];
 
-  // ── Accountant ── (students tab removed per user request)
+  // ── Accountant ──
+  // Groups: Finance, Account
   static final _accountant = [
     NavItem(
       id: 'dashboard',
@@ -241,6 +334,7 @@ class NavItems {
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'Finance',
       builder: (_) => const AccountantPortal(),
     ),
     NavItem(
@@ -249,6 +343,7 @@ class NavItems {
       shortLabel: 'Fees',
       icon: Icons.receipt_long_outlined,
       activeIcon: Icons.receipt_long,
+      group: 'Finance',
       builder: (_) => const AccountantPortal(initialTab: AccountantTab.fees),
     ),
     NavItem(
@@ -257,14 +352,16 @@ class NavItems {
       shortLabel: 'Charges',
       icon: Icons.add_circle_outline,
       activeIcon: Icons.add_circle,
+      group: 'Finance',
       builder: (_) => const AccountantPortal(initialTab: AccountantTab.misc),
     ),
     NavItem(
       id: 'logins',
-      label: 'Student Logins',
+      label: 'Create Student Logins',
       shortLabel: 'Logins',
       icon: Icons.vpn_key_outlined,
       activeIcon: Icons.vpn_key,
+      group: 'Finance',
       builder: (_) => const AccountantPortal(initialTab: AccountantTab.logins),
     ),
     NavItem(
@@ -273,11 +370,13 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];
 
-  // ── Academic Office ── (Date Sheets & Exams merged into one tab)
+  // ── Academic Office ──
+  // Groups: Overview, Classes & Academics, Account
   static final _academic = [
     NavItem(
       id: 'dashboard',
@@ -285,6 +384,7 @@ class NavItems {
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'Overview',
       builder: (_) => const AcademicPortal(),
     ),
     NavItem(
@@ -293,6 +393,7 @@ class NavItems {
       shortLabel: 'Announce',
       icon: Icons.campaign_outlined,
       activeIcon: Icons.campaign,
+      group: 'Overview',
       builder: (_) => const AnnouncementsViewScreen(),
     ),
     NavItem(
@@ -301,6 +402,7 @@ class NavItems {
       shortLabel: 'Classes',
       icon: Icons.class_outlined,
       activeIcon: Icons.class_,
+      group: 'Classes & Academics',
       builder: (_) => const AcademicPortal(initialTab: AcademicTab.classes),
     ),
     NavItem(
@@ -309,6 +411,7 @@ class NavItems {
       shortLabel: 'Timetable',
       icon: Icons.calendar_today_outlined,
       activeIcon: Icons.calendar_today,
+      group: 'Classes & Academics',
       builder: (_) => const AcademicPortal(initialTab: AcademicTab.timetable),
     ),
     NavItem(
@@ -317,6 +420,7 @@ class NavItems {
       shortLabel: 'Exams',
       icon: Icons.assignment_outlined,
       activeIcon: Icons.assignment,
+      group: 'Classes & Academics',
       builder: (_) => const AcademicPortal(initialTab: AcademicTab.exams),
     ),
     NavItem(
@@ -325,6 +429,7 @@ class NavItems {
       shortLabel: 'Results',
       icon: Icons.description_outlined,
       activeIcon: Icons.description,
+      group: 'Classes & Academics',
       builder: (_) => const AcademicPortal(initialTab: AcademicTab.results),
     ),
     NavItem(
@@ -333,11 +438,13 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];
 
   // ── Teacher ──
+  // Groups: Teaching, Account
   static final _teacher = [
     NavItem(
       id: 'dashboard',
@@ -345,6 +452,7 @@ class NavItems {
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'Teaching',
       builder: (_) => const TeacherPortal(),
     ),
     NavItem(
@@ -353,6 +461,7 @@ class NavItems {
       shortLabel: 'Classes',
       icon: Icons.class_outlined,
       activeIcon: Icons.class_,
+      group: 'Teaching',
       builder: (_) => const TeacherPortal(initialTab: TeacherTab.classes),
     ),
     NavItem(
@@ -361,6 +470,7 @@ class NavItems {
       shortLabel: 'Attend',
       icon: Icons.check_circle_outline,
       activeIcon: Icons.check_circle,
+      group: 'Teaching',
       builder: (_) => const TeacherPortal(initialTab: TeacherTab.attendance),
     ),
     NavItem(
@@ -369,6 +479,7 @@ class NavItems {
       shortLabel: 'Results',
       icon: Icons.grade_outlined,
       activeIcon: Icons.grade,
+      group: 'Teaching',
       builder: (_) => const TeacherPortal(initialTab: TeacherTab.results),
     ),
     NavItem(
@@ -377,6 +488,7 @@ class NavItems {
       shortLabel: 'Feedback',
       icon: Icons.feedback_outlined,
       activeIcon: Icons.feedback,
+      group: 'Teaching',
       builder: (_) => const StudentFeedbackScreen(),
     ),
     NavItem(
@@ -385,6 +497,7 @@ class NavItems {
       shortLabel: 'Announce',
       icon: Icons.campaign_outlined,
       activeIcon: Icons.campaign,
+      group: 'Teaching',
       builder: (_) => const TeacherPortal(initialTab: TeacherTab.announcements),
     ),
     NavItem(
@@ -393,6 +506,7 @@ class NavItems {
       shortLabel: 'Timetable',
       icon: Icons.calendar_today_outlined,
       activeIcon: Icons.calendar_today,
+      group: 'Teaching',
       builder: (_) => const TimetableViewScreen(isTeacher: true),
     ),
     NavItem(
@@ -401,11 +515,13 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];
 
   // ── Student / Parent ──
+  // Groups: My Portal, Account
   static final _student = [
     NavItem(
       id: 'dashboard',
@@ -413,6 +529,7 @@ class NavItems {
       shortLabel: 'Home',
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
+      group: 'My Portal',
       builder: (_) => const StudentPortal(),
     ),
     NavItem(
@@ -421,6 +538,7 @@ class NavItems {
       shortLabel: 'Fees',
       icon: Icons.account_balance_wallet_outlined,
       activeIcon: Icons.account_balance_wallet,
+      group: 'My Portal',
       builder: (_) => const StudentPortal(initialTab: StudentTab.fees),
     ),
     NavItem(
@@ -429,6 +547,7 @@ class NavItems {
       shortLabel: 'Results',
       icon: Icons.grade_outlined,
       activeIcon: Icons.grade,
+      group: 'My Portal',
       builder: (_) => const StudentPortal(initialTab: StudentTab.results),
     ),
     NavItem(
@@ -437,6 +556,7 @@ class NavItems {
       shortLabel: 'Report',
       icon: Icons.description_outlined,
       activeIcon: Icons.description,
+      group: 'My Portal',
       builder: (_) => const ReportCardsScreen(),
     ),
     NavItem(
@@ -445,6 +565,7 @@ class NavItems {
       shortLabel: 'Attend',
       icon: Icons.check_circle_outline,
       activeIcon: Icons.check_circle,
+      group: 'My Portal',
       builder: (_) => const StudentPortal(initialTab: StudentTab.attendance),
     ),
     NavItem(
@@ -453,6 +574,7 @@ class NavItems {
       shortLabel: 'Timetable',
       icon: Icons.calendar_today_outlined,
       activeIcon: Icons.calendar_today,
+      group: 'My Portal',
       builder: (_) => const StudentPortal(initialTab: StudentTab.timetable),
     ),
     NavItem(
@@ -461,6 +583,7 @@ class NavItems {
       shortLabel: 'Dates',
       icon: Icons.event_note_outlined,
       activeIcon: Icons.event_note,
+      group: 'My Portal',
       builder: (_) => const DateSheetsScreen(),
     ),
     NavItem(
@@ -469,6 +592,7 @@ class NavItems {
       shortLabel: 'Announce',
       icon: Icons.campaign_outlined,
       activeIcon: Icons.campaign,
+      group: 'My Portal',
       builder: (_) => const AnnouncementsViewScreen(),
     ),
     NavItem(
@@ -477,6 +601,7 @@ class NavItems {
       shortLabel: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings,
+      group: 'Account',
       builder: (_) => const SettingsScreen(),
     ),
   ];

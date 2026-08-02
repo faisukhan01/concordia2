@@ -1,22 +1,25 @@
 // Role shell — the main scaffold after login.
 //
-// Clean, professional layout:
-//   • Minimal app bar with menu button, page title, user name
-//   • Bottom navigation: icon + label, active state uses color + small
-//     dot indicator (no bulky pill toggle)
-//   • Roles with >5 modules: first 4 + "More" sheet
-//   • Drawer for full navigation, settings, logout
-//
-// The bottom nav is ALWAYS white on warm off-white background — there is
-// no dark mode anywhere in the app (the web portal is light-only).
+// Matches the web app's mobile layout exactly:
+//   • Header (AppBar): 64px, white bg, #FFE0CC bottom border, hamburger
+//     left, page title center-left, notifications bell (red dot badge) right,
+//     user avatar (gradient initials) right
+//   • Sidebar: 260px slide-in from left, bg-black/50 overlay, spring
+//     animation, brand header with logo, nav groups with section headers,
+//     bottom user card with sign out
+//   • Bottom Navigation: white/95 backdrop-blur, border-orange-100,
+//     icon + page name, active: orange + bold + dot indicator
+//     >5 modules: first 4 + "More" bottom sheet
+//   • Content area: p-4 (16px), bg #FCFBF9
 
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../widgets/shared_widgets.dart';
 import '../auth/auth_provider.dart';
 import 'nav_items.dart';
 import 'nav_provider.dart';
-import 'app_drawer.dart';
 
 class RoleShell extends StatefulWidget {
   const RoleShell({super.key});
@@ -26,11 +29,11 @@ class RoleShell extends StatefulWidget {
 }
 
 class _RoleShellState extends State<RoleShell> {
+  bool _sidebarOpen = false;
+
   @override
   void initState() {
     super.initState();
-    // Start every fresh shell session at the Home tab so a stale index from
-    // a previous session doesn't carry over (e.g. after logout → login).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<NavProvider>().reset();
     });
@@ -53,73 +56,172 @@ class _RoleShellState extends State<RoleShell> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: Builder(
-          builder: (ctx) => Padding(
-            padding: const EdgeInsets.only(left: 12),
-            child: IconButton(
-              onPressed: () => Scaffold.of(ctx).openDrawer(),
-              icon: const Icon(Icons.menu_rounded,
-                  color: AppColors.textPrimary, size: 24),
-              style: IconButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                ),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(64),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: Color(0xFFFFE0CC),
+                width: 0.5,
+              ),
+            ),
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: SizedBox(
+              height: 64,
+              child: Row(
+                children: [
+                  // Hamburger menu icon (h-8 w-8, rounded-md)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: IconButton(
+                      onPressed: () => _openSidebar(),
+                      icon: const Icon(Icons.menu_rounded,
+                          color: AppColors.textPrimary, size: 24),
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(32, 32),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Page title (font-semibold, text-sm sm:text-base)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text(
+                        currentItem.label,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  // Notifications bell icon (h-9 w-9, rounded-md) with red dot badge
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: IconButton(
+                      onPressed: () => _showNotifications(context),
+                      icon: SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            const Icon(Icons.notifications_none_rounded,
+                                color: AppColors.textSecondary, size: 22),
+                            // Red dot badge
+                            Positioned(
+                              top: 6,
+                              right: 8,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: AppColors.danger,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(36, 36),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // User avatar (h-8 w-8, gradient bg with initials, ring-1 ring-gray-200)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFFF26522), Color(0xFFD4541E)],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFFE5E7EB),
+                          width: 1,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          initialsOf(user.name),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              currentItem.label,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-                letterSpacing: -0.2,
-                height: 1.2,
+      ),
+      body: Stack(
+        children: [
+          // Main content area: p-4 (16px), bg #FCFBF9
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: KeyedSubtree(
+              key: ValueKey(index),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: currentItem.builder(context),
               ),
             ),
-            const SizedBox(height: 1),
-            Text(
-              'Hi, ${_firstName(user.name)}',
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w400,
-                color: AppColors.textSecondary,
+          ),
+          // Sidebar overlay
+          if (_sidebarOpen) ...[
+            // Backdrop: bg-black/50
+            GestureDetector(
+              onTap: () => _closeSidebar(),
+              child: Container(
+                color: Colors.black.withOpacity(0.5),
               ),
+            ),
+            // Sidebar panel
+            _SidebarPanel(
+              items: items,
+              currentIndex: index,
+              user: user,
+              onSelect: (i) {
+                _closeSidebar();
+                context.read<NavProvider>().setIndex(i);
+              },
+              onClose: () => _closeSidebar(),
+              onSignOut: () {
+                _closeSidebar();
+                _confirmAndSignOut(context, auth);
+              },
             ),
           ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: IconButton(
-              onPressed: () => _showNotifications(context),
-              icon: const Icon(Icons.notifications_none_rounded,
-                  color: AppColors.textSecondary, size: 22),
-              style: IconButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                ),
-              ),
-            ),
-          ),
         ],
-      ),
-      drawer: const AppDrawer(),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 180),
-        child: KeyedSubtree(
-          key: ValueKey(index),
-          child: currentItem.builder(context),
-        ),
       ),
       bottomNavigationBar: _BottomNav(
         items: visibleItems,
@@ -136,9 +238,12 @@ class _RoleShellState extends State<RoleShell> {
     );
   }
 
-  String _firstName(String name) {
-    if (name.isEmpty) return '';
-    return name.trim().split(RegExp(r'\s+')).first;
+  void _openSidebar() {
+    setState(() => _sidebarOpen = true);
+  }
+
+  void _closeSidebar() {
+    setState(() => _sidebarOpen = false);
   }
 
   void _showMoreSheet(BuildContext context, List<NavItem> moreItems) {
@@ -262,11 +367,368 @@ class _RoleShellState extends State<RoleShell> {
       ),
     );
   }
+
+  void _confirmAndSignOut(BuildContext context, AuthProvider auth) {
+    showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text('Sign Out'),
+        content: const Text('Are you sure you want to sign out of your account?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+              ),
+            ),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    ).then((confirmed) {
+      if (confirmed == true) {
+        auth.logout();
+      }
+    });
+  }
 }
 
-// ── Bottom navigation — clean, professional ──────────────────────
-// Active state: orange icon + small dot indicator above label + bold
-// orange label. No bulky pill background.
+// ════════════════════════════════════════════════════════════════
+// SIDEBAR PANEL — 260px slide-in from left
+// ════════════════════════════════════════════════════════════════
+
+class _SidebarPanel extends StatefulWidget {
+  final List<NavItem> items;
+  final int currentIndex;
+  final dynamic user;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onClose;
+  final VoidCallback onSignOut;
+
+  const _SidebarPanel({
+    required this.items,
+    required this.currentIndex,
+    required this.user,
+    required this.onSelect,
+    required this.onClose,
+    required this.onSignOut,
+  });
+
+  @override
+  State<_SidebarPanel> createState() => _SidebarPanelState();
+}
+
+class _SidebarPanelState extends State<_SidebarPanel>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(-1.0, 0.0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    ));
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SlideTransition(
+      position: _slideAnimation,
+      child: Container(
+        width: 260,
+        height: MediaQuery.of(context).size.height,
+        color: Colors.white,
+        child: Column(
+          children: [
+            // ── Brand header (h-16) with Concordia logo (38px height) ──
+            Container(
+              height: 64,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  bottom: BorderSide(
+                    color: Color(0xFFFFE0CC),
+                    width: 0.5,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Image.asset(
+                    'assets/images/concordia-logo.png',
+                    height: 38,
+                    fit: BoxFit.contain,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.close_rounded,
+                        size: 20, color: AppColors.textSecondary),
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(32, 32),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // ── Navigation: scrollable, groups separated by section headers ──
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: _buildNavGroups(),
+              ),
+            ),
+            // ── Bottom: User card (border-t, p-3) ──
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: Color(0xFFFFE0CC),
+                    width: 0.5,
+                  ),
+                ),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      // Avatar with gradient
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFFF26522), Color(0xFFD4541E)],
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: const Color(0xFFE5E7EB),
+                            width: 1,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            initialsOf(widget.user.name as String),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.user.name as String,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              widget.user.email as String? ?? '',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textMuted,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: widget.onSignOut,
+                      icon: const Icon(Icons.logout_rounded,
+                          size: 16, color: AppColors.danger),
+                      label: const Text('Sign Out',
+                          style: TextStyle(
+                              color: AppColors.danger,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.dangerSoft),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildNavGroups() {
+    final groups = <Widget>[];
+    // Group items by section using the NavItem's group field
+    // We iterate items and detect group changes
+    String? currentGroup;
+    for (int i = 0; i < widget.items.length; i++) {
+      final item = widget.items[i];
+      if (item.group != null && item.group != currentGroup) {
+        currentGroup = item.group;
+        groups.add(_SidebarSectionHeader(label: currentGroup!));
+      }
+      groups.add(_SidebarNavItem(
+        item: item,
+        active: i == widget.currentIndex,
+        onTap: () => widget.onSelect(i),
+      ));
+    }
+    return groups;
+  }
+}
+
+/// Section header: text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400
+class _SidebarSectionHeader extends StatelessWidget {
+  final String label;
+  const _SidebarSectionHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF9CA3AF),
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+}
+
+/// Nav item: w-full flex items-center gap-3 rounded-lg text-[13px] font-medium px-3 py-2.5
+/// Active: bg-[#F26522] text-white shadow-sm shadow-[#F26522]/20
+/// Inactive: text-gray-600 hover:bg-[#FFF0E8] hover:text-[#F26522]
+/// Icons: h-[17px] w-[17px]
+class _SidebarNavItem extends StatelessWidget {
+  final NavItem item;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _SidebarNavItem({
+    required this.item,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: active ? const Color(0xFFF26522) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: active
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFFF26522).withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  active ? (item.activeIcon ?? item.icon) : item.icon,
+                  size: 17,
+                  color: active ? Colors.white : const Color(0xFF4A5568),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: active ? Colors.white : const Color(0xFF4A5568),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// BOTTOM NAVIGATION — clean, professional
+// ════════════════════════════════════════════════════════════════
+// Active state: orange icon + bold orange label + small dot indicator
+// (3px tall, 18px wide, rounded, orange). Inactive: gray icon + gray label.
+// Background: bg-white/95 backdrop-blur, top border border-orange-100.
+
 class _BottomNav extends StatelessWidget {
   final List<NavItem> items;
   final int currentIndex;
@@ -285,7 +747,7 @@ class _BottomNav extends StatelessWidget {
     final tabs = <_NavTab>[];
     for (final i in items) {
       tabs.add(_NavTab(
-        label: i.shortLabel,
+        label: i.label,
         icon: i.icon,
         activeIcon: i.activeIcon ?? i.icon,
       ));
@@ -298,26 +760,36 @@ class _BottomNav extends StatelessWidget {
       ));
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Row(
-            children: [
-              for (int i = 0; i < tabs.length; i++)
-                Expanded(
-                  child: _NavTabButton(
-                    tab: tabs[i],
-                    active: i == currentIndex,
-                    onTap: () => onTap(i),
-                  ),
-                ),
-            ],
+    return ClipRect(
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xF2FFFFFF), // white/95
+          border: Border(
+            top: BorderSide(
+              color: Color(0xFFFFE0CC), // orange-100
+              width: 0.5,
+            ),
+          ),
+        ),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
+                children: [
+                  for (int i = 0; i < tabs.length; i++)
+                    Expanded(
+                      child: _NavTabButton(
+                        tab: tabs[i],
+                        active: i == currentIndex,
+                        onTap: () => onTap(i),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -349,7 +821,7 @@ class _NavTabButton extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Active dot indicator (small, clean)
+            // Active dot indicator (3px tall, 18px wide, rounded, orange)
             SizedBox(
               height: 4,
               child: AnimatedSwitcher(

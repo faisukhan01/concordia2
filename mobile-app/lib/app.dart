@@ -10,6 +10,9 @@
 // Theme is forced to LIGHT always — the web portal is light-only and the
 // mobile app must match. Never use ThemeMode.system (that caused the dark
 // footer/bottom-nav bug on phones in dark mode).
+//
+// Uses the new design system: AppTheme.light, AppColors, AppRadii.
+// Splash screen uses the Concordia logo on an orange gradient background.
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -103,56 +106,85 @@ class _ConcordiaAppState extends State<ConcordiaApp> {
 }
 
 /// Branded splash — shown for <500ms while AuthProvider.bootstrap() restores
-/// the session from SharedPreferences. Clean, minimal, no animation jank.
+/// the session from SharedPreferences. Uses the Concordia logo on an orange
+/// gradient background matching the web app's splash/branding.
 class _Splash extends StatelessWidget {
   const _Splash();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF26522),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: Image.asset(
-                'assets/images/app-icon.png',
-                width: 96,
-                height: 96,
-                fit: BoxFit.cover,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: AppColors.primaryGradient,
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Concordia logo in a white pill container
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.asset(
+                    'assets/images/concordia-logo.png',
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.school_rounded,
+                      size: 64,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 28),
-            const Text(
-              'Concordia College',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
+              const SizedBox(height: 28),
+              const Text(
+                'Concordia College',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Student & Staff Portal',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
+              const SizedBox(height: 6),
+              const Text(
+                'Student & Staff Portal',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
-            ),
-            const SizedBox(height: 36),
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 2.5,
+              const SizedBox(height: 36),
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2.5,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
