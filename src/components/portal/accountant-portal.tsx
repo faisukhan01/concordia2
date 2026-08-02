@@ -25,9 +25,24 @@
 //   • Money amounts: text-gray-900 font-semibold (NEVER orange / green).
 // ============================================================================
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useApp } from '@/lib/store';
+import {
+  DEPARTMENTS,
+  DeptCardGrid,
+  PartToggle,
+  ClassCardGrid,
+  SectionCardGrid,
+  HierarchyBreadcrumb,
+} from '@/components/portal/shared/concordia-hierarchy';
+import {
+  SimpleBarChart,
+  SimplePieChart,
+  ChartCard,
+} from '@/components/portal/shared/concordia-charts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -93,6 +108,9 @@ import {
   ShieldBan,
   AlertTriangle,
   Ban,
+  Layers,
+  Zap,
+  PieChart,
 } from 'lucide-react';
 import { buildFeeChallan, savePdf } from '@/lib/pdf-utils';
 import {
@@ -431,6 +449,10 @@ export function AccountantPortal({ activeModule, user }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Wire the global module-switcher from the zustand store so the Overview
+  // quick-action cards can deep-link into the Fee & Installments page.
+  const setActiveModule = useApp((s) => s.setActiveModule);
+
   // Initial + branch-change load. The effect body performs NO synchronous
   // setState — all state updates happen inside async promise callbacks.
   // `loading` starts true (useState initial), so we don't need to flip it
@@ -497,16 +519,7 @@ export function AccountantPortal({ activeModule, user }: Props) {
     });
 
   let content: React.ReactNode;
-  if (activeModule === 'accountant-students')
-    content = (
-      <StudentsView
-        students={students}
-        invoices={invoices}
-        loading={loading}
-        onRefresh={refresh}
-      />
-    );
-  else if (
+  if (
     activeModule === 'accountant-challans' ||
     activeModule === 'accountant-collect' ||
     activeModule === 'accountant-installments'
@@ -515,6 +528,7 @@ export function AccountantPortal({ activeModule, user }: Props) {
       <FeeInstallmentsView
         user={user}
         students={students}
+        classes={classes}
         invoices={invoices}
         loading={loading}
         onRefresh={refresh}
@@ -523,7 +537,14 @@ export function AccountantPortal({ activeModule, user }: Props) {
       />
     );
   else if (activeModule === 'accountant-misc')
-    content = <MiscChargesView user={user} students={students} loading={loading} />;
+    content = (
+      <MiscChargesView
+        user={user}
+        students={students}
+        classes={classes}
+        loading={loading}
+      />
+    );
   else if (activeModule === 'accountant-logins')
     content = (
       <LoginsView user={user} students={students} loading={loading} onUpdate={upsertStudent} />
@@ -535,6 +556,7 @@ export function AccountantPortal({ activeModule, user }: Props) {
         students={students}
         invoices={invoices}
         loading={loading}
+        onNavigate={(moduleId) => setActiveModule(moduleId)}
       />
     );
 
@@ -548,29 +570,17 @@ function OverviewView({
   students,
   invoices,
   loading,
+  onNavigate,
 }: {
   user: any;
   students: any[];
   invoices: any[];
   loading: boolean;
+  onNavigate: (moduleId: string) => void;
 }) {
   const firstName = (user?.name || 'Accountant').split(' ')[0];
 
   // KPIs derived from invoices + students
-  const collected = useMemo(
-    () =>
-      invoices
-        .filter((i) => (i.status || '').toLowerCase() === 'paid')
-        .reduce((s, i) => s + Number(i.paidAmount || i.amount || 0), 0),
-    [invoices],
-  );
-  const pending = useMemo(
-    () =>
-      invoices
-        .filter((i) => (i.status || '').toLowerCase() !== 'paid')
-        .reduce((s, i) => s + Number(i.amount || 0), 0),
-    [invoices],
-  );
   const overdue = useMemo(
     () => invoices.filter((i) => (i.status || '').toLowerCase() === 'overdue').length,
     [invoices],
@@ -587,10 +597,10 @@ function OverviewView({
     [invoices],
   );
 
-  // Monthly collection — last 6 months, current month in orange accent
-  const monthly = useMemo(() => {
+  // Monthly collection — last 6 months (drives the SimpleBarChart).
+  const monthlyData = useMemo(() => {
     const now = new Date();
-    const buckets: { label: string; total: number }[] = [];
+    const buckets: { label: string; value: number }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const m = d.getMonth();
@@ -604,12 +614,41 @@ function OverviewView({
         .reduce((acc, inv) => acc + Number(inv.paidAmount || inv.amount || 0), 0);
       buckets.push({
         label: d.toLocaleString('en-US', { month: 'short' }),
-        total,
+        value: total,
       });
     }
     return buckets;
   }, [invoices]);
-  const maxMonthly = Math.max(1, ...monthly.map((m) => m.total));
+
+  // Fee-status distribution (Paid / Pending / Overdue) for the pie chart.
+  const feeStatusData = useMemo(() => {
+    let paid = 0;
+    let pending = 0;
+    let over = 0;
+    for (const i of invoices) {
+      const s = (i.status || '').toLowerCase();
+      if (s === 'paid') paid += 1;
+      else if (s === 'overdue') over += 1;
+      else pending += 1;
+    }
+    return [
+      { label: 'Paid', value: paid },
+      { label: 'Pending', value: pending },
+      { label: 'Overdue', value: over },
+    ];
+  }, [invoices]);
+
+  // Students-per-program — counts of students whose `program` matches one
+  // of the canonical 6 Concordia departments (matches the Academic portal).
+  const studentsByProgram = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of DEPARTMENTS) map[d] = 0;
+    for (const s of students) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+  }, [students]);
 
   return (
     <div className="space-y-6">
@@ -618,7 +657,7 @@ function OverviewView({
         subtitle="Fee collection, challans, and student logins — all in one place."
       />
 
-      {/* KPI cards */}
+      {/* KPI cards — 2 stats + 2 quick-actions, in a 4-col responsive grid */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[0, 1, 2, 3].map((i) => (
@@ -626,19 +665,12 @@ function OverviewView({
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            icon={DollarSign}
-            label="Total Collected"
-            value={fmtMoney(collected)}
-            sub="All paid invoices"
-          />
-          <StatCard
-            icon={TrendingUp}
-            label="Pending"
-            value={fmtMoney(pending)}
-            sub="Awaiting payment"
-          />
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        >
           <StatCard
             icon={AlertCircle}
             label="Overdue"
@@ -651,51 +683,129 @@ function OverviewView({
             value={withLogin}
             sub={`of ${students.length} enrolled`}
           />
-        </div>
+          {/* Quick-action card — amber/orange accent so it reads as an action */}
+          <button
+            type="button"
+            onClick={() => onNavigate('accountant-challans')}
+            className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                  Quick Action
+                </div>
+                <div className="text-base font-bold text-gray-900 mt-1.5">
+                  Add New Installment
+                </div>
+                <div className="text-xs text-amber-700/80 mt-1">
+                  Split a student&apos;s locked fee into a payment plan
+                </div>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-amber-200 transition-colors">
+                <Plus className="h-4 w-4 text-amber-700" />
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('accountant-challans')}
+            className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                  Quick Action
+                </div>
+                <div className="text-base font-bold text-gray-900 mt-1.5">
+                  Check Installments
+                </div>
+                <div className="text-xs text-amber-700/80 mt-1">
+                  Review paid / outstanding balances per student
+                </div>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-amber-200 transition-colors">
+                <Receipt className="h-4 w-4 text-amber-700" />
+              </div>
+            </div>
+          </button>
+        </motion.div>
       )}
 
-      {/* Monthly collection bar chart */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <SectionHeader
+      {/* Analytics charts — monthly collection (2/3 width) + fee-status pie (1/3 width) */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, delay: 0.05 }}
+        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+      >
+        <ChartCard
           title="Monthly Collection"
-          desc="Total fee collected — last 6 months"
-        />
-        {loading ? (
-          <Skeleton className="h-44 w-full rounded-md" />
-        ) : (
-          <div className="flex items-end gap-3 h-44 pt-2">
-            {monthly.map((m, i) => {
-              const isCurrent = i === monthly.length - 1;
-              return (
-                <div
-                  key={m.label + i}
-                  className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end"
-                >
-                  <span className="text-[11px] font-semibold text-gray-700 tabular-nums">
-                    {m.total > 0 ? `${(m.total / 1000).toFixed(0)}k` : ''}
-                  </span>
-                  <div
-                    className={cn(
-                      'w-full rounded-t-sm transition-all',
-                      isCurrent ? 'bg-[#F26522]' : 'bg-gray-200',
-                    )}
-                    style={{ height: `${Math.max(4, (m.total / maxMonthly) * 100)}%` }}
-                  />
-                  <span className="text-[10px] text-gray-400">{m.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <div className="mt-3 flex items-center gap-4 text-[11px] text-gray-500">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm bg-[#F26522]" /> Current month
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm bg-gray-200" /> Prior months
-          </span>
-        </div>
-      </div>
+          subtitle="Total fee collected — last 6 months"
+          className="lg:col-span-2"
+        >
+          {loading ? (
+            <Skeleton className="h-[260px] w-full rounded-lg" />
+          ) : monthlyData.every((m) => m.value === 0) ? (
+            <EmptyState
+              icon={TrendingUp}
+              title="No collections yet"
+              desc="Record your first payment from the Fee & Installments page to see the trend here."
+            />
+          ) : (
+            <SimpleBarChart
+              data={monthlyData}
+              height={260}
+              yLabel="Rs"
+              formatValue={(v) => fmtMoney(v)}
+            />
+          )}
+        </ChartCard>
+        <ChartCard
+          title="Fee Status Distribution"
+          subtitle="Across all invoices"
+        >
+          {loading ? (
+            <Skeleton className="h-[260px] w-full rounded-lg" />
+          ) : feeStatusData.every((d) => d.value === 0) ? (
+            <EmptyState
+              icon={PieChart}
+              title="No invoices yet"
+              desc="Generate monthly challans from the Fee & Installments page."
+            />
+          ) : (
+            <SimplePieChart data={feeStatusData} height={260} donut />
+          )}
+        </ChartCard>
+      </motion.div>
+
+      {/* Students-per-program chart — matches the Academic portal overview */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, delay: 0.1 }}
+      >
+        <ChartCard
+          title="Students per Program"
+          subtitle="Enrollment across the 6 Concordia departments"
+        >
+          {loading ? (
+            <Skeleton className="h-[240px] w-full rounded-lg" />
+          ) : students.length === 0 ? (
+            <EmptyState
+              icon={Layers}
+              title="No enrollment data yet"
+              desc="Students will appear here once the Admissions Office enrolls them."
+            />
+          ) : (
+            <SimpleBarChart
+              data={studentsByProgram}
+              height={240}
+              yLabel="Students"
+              formatValue={(v) => `${v} student${v === 1 ? '' : 's'}`}
+            />
+          )}
+        </ChartCard>
+      </motion.div>
 
       {/* Recent payments table */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
@@ -772,422 +882,6 @@ function OverviewView({
   );
 }
 
-// ───────────────────────── 2. Students (class-wise) ─────────────────────────
-
-function StudentsView({
-  students,
-  invoices,
-  loading,
-  onRefresh,
-}: {
-  students: any[];
-  invoices: any[];
-  loading: boolean;
-  onRefresh: () => void;
-}) {
-  const [search, setSearch] = useState('');
-  const [expandedClass, setExpandedClass] = useState<string | null>(null);
-  const [selected, setSelected] = useState<any | null>(null);
-
-  // Map studentId → invoice summary for fast lookups
-  const invoiceByStudent = useMemo(() => {
-    const map: Record<string, any[]> = {};
-    invoices.forEach((inv) => {
-      const key = inv.studentId || inv.userId;
-      if (!key) return;
-      (map[key] ||= []).push(inv);
-    });
-    return map;
-  }, [invoices]);
-
-  // Group students by class (e.g. "Class 5 - A"). Falls back to "Unassigned".
-  const classGroups = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-    students.forEach((s) => {
-      const cls = s.class ? (s.section ? `${s.class} - ${s.section}` : s.class) : 'Unassigned';
-      (groups[cls] ||= []).push(s);
-    });
-    return Object.entries(groups)
-      .map(([className, list]) => ({
-        className,
-        students: list.sort((a, b) => (a.rollNo || '').localeCompare(b.rollNo || '')),
-      }))
-      .sort((a, b) => a.className.localeCompare(b.className));
-  }, [students]);
-
-  // Filter class groups by search query (matches student name/roll/guardian/contact)
-  const filteredGroups = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return classGroups;
-    return classGroups
-      .map((g) => ({
-        ...g,
-        students: g.students.filter(
-          (s) =>
-            s.name?.toLowerCase().includes(q) ||
-            s.rollNo?.toLowerCase().includes(q) ||
-            s.fatherName?.toLowerCase().includes(q) ||
-            s.guardian?.toLowerCase().includes(q) ||
-            s.guardianPhone?.toLowerCase().includes(q),
-        ),
-      }))
-      .filter((g) => g.students.length > 0);
-  }, [classGroups, search]);
-
-  const totalStudents = students.length;
-  const totalLocked = students.filter(
-    (s) => s.baseFeeLocked && s.baseFee != null && s.baseFee !== '',
-  ).length;
-  const totalCollected = invoices
-    .filter((i) => (i.status || '').toLowerCase() === 'paid')
-    .reduce((sum, i) => sum + Number(i.paidAmount || i.amount || 0), 0);
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Students (Class-wise)"
-        subtitle="Browse enrolled students grouped by class — click a class card to see every student inside."
-        action={
-          <Button
-            variant="outline"
-            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
-            onClick={onRefresh}
-          >
-            <Loader2 className={cn('h-4 w-4 mr-1.5', loading && 'animate-spin')} />
-            Refresh
-          </Button>
-        }
-      />
-
-      {/* KPI strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          icon={GraduationCap}
-          label="Total Students"
-          value={totalStudents}
-          sub={`${classGroups.length} class${classGroups.length === 1 ? '' : 'es'}`}
-        />
-        <StatCard
-          icon={Lock}
-          label="Fee Locked"
-          value={totalLocked}
-          sub="Ready for installments"
-        />
-        <StatCard
-          icon={Wallet}
-          label="Collected"
-          value={fmtMoney(totalCollected)}
-          sub="All-time paid"
-        />
-      </div>
-
-      {/* Search */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="relative">
-          <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, roll #, father / guardian, or contact…"
-            className={`${inputCls} pl-9`}
-          />
-        </div>
-      </div>
-
-      {/* Class cards */}
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-32 rounded-xl" />
-          ))}
-        </div>
-      ) : filteredGroups.length === 0 ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <EmptyState
-            icon={Users}
-            title={students.length === 0 ? 'No students enrolled yet' : 'No matching records'}
-            desc={
-              students.length === 0
-                ? 'The Admission Office must enroll students first. Once enrolled, they will appear here grouped by class.'
-                : 'Try a different search query.'
-            }
-          />
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredGroups.map((g) => {
-            const classPaid = g.students.reduce(
-              (acc, s) => acc + sumPaid(invoiceByStudent[s.id] || []),
-              0,
-            );
-            const classBalance = g.students.reduce(
-              (acc, s) => acc + sumOutstanding(invoiceByStudent[s.id] || []),
-              0,
-            );
-            const isOpen = expandedClass === g.className;
-            return (
-              <div
-                key={g.className}
-                className={cn(
-                  'rounded-xl border bg-white overflow-hidden transition-all',
-                  isOpen ? 'border-[#F26522] shadow-sm md:col-span-2 xl:col-span-3' : 'border-gray-200 hover:border-gray-300',
-                )}
-              >
-                {/* Card header — always visible */}
-                <button
-                  type="button"
-                  onClick={() => setExpandedClass(isOpen ? null : g.className)}
-                  className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-gray-50/60 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-10 w-10 rounded-lg bg-[#FFF0E8] grid place-items-center shrink-0">
-                      <GraduationCap className="h-5 w-5 text-[#F26522]" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">
-                        {g.className}
-                      </p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">
-                        {g.students.length} student{g.students.length === 1 ? '' : 's'} ·{' '}
-                        <span className="text-emerald-700">Paid {fmtMoney(classPaid)}</span>
-                        {classBalance > 0 && (
-                          <span className="text-amber-700"> · Due {fmtMoney(classBalance)}</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  {isOpen ? (
-                    <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 text-gray-400 shrink-0" />
-                  )}
-                </button>
-
-                {/* Expanded student list */}
-                {isOpen && (
-                  <div className="border-t border-gray-100">
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="border-gray-100 hover:bg-transparent">
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4">
-                              Roll #
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4">
-                              Name
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4">
-                              Father / Guardian
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4">
-                              Contact
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4 text-right">
-                              Base Fee
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4 text-right">
-                              Paid
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4 text-right">
-                              Balance
-                            </TableHead>
-                            <TableHead className="text-[10px] font-medium uppercase tracking-wider text-gray-400 px-4 text-center">
-                              Status
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {g.students.map((s) => {
-                            const invs = invoiceByStudent[s.id] || [];
-                            const paid = sumPaid(invs);
-                            const balance = sumOutstanding(invs);
-                            const status = deriveFeeStatus(invs);
-                            return (
-                              <TableRow
-                                key={s.id}
-                                className="border-gray-100 hover:bg-gray-50 cursor-pointer"
-                                onClick={() => setSelected(s)}
-                              >
-                                <TableCell className="text-xs font-mono text-gray-700 px-4 py-2.5">
-                                  {s.rollNo || '—'}
-                                </TableCell>
-                                <TableCell className="text-xs font-medium text-gray-900 px-4 py-2.5">
-                                  {s.name}
-                                </TableCell>
-                                <TableCell className="text-xs text-gray-700 px-4 py-2.5">
-                                  {s.guardian || s.fatherName || '—'}
-                                </TableCell>
-                                <TableCell className="text-xs text-gray-700 px-4 py-2.5 tabular-nums">
-                                  {s.guardianPhone || '—'}
-                                </TableCell>
-                                <TableCell className="text-xs text-gray-700 px-4 py-2.5 text-right tabular-nums">
-                                  {s.baseFee ? (
-                                    <span className="inline-flex items-center gap-1">
-                                      <Lock className="h-3 w-3 text-gray-400" />
-                                      {fmtMoney(Number(s.baseFee))}
-                                    </span>
-                                  ) : (
-                                    '—'
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-xs font-semibold text-gray-900 px-4 py-2.5 text-right tabular-nums">
-                                  {fmtMoney(paid)}
-                                </TableCell>
-                                <TableCell className="text-xs font-semibold text-gray-900 px-4 py-2.5 text-right tabular-nums">
-                                  {fmtMoney(balance)}
-                                </TableCell>
-                                <TableCell className="px-4 py-2.5 text-center">
-                                  <StatusBadge status={status} />
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Fee detail sheet */}
-      <StudentFeeSheet
-        student={selected}
-        invoices={selected ? invoiceByStudent[selected.id] || [] : []}
-        onClose={() => setSelected(null)}
-      />
-    </div>
-  );
-}
-
-function StudentFeeSheet({
-  student,
-  invoices,
-  onClose,
-}: {
-  student: any | null;
-  invoices: any[];
-  onClose: () => void;
-}) {
-  if (!student) return null;
-  const paid = sumPaid(invoices);
-  const balance = sumOutstanding(invoices);
-  const status = deriveFeeStatus(invoices);
-
-  return (
-    <Sheet open={!!student} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white">
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold text-gray-900">
-            Fee Detail
-          </SheetTitle>
-          <SheetDescription className="text-sm text-gray-500">
-            {student.name} · {student.rollNo || '—'}
-          </SheetDescription>
-        </SheetHeader>
-
-        <div className="px-4 pb-4 space-y-4">
-          {/* Student info */}
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <Row label="Roll Number" value={student.rollNo || '—'} mono />
-            <Row label="Class" value={`${student.class || '—'}${student.section ? ' · ' + student.section : ''}`} />
-            <Row label="Program" value={student.program || '—'} />
-            <Row label="Father / Guardian" value={student.guardian || student.fatherName || '—'} />
-            {student.guardianPhone ? (
-              <Row label="Father / Guardian Contact" value={student.guardianPhone} mono />
-            ) : null}
-            {student.cnic ? <Row label="CNIC" value={student.cnic} mono /> : null}
-            <Row
-              label="Base Fee (locked)"
-              value={student.baseFee ? fmtMoney(Number(student.baseFee)) : 'Not set'}
-              mono
-            />
-          </div>
-
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-lg border border-gray-200 bg-white p-3">
-              <p className="text-[10px] uppercase tracking-wider text-gray-400">Collected</p>
-              <p className="text-base font-bold text-gray-900 mt-1 tabular-nums">
-                {fmtMoney(paid)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white p-3">
-              <p className="text-[10px] uppercase tracking-wider text-gray-400">Balance</p>
-              <p className="text-base font-bold text-gray-900 mt-1 tabular-nums">
-                {fmtMoney(balance)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white p-3">
-              <p className="text-[10px] uppercase tracking-wider text-gray-400">Status</p>
-              <div className="mt-1.5">
-                <StatusBadge status={status} />
-              </div>
-            </div>
-          </div>
-
-          {/* Invoice list */}
-          <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-2">Invoices</h4>
-            {invoices.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-500">
-                No invoices issued yet. Generate a challan from the Fee Challans tab.
-              </div>
-            ) : (
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-gray-200 hover:bg-transparent">
-                      <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                        Period
-                      </TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                        Amount
-                      </TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">
-                        Status
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {invoices.map((inv) => (
-                      <TableRow key={inv.id} className="border-gray-100">
-                        <TableCell className="text-sm text-gray-700">
-                          {inv.month ? monthName(inv.month) : '—'}
-                          {inv.year ? ` ${inv.year}` : ''}
-                        </TableCell>
-                        <TableCell className="text-sm font-semibold text-gray-900 text-right tabular-nums">
-                          {fmtMoney(Number(inv.amount || 0))}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <StatusBadge status={inv.status} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <SheetFooter>
-          <Button
-            variant="outline"
-            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium w-full"
-            onClick={onClose}
-          >
-            Close
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 // ───────────────────────── 3. Fee & Installments (merged) ─────────────────────────
 //
 // One unified page that replaces the old Collect Payment + Fee Challans +
@@ -1203,6 +897,7 @@ type InstallmentRow = { id: string; amount: string; due: string };
 function FeeInstallmentsView({
   user,
   students,
+  classes,
   invoices,
   loading,
   onRefresh,
@@ -1211,13 +906,27 @@ function FeeInstallmentsView({
 }: {
   user: any;
   students: any[];
+  classes: any[];
   invoices: any[];
   loading: boolean;
   onRefresh: () => void;
   onInvoiceUpdate: (inv: any) => void;
   onStudentUpdate: (s: any) => void;
 }) {
+  type FeeDrill = {
+    dept: string | null;
+    part: string;
+    cls: { id: string; name: string; section: string } | null;
+    section: { id: string; name: string; section: string } | null;
+  };
+
   const [search, setSearch] = useState('');
+  const [drill, setDrill] = useState<FeeDrill>({
+    dept: null,
+    part: '1',
+    cls: null,
+    section: null,
+  });
   const [selected, setSelected] = useState<any | null>(null);
   const [rows, setRows] = useState<InstallmentRow[]>([]);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -1233,16 +942,73 @@ function FeeInstallmentsView({
     [students],
   );
 
-  const filteredStudents = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return lockedStudents;
+  // Per-department counts of locked-fee students (drives the DeptCardGrid).
+  const studentCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of DEPARTMENTS) map[d] = 0;
+    for (const s of lockedStudents) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return map;
+  }, [lockedStudents]);
+
+  // ── Hierarchy memos ──
+  const classesInDept = useMemo(() => {
+    if (!drill.dept) return [];
+    return classes.filter(
+      (c) => (c.program || '').trim() === drill.dept && String(c.part || '') === drill.part,
+    );
+  }, [classes, drill.dept, drill.part]);
+
+  const sectionsOfClass = useMemo(() => {
+    if (!drill.cls) return [];
+    return classes.filter((c) => c.name === drill.cls!.name);
+  }, [classes, drill.cls]);
+  const hasMultipleSections = sectionsOfClass.length > 1;
+
+  const activeClassId = drill.section?.id || drill.cls?.id || '';
+  const activeClassObj = classes.find((c) => c.id === activeClassId) || null;
+
+  const isSearching = search.trim().length > 0;
+
+  // ── Student list shown in the picker — flat search OR drilled class+section.
+  const displayedStudents = useMemo(() => {
+    if (isSearching) {
+      const q = search.trim().toLowerCase();
+      return lockedStudents.filter(
+        (s) =>
+          s.name?.toLowerCase().includes(q) ||
+          s.rollNo?.toLowerCase().includes(q) ||
+          s.class?.toLowerCase().includes(q),
+      );
+    }
+    if (!activeClassObj) return [];
     return lockedStudents.filter(
       (s) =>
-        s.name?.toLowerCase().includes(q) ||
-        s.rollNo?.toLowerCase().includes(q) ||
-        s.class?.toLowerCase().includes(q),
+        (s.class || '') === activeClassObj.name &&
+        (s.section || '') === activeClassObj.section,
     );
-  }, [lockedStudents, search]);
+  }, [lockedStudents, search, activeClassObj, isSearching]);
+
+  // Helper: count locked-fee students for a given class id (for the card grids).
+  const getLockedCountForClass = (clsId: string) => {
+    const c = classes.find((x) => x.id === clsId);
+    if (!c) return 0;
+    return lockedStudents.filter(
+      (s) => (s.class || '') === c.name && (s.section || '') === c.section,
+    ).length;
+  };
+
+  // Reset the selected student + plan builder whenever the user navigates
+  // to a new section or toggles between hierarchy / search modes — the
+  // detail panel should never show a stale student.
+  useEffect(() => {
+    setSelected(null);
+    setRows([]);
+    setPlanError(null);
+    setGeneratedLogin(null);
+  }, [activeClassId, isSearching]);
 
   // All invoices for the selected student
   const studentInvoices = useMemo(() => {
@@ -1469,6 +1235,418 @@ function FeeInstallmentsView({
     }
   };
 
+  // ── Drill handlers ──
+  const handleSelectDept = (dept: string) =>
+    setDrill({ dept, part: '1', cls: null, section: null });
+  const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
+    const secs = classes.filter((c) => c.name === cls.name);
+    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
+    else setDrill({ ...drill, cls, section: cls });
+  };
+  const handleSelectSection = (section: { id: string; name: string; section: string }) =>
+    setDrill({ ...drill, section });
+  const handleClearHierarchy = () =>
+    setDrill({ dept: null, part: '1', cls: null, section: null });
+
+  // ── Student picker + detail panel (rendered for both L4 and search-bypass) ──
+  const renderStudentPickerAndDetail = () => (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Student picker */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <SectionHeader
+          title={
+            isSearching
+              ? 'Matching Students'
+              : `${activeClassObj?.name || '—'} · Section ${activeClassObj?.section || '—'}`
+          }
+          desc={
+            displayedStudents.length === 0
+              ? 'No students with a locked fee here.'
+              : `${displayedStudents.length} student(s) with locked fee`
+          }
+        />
+        {loading ? (
+          <SkeletonTable rows={4} />
+        ) : (
+          <div className="space-y-1.5 max-h-[32rem] overflow-y-auto -mr-1 pr-1">
+            {displayedStudents.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title={
+                  lockedStudents.length === 0
+                    ? 'No locked fees'
+                    : isSearching
+                      ? 'No matching students'
+                      : 'No locked-fee students in this section'
+                }
+                desc={
+                  lockedStudents.length === 0
+                    ? "The Admission Office must lock each student's base fee first."
+                    : isSearching
+                      ? 'Try a different search.'
+                      : 'Pick another section or use the search box above.'
+                }
+              />
+            ) : (
+              displayedStudents.map((s) => {
+                const invs = invoices.filter((i) => i.studentId === s.id || i.userId === s.id);
+                const instCount = invs.filter((i) => (i.type || '').toLowerCase() === 'installment').length;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setSelected(s);
+                      setRows([]);
+                      setPlanError(null);
+                      setGeneratedLogin(null);
+                    }}
+                    className={cn(
+                      'w-full text-left p-3 rounded-lg border transition-colors',
+                      selected?.id === s.id
+                        ? 'border-[#F26522] bg-[#F26522]/5'
+                        : 'border-gray-200 hover:bg-gray-50',
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-gray-900 truncate">{s.name}</div>
+                      {instCount > 0 && (
+                        <span className="text-[10px] uppercase tracking-wider text-emerald-700 border border-emerald-100 bg-emerald-50 rounded px-1.5 py-0.5 shrink-0">
+                          {instCount} inst.
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-gray-500 truncate mt-0.5">
+                      {s.rollNo} · {s.class || '—'}
+                      {s.section ? `-${s.section}` : ''} · {fmtMoney(Number(s.baseFee || 0))}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Detail panel */}
+      <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5">
+        {!selected ? (
+          <EmptyState
+            icon={Receipt}
+            title="Select a student"
+            desc="Pick a student on the left to split their locked base fee into installments, collect payments, and download challans."
+          />
+        ) : (
+          <div className="space-y-5">
+            {/* Student summary */}
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{selected.name}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {selected.rollNo} · {selected.class || '—'}
+                  {selected.section ? `-${selected.section}` : ''}
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-[10px] uppercase tracking-wider text-gray-400">
+                  Base Fee (locked)
+                </p>
+                <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5 justify-end mt-0.5">
+                  <Lock className="h-3 w-3 text-gray-400" />
+                  {fmtMoney(baseFee)}
+                </p>
+              </div>
+            </div>
+
+            {/* Paid + Outstanding KPIs */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-gray-400">Collected</p>
+                <p className="text-base font-bold text-emerald-700 mt-1 tabular-nums">{fmtMoney(paidTotal)}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-gray-400">Outstanding</p>
+                <p className="text-base font-bold text-amber-700 mt-1 tabular-nums">{fmtMoney(outstandingTotal)}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wider text-gray-400">Installments</p>
+                <p className="text-base font-bold text-gray-900 mt-1 tabular-nums">
+                  {studentInstallments.length}
+                  <span className="text-xs text-gray-400 font-normal"> / plan</span>
+                </p>
+              </div>
+            </div>
+
+            {/* ── Installment plan builder ── */}
+            {studentInstallments.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/40 p-4">
+                <SectionHeader
+                  title="Create Installment Plan"
+                  desc="Add each installment with its amount and a due date you pick manually."
+                />
+                <div className="flex items-center gap-2 flex-wrap mb-3">
+                  <span className="text-xs text-gray-500">
+                    Quick split (you can edit dates after):
+                  </span>
+                  {[3, 4, 5].map((n) => (
+                    <Button
+                      key={n}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
+                      onClick={() => autoSplit(n)}
+                      disabled={!baseFee}
+                    >
+                      {n} installments
+                    </Button>
+                  ))}
+                </div>
+                {rows.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-gray-500 bg-white">
+                    No installments yet. Click “Add Row” to create each
+                    installment with its own due date, or use a quick split.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[2rem_1fr_1.3fr_2rem] gap-2 text-[10px] uppercase tracking-wider text-gray-400 px-1">
+                      <span>#</span>
+                      <span>Amount (Rs)</span>
+                      <span>Due Date (pick manually)</span>
+                      <span />
+                    </div>
+                    {rows.map((r, i) => (
+                      <div key={r.id} className="grid grid-cols-[2rem_1fr_1.3fr_2rem] gap-2 items-center">
+                        <span className="text-sm font-semibold text-gray-400 text-center">{i + 1}</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={r.amount}
+                          onChange={(e) => updateRow(r.id, { amount: e.target.value })}
+                          placeholder="0"
+                          className={`${inputCls} h-9`}
+                        />
+                        <Input
+                          type="date"
+                          value={r.due}
+                          onChange={(e) => updateRow(r.id, { due: e.target.value })}
+                          className={`${inputCls} h-9`}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                          onClick={() => removeRow(r.id)}
+                          aria-label="Remove installment"
+                        >
+                          ×
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mt-3">
+                  <Button
+                    variant="outline"
+                    className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
+                    onClick={addRow}
+                  >
+                    <Plus className="h-4 w-4 mr-1.5" /> Add Row
+                  </Button>
+                  <Button
+                    className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium ml-auto"
+                    onClick={createPlan}
+                    disabled={savingPlan || rows.length === 0}
+                  >
+                    {savingPlan ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Saving…
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-1.5" /> Create Installments
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {/* Totals */}
+                {rows.length > 0 && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-1.5 mt-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">Base Fee</span>
+                      <span className="font-mono text-gray-900">{fmtMoney(baseFee)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">Planned Total</span>
+                      <span className="font-mono text-gray-900">{fmtMoney(totalPlanned)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-200">
+                      <span className="font-semibold text-gray-700">Remaining</span>
+                      <span
+                        className={cn(
+                          'font-bold tabular-nums font-mono',
+                          remaining === 0 ? 'text-emerald-700' : 'text-gray-900',
+                        )}
+                      >
+                        {fmtMoney(remaining)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {planError && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 flex items-center gap-2 mt-3">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    {planError}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800">Installment plan active</p>
+                    <p className="text-[11px] text-emerald-700 mt-0.5">
+                      {studentInstallments.length} installments · use the list below to mark paid or download.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-700"
+                  onClick={() => {
+                    setRows(
+                      studentInstallments.map((i) => ({
+                        id: `inst-${i.id}`,
+                        amount: String(i.amount),
+                        due: i.dueDate || '',
+                      })),
+                    );
+                    setPlanError(null);
+                  }}
+                >
+                  Re-split
+                </Button>
+              </div>
+            )}
+
+            {/* ── Invoices list ── */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                All Invoices & Installments
+              </h4>
+              {studentInvoices.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-500">
+                  No invoices yet. Create an installment plan above.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {studentInvoices.map((inv) => {
+                    const isPaid = (inv.status || '').toLowerCase() === 'paid';
+                    const isInstallment = (inv.type || '').toLowerCase() === 'installment';
+                    return (
+                      <div
+                        key={inv.id}
+                        className={cn(
+                          'flex items-center justify-between gap-3 p-3 rounded-lg border',
+                          isPaid ? 'border-emerald-100 bg-emerald-50/40' : 'border-gray-200 bg-white',
+                        )}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-medium text-gray-900">
+                              {isInstallment
+                                ? `Installment — Due ${formatDate(inv.dueDate)}`
+                                : `${inv.type || 'Tuition'} — ${inv.month ? monthName(inv.month) : ''} ${inv.year || ''}`}
+                            </p>
+                            <StatusBadge status={inv.status} />
+                          </div>
+                          <p className="text-[11px] text-gray-400 mt-0.5 font-mono">
+                            {inv.challanNo || String(inv.id || '').slice(0, 12)}
+                            {inv.paidAt && ` · Paid ${formatDate(inv.paidAt)}`}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-bold text-gray-900 tabular-nums">
+                            {fmtMoney(Number(inv.amount || 0))}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2.5 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
+                            onClick={() => downloadChallanPdf(inv)}
+                            disabled={downloadingId === inv.id}
+                          >
+                            {downloadingId === inv.id ? (
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                            ) : (
+                              <Download className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            PDF
+                          </Button>
+                          {!isPaid && (
+                            <Button
+                              size="sm"
+                              className="h-8 px-2.5 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white"
+                              onClick={() => markPaid(inv)}
+                              disabled={markingId === inv.id}
+                            >
+                              {markingId === inv.id ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              Mark Paid
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Generated login confirmation */}
+            {generatedLogin && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <KeyRound className="h-4 w-4 text-emerald-700" />
+                  <p className="text-sm font-semibold text-emerald-800">
+                    Student login generated — share with the student
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-white border border-emerald-100 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400">Username (Roll #)</p>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.rollNo}</span>
+                      <CopyButton text={generatedLogin.rollNo} />
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-white border border-emerald-100 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400">Default Password</p>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.password}</span>
+                      <CopyButton text={generatedLogin.password} />
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[11px] text-emerald-700 mt-2.5">
+                  The student signs in at the portal with their{' '}
+                  <span className="font-semibold">Roll Number</span> and this{' '}
+                  <span className="font-semibold">password</span> — then changes it on first login.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -1505,397 +1683,208 @@ function FeeInstallmentsView({
 
       <LockedFeeCallout />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Student picker ── */}
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <SectionHeader
-            title="Select Student"
-            desc={lockedStudents.length === 0 ? 'No students with a locked fee yet.' : `${lockedStudents.length} student(s) with locked fee`}
+      {/* Search bar — always visible. Drives the flat-search fallback. */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="relative">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search locked-fee students by name, roll #, or class…"
+            className={`${inputCls} pl-9`}
           />
-          <div className="relative mb-3">
-            <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, roll #, class…"
-              className={`${inputCls} pl-9`}
-            />
-          </div>
-          {loading ? (
-            <SkeletonTable rows={4} />
-          ) : (
-            <div className="space-y-1.5 max-h-[32rem] overflow-y-auto -mr-1 pr-1">
-              {filteredStudents.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title={lockedStudents.length === 0 ? 'No locked fees' : 'No matching students'}
-                  desc={
-                    lockedStudents.length === 0
-                      ? 'The Admission Office must lock each student\'s base fee first.'
-                      : 'Try a different search.'
-                  }
-                />
-              ) : (
-                filteredStudents.map((s) => {
-                  const invs = invoices.filter((i) => i.studentId === s.id || i.userId === s.id);
-                  const instCount = invs.filter((i) => (i.type || '').toLowerCase() === 'installment').length;
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setSelected(s);
-                        setRows([]);
-                        setPlanError(null);
-                        setGeneratedLogin(null);
-                      }}
-                      className={cn(
-                        'w-full text-left p-3 rounded-lg border transition-colors',
-                        selected?.id === s.id
-                          ? 'border-[#F26522] bg-[#F26522]/5'
-                          : 'border-gray-200 hover:bg-gray-50',
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-gray-900 truncate">{s.name}</div>
-                        {instCount > 0 && (
-                          <span className="text-[10px] uppercase tracking-wider text-emerald-700 border border-emerald-100 bg-emerald-50 rounded px-1.5 py-0.5 shrink-0">
-                            {instCount} inst.
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-gray-500 truncate mt-0.5">
-                        {s.rollNo} · {s.class || '—'}
-                        {s.section ? `-${s.section}` : ''} · {fmtMoney(Number(s.baseFee || 0))}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── Detail panel ── */}
-        <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5">
-          {!selected ? (
-            <EmptyState
-              icon={Receipt}
-              title="Select a student"
-              desc="Pick a student on the left to split their locked base fee into installments, collect payments, and download challans."
-            />
-          ) : (
-            <div className="space-y-5">
-              {/* Student summary */}
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{selected.name}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {selected.rollNo} · {selected.class || '—'}
-                    {selected.section ? `-${selected.section}` : ''}
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-400">
-                    Base Fee (locked)
-                  </p>
-                  <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5 justify-end mt-0.5">
-                    <Lock className="h-3 w-3 text-gray-400" />
-                    {fmtMoney(baseFee)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Paid + Outstanding KPIs */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-lg border border-gray-200 bg-white p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-400">Collected</p>
-                  <p className="text-base font-bold text-emerald-700 mt-1 tabular-nums">{fmtMoney(paidTotal)}</p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-white p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-400">Outstanding</p>
-                  <p className="text-base font-bold text-amber-700 mt-1 tabular-nums">{fmtMoney(outstandingTotal)}</p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-white p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-400">Installments</p>
-                  <p className="text-base font-bold text-gray-900 mt-1 tabular-nums">
-                    {studentInstallments.length}
-                    <span className="text-xs text-gray-400 font-normal"> / plan</span>
-                  </p>
-                </div>
-              </div>
-
-              {/* ── Installment plan builder ── */}
-              {studentInstallments.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/40 p-4">
-                  <SectionHeader
-                    title="Create Installment Plan"
-                    desc="Add each installment with its amount and a due date you pick manually."
-                  />
-                  <div className="flex items-center gap-2 flex-wrap mb-3">
-                    <span className="text-xs text-gray-500">
-                      Quick split (you can edit dates after):
-                    </span>
-                    {[3, 4, 5].map((n) => (
-                      <Button
-                        key={n}
-                        variant="outline"
-                        size="sm"
-                        className="h-8 px-3 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
-                        onClick={() => autoSplit(n)}
-                        disabled={!baseFee}
-                      >
-                        {n} installments
-                      </Button>
-                    ))}
-                  </div>
-                  {rows.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-gray-500 bg-white">
-                      No installments yet. Click “Add Row” to create each
-                      installment with its own due date, or use a quick split.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-[2rem_1fr_1.3fr_2rem] gap-2 text-[10px] uppercase tracking-wider text-gray-400 px-1">
-                        <span>#</span>
-                        <span>Amount (Rs)</span>
-                        <span>Due Date (pick manually)</span>
-                        <span />
-                      </div>
-                      {rows.map((r, i) => (
-                        <div key={r.id} className="grid grid-cols-[2rem_1fr_1.3fr_2rem] gap-2 items-center">
-                          <span className="text-sm font-semibold text-gray-400 text-center">{i + 1}</span>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={r.amount}
-                            onChange={(e) => updateRow(r.id, { amount: e.target.value })}
-                            placeholder="0"
-                            className={`${inputCls} h-9`}
-                          />
-                          <Input
-                            type="date"
-                            value={r.due}
-                            onChange={(e) => updateRow(r.id, { due: e.target.value })}
-                            className={`${inputCls} h-9`}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-gray-400 hover:text-rose-600 hover:bg-rose-50"
-                            onClick={() => removeRow(r.id)}
-                            aria-label="Remove installment"
-                          >
-                            ×
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 mt-3">
-                    <Button
-                      variant="outline"
-                      className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
-                      onClick={addRow}
-                    >
-                      <Plus className="h-4 w-4 mr-1.5" /> Add Row
-                    </Button>
-                    <Button
-                      className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium ml-auto"
-                      onClick={createPlan}
-                      disabled={savingPlan || rows.length === 0}
-                    >
-                      {savingPlan ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Saving…
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 mr-1.5" /> Create Installments
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  {/* Totals */}
-                  {rows.length > 0 && (
-                    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-1.5 mt-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Base Fee</span>
-                        <span className="font-mono text-gray-900">{fmtMoney(baseFee)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Planned Total</span>
-                        <span className="font-mono text-gray-900">{fmtMoney(totalPlanned)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-200">
-                        <span className="font-semibold text-gray-700">Remaining</span>
-                        <span
-                          className={cn(
-                            'font-bold tabular-nums font-mono',
-                            remaining === 0 ? 'text-emerald-700' : 'text-gray-900',
-                          )}
-                        >
-                          {fmtMoney(remaining)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {planError && (
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 flex items-center gap-2 mt-3">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      {planError}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-800">Installment plan active</p>
-                      <p className="text-[11px] text-emerald-700 mt-0.5">
-                        {studentInstallments.length} installments · use the list below to mark paid or download.
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 px-3 text-xs border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-700"
-                    onClick={() => {
-                      setRows(
-                        studentInstallments.map((i) => ({
-                          id: `inst-${i.id}`,
-                          amount: String(i.amount),
-                          due: i.dueDate || '',
-                        })),
-                      );
-                      setPlanError(null);
-                    }}
-                  >
-                    Re-split
-                  </Button>
-                </div>
-              )}
-
-              {/* ── Invoices list ── */}
-              <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                  All Invoices & Installments
-                </h4>
-                {studentInvoices.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-500">
-                    No invoices yet. Create an installment plan above.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {studentInvoices.map((inv) => {
-                      const isPaid = (inv.status || '').toLowerCase() === 'paid';
-                      const isInstallment = (inv.type || '').toLowerCase() === 'installment';
-                      return (
-                        <div
-                          key={inv.id}
-                          className={cn(
-                            'flex items-center justify-between gap-3 p-3 rounded-lg border',
-                            isPaid ? 'border-emerald-100 bg-emerald-50/40' : 'border-gray-200 bg-white',
-                          )}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="text-sm font-medium text-gray-900">
-                                {isInstallment
-                                  ? `Installment — Due ${formatDate(inv.dueDate)}`
-                                  : `${inv.type || 'Tuition'} — ${inv.month ? monthName(inv.month) : ''} ${inv.year || ''}`}
-                              </p>
-                              <StatusBadge status={inv.status} />
-                            </div>
-                            <p className="text-[11px] text-gray-400 mt-0.5 font-mono">
-                              {inv.challanNo || String(inv.id || '').slice(0, 12)}
-                              {inv.paidAt && ` · Paid ${formatDate(inv.paidAt)}`}
-                            </p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-sm font-bold text-gray-900 tabular-nums">
-                              {fmtMoney(Number(inv.amount || 0))}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2.5 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
-                              onClick={() => downloadChallanPdf(inv)}
-                              disabled={downloadingId === inv.id}
-                            >
-                              {downloadingId === inv.id ? (
-                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                              ) : (
-                                <Download className="h-3.5 w-3.5 mr-1" />
-                              )}
-                              PDF
-                            </Button>
-                            {!isPaid && (
-                              <Button
-                                size="sm"
-                                className="h-8 px-2.5 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white"
-                                onClick={() => markPaid(inv)}
-                                disabled={markingId === inv.id}
-                              >
-                                {markingId === inv.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                                )}
-                                Mark Paid
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Generated login confirmation */}
-              {generatedLogin && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <KeyRound className="h-4 w-4 text-emerald-700" />
-                    <p className="text-sm font-semibold text-emerald-800">
-                      Student login generated — share with the student
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-lg bg-white border border-emerald-100 p-3">
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Username (Roll #)</p>
-                      <div className="flex items-center justify-between gap-2 mt-0.5">
-                        <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.rollNo}</span>
-                        <CopyButton text={generatedLogin.rollNo} />
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-white border border-emerald-100 p-3">
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Default Password</p>
-                      <div className="flex items-center justify-between gap-2 mt-0.5">
-                        <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.password}</span>
-                        <CopyButton text={generatedLogin.password} />
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-emerald-700 mt-2.5">
-                    The student signs in at the portal with their{' '}
-                    <span className="font-semibold">Roll Number</span> and this{' '}
-                    <span className="font-semibold">password</span> — then changes it on first login.
-                  </p>
-                </div>
-              )}
-            </div>
+          {isSearching && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
+              {displayedStudents.length} match{displayedStudents.length === 1 ? '' : 'es'}
+            </span>
           )}
         </div>
       </div>
+
+      {/* ── Body: search results / hierarchy / drilled-in picker+detail ── */}
+      {isSearching ? (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Search Results</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Matching locked-fee students across all departments
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() => setSearch('')}
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to hierarchy
+            </Button>
+          </div>
+          {renderStudentPickerAndDetail()}
+        </motion.div>
+      ) : !drill.dept ? (
+        // ── L1: Department cards ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Select a Department</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Browse the 6 Concordia departments to find students with a locked base fee.
+            </p>
+          </div>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-32 rounded-2xl" />
+              ))}
+            </div>
+          ) : (
+            <DeptCardGrid onSelect={handleSelectDept} studentCounts={studentCounts} />
+          )}
+        </motion.div>
+      ) : !drill.cls ? (
+        // ── L2: Part toggle + class cards ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb dept={drill.dept} part={drill.part} onClear={handleClearHierarchy} />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.
+              </p>
+            </div>
+            <PartToggle
+              value={drill.part}
+              onChange={(p) => setDrill((d) => ({ ...d, part: p, cls: null, section: null }))}
+            />
+          </div>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-28 rounded-xl" />
+              ))}
+            </div>
+          ) : classesInDept.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
+              <GraduationCap className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm font-medium text-gray-900">
+                No classes found for {drill.dept} · Part {drill.part}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                The Academic Office needs to create classes with program={drill.dept} and
+                part={drill.part}. Meanwhile, you can still search locked-fee students by name
+                or roll # above.
+              </p>
+            </div>
+          ) : (
+            <ClassCardGrid
+              classes={classesInDept}
+              onSelect={handleSelectClass}
+              getStudentCount={getLockedCountForClass}
+            />
+          )}
+        </motion.div>
+      ) : hasMultipleSections && !drill.section ? (
+        // ── L3: Section cards (only when multiple sections exist) ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            cls={drill.cls.name}
+            onClear={handleClearHierarchy}
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {drill.cls.name} — Select Section
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                This class has multiple sections. Pick one to view its locked-fee students.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() => setDrill((d) => ({ ...d, cls: null, section: null }))}
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to classes
+            </Button>
+          </div>
+          <SectionCardGrid
+            sections={sectionsOfClass}
+            onSelect={handleSelectSection}
+            getStudentCount={getLockedCountForClass}
+          />
+        </motion.div>
+      ) : (
+        // ── L4: Student picker + detail panel ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            cls={drill.cls.name}
+            section={(drill.section || drill.cls).section}
+            onClear={handleClearHierarchy}
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {drill.cls.name} · Section {(drill.section || drill.cls).section}
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {displayedStudents.length} locked-fee student
+                {displayedStudents.length === 1 ? '' : 's'} in this section
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() =>
+                setDrill((d) => ({
+                  ...d,
+                  cls: hasMultipleSections ? d.cls : null,
+                  section: null,
+                }))
+              }
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+              {hasMultipleSections ? 'Back to sections' : 'Back to classes'}
+            </Button>
+          </div>
+          {renderStudentPickerAndDetail()}
+        </motion.div>
+      )}
     </div>
   );
 }
+
+
 
 
 // ───────────────────────── 6. Miscellaneous Charges ─────────────────────────
@@ -1910,10 +1899,29 @@ type MiscCharge = {
   createdAt: string;
 };
 
-function MiscChargesView({ user, students, loading }: { user: any; students: any[]; loading: boolean }) {
+function MiscChargesView({
+  user,
+  students,
+  classes,
+  loading,
+}: {
+  user: any;
+  students: any[];
+  classes: any[];
+  loading: boolean;
+}) {
+  type MiscDrill = {
+    dept: string | null;
+    part: string;
+    cls: { id: string; name: string; section: string } | null;
+    section: { id: string; name: string; section: string } | null;
+  };
+
   const [charges, setCharges] = useState<MiscCharge[]>([]);
   const [chargesLoading, setChargesLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  // ── Per-student charge form state (preserved from the legacy view) ──
   const [studentSearch, setStudentSearch] = useState('');
   const [selStudent, setSelStudent] = useState('');
   const [type, setType] = useState(MISC_CHARGE_TYPES[0]);
@@ -1921,6 +1929,23 @@ function MiscChargesView({ user, students, loading }: { user: any; students: any
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
   const [saving, setSaving] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+
+  // ── Bulk-charge card state ──
+  const [bulkPart, setBulkPart] = useState('1');
+  const [bulkDept, setBulkDept] = useState('All');
+  const [bulkType, setBulkType] = useState('');
+  const [bulkAmount, setBulkAmount] = useState('');
+  const [bulkDesc, setBulkDesc] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  // ── Hierarchy drill state ──
+  const [drill, setDrill] = useState<MiscDrill>({
+    dept: null,
+    part: '1',
+    cls: null,
+    section: null,
+  });
 
   // Load persisted misc charges for the branch
   useEffect(() => {
@@ -1941,19 +1966,75 @@ function MiscChargesView({ user, students, loading }: { user: any; students: any
     };
   }, [user?.branchId]);
 
-  const filteredCharges = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return charges;
-    return charges.filter(
-      (c) =>
-        c.studentName?.toLowerCase().includes(q) ||
-        c.type?.toLowerCase().includes(q),
-    );
-  }, [charges, search]);
+  // Reload the charges list (called after bulk / per-student adds).
+  const reloadCharges = () => {
+    setChargesLoading(true);
+    api
+      .getMiscCharges({ branchId: user?.branchId })
+      .then((data) => setCharges(Array.isArray(data) ? (data as MiscCharge[]) : []))
+      .catch(() => setCharges([]))
+      .finally(() => setChargesLoading(false));
+  };
 
-  // Searchable student list — students are ONLY shown when the accountant
-  // types a name (or roll # / class). This keeps the list short and focused
-  // instead of dumping every enrolled student at once.
+  // Per-department student counts (drives the DeptCardGrid).
+  const studentCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of DEPARTMENTS) map[d] = 0;
+    for (const s of students) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return map;
+  }, [students]);
+
+  // ── Hierarchy memos ──
+  const classesInDept = useMemo(() => {
+    if (!drill.dept) return [];
+    return classes.filter(
+      (c) => (c.program || '').trim() === drill.dept && String(c.part || '') === drill.part,
+    );
+  }, [classes, drill.dept, drill.part]);
+
+  const sectionsOfClass = useMemo(() => {
+    if (!drill.cls) return [];
+    return classes.filter((c) => c.name === drill.cls!.name);
+  }, [classes, drill.cls]);
+  const hasMultipleSections = sectionsOfClass.length > 1;
+
+  const activeClassId = drill.section?.id || drill.cls?.id || '';
+  const activeClassObj = classes.find((c) => c.id === activeClassId) || null;
+
+  const isSearching = search.trim().length > 0;
+
+  // Map studentId → student row, for joining charges back to a class+section.
+  const studentById = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const s of students) m[s.id] = s;
+    return m;
+  }, [students]);
+
+  // Charges shown in the list — flat search OR filtered to the drilled section.
+  const displayedCharges = useMemo(() => {
+    if (isSearching) {
+      const q = search.trim().toLowerCase();
+      return charges.filter(
+        (c) =>
+          c.studentName?.toLowerCase().includes(q) ||
+          c.type?.toLowerCase().includes(q),
+      );
+    }
+    if (!activeClassObj) return charges;
+    return charges.filter((c) => {
+      const s = studentById[c.studentId];
+      if (!s) return false;
+      return (
+        (s.class || '') === activeClassObj.name &&
+        (s.section || '') === activeClassObj.section
+      );
+    });
+  }, [charges, search, activeClassObj, isSearching, studentById]);
+
+  // Searchable student list for the per-student Add Charge form.
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase();
     if (!q) return [];
@@ -1969,8 +2050,9 @@ function MiscChargesView({ user, students, loading }: { user: any; students: any
   const isOther = type === 'Other';
   const finalType = isOther ? customType.trim() : type;
 
-  const total = charges.reduce((acc, c) => acc + c.amount, 0);
+  const total = displayedCharges.reduce((acc, c) => acc + c.amount, 0);
 
+  // ── Add a single per-student charge (preserved legacy logic) ──
   const add = async () => {
     if (!selStudent) {
       toast({ title: 'Select a student', variant: 'destructive' });
@@ -2011,10 +2093,13 @@ function MiscChargesView({ user, students, loading }: { user: any; students: any
       setDesc('');
       setCustomType('');
       setType(MISC_CHARGE_TYPES[0]);
+      setSelStudent('');
+      setStudentSearch('');
       toast({
         title: 'Charge added',
         description: `${finalType} — ${fmtMoney(v)} for ${selectedStudent?.name || 'student'}.`,
       });
+      setAddOpen(false);
     } catch (e: any) {
       toast({
         title: 'Could not add charge',
@@ -2042,18 +2127,487 @@ function MiscChargesView({ user, students, loading }: { user: any; students: any
     }
   };
 
+  // ── Apply a bulk charge to every student in the chosen Part (+ optional dept) ──
+  const applyBulk = async () => {
+    const t = bulkType.trim();
+    if (!t) {
+      toast({ title: 'Enter a charge type', variant: 'destructive' });
+      return;
+    }
+    const v = Number(bulkAmount);
+    if (!bulkAmount || isNaN(v) || v <= 0) {
+      toast({
+        title: 'Enter a valid amount',
+        description: 'Amount must be a positive number.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setBulkSaving(true);
+    try {
+      const res = await api.bulkAddMiscCharges({
+        part: bulkPart,
+        program: bulkDept === 'All' ? undefined : bulkDept,
+        branchId: user?.branchId,
+        type: t,
+        amount: v,
+        description: bulkDesc.trim(),
+      });
+      toast({
+        title: 'Bulk charge applied',
+        description: `Applied "${t}" of Rs ${v.toLocaleString('en-PK')} to ${res?.created ?? 0} students (Part ${bulkPart}).`,
+      });
+      setBulkType('');
+      setBulkAmount('');
+      setBulkDesc('');
+      reloadCharges();
+    } catch (e: any) {
+      toast({
+        title: 'Could not apply bulk charge',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
+  // ── Drill handlers ──
+  const handleSelectDept = (dept: string) =>
+    setDrill({ dept, part: '1', cls: null, section: null });
+  const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
+    const secs = classes.filter((c) => c.name === cls.name);
+    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
+    else setDrill({ ...drill, cls, section: cls });
+  };
+  const handleSelectSection = (section: { id: string; name: string; section: string }) =>
+    setDrill({ ...drill, section });
+  const handleClearHierarchy = () =>
+    setDrill({ dept: null, part: '1', cls: null, section: null });
+
+  // Helper: count students for a given class id (for the card grids).
+  const getStudentCountForClass = (clsId: string) => {
+    const c = classes.find((x) => x.id === clsId);
+    if (!c) return 0;
+    return students.filter(
+      (s) => (s.class || '') === c.name && (s.section || '') === c.section,
+    ).length;
+  };
+
+  // ── Charges list card — used by both search mode and L4 drilled-in mode ──
+  const renderChargesList = (title: string, subtitle: string) => (
+    <div className="rounded-xl border border-gray-200 bg-white p-5">
+      <SectionHeader
+        title={title}
+        desc={subtitle}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-3 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
+            onClick={() => setAddOpen(true)}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Add Individual Charge
+          </Button>
+        }
+      />
+      {chargesLoading ? (
+        <SkeletonTable rows={5} />
+      ) : displayedCharges.length === 0 ? (
+        <EmptyState
+          icon={DollarSign}
+          title={charges.length === 0 ? 'No misc charges yet' : 'No charges in this view'}
+          desc={
+            charges.length === 0
+              ? 'Use the bulk card above or the “Add Individual Charge” button to record the first charge.'
+              : 'Try a different section or clear the search.'
+          }
+        />
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-200 hover:bg-transparent">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                  Student
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                  Type
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
+                  Amount
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                  Description
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
+                  Action
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {displayedCharges.map((c) => (
+                <TableRow key={c.id} className="border-gray-100 hover:bg-gray-50">
+                  <TableCell className="text-sm font-medium text-gray-900">
+                    {c.studentName}
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-700">
+                    <Badge
+                      variant="outline"
+                      className="bg-gray-50 text-gray-700 border-gray-200 text-[10px]"
+                    >
+                      {c.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm font-semibold text-gray-900 text-right tabular-nums">
+                    {fmtMoney(c.amount)}
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-500 max-w-xs truncate">
+                    {c.description || '—'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs text-gray-500 hover:text-rose-600 hover:bg-rose-50"
+                      onClick={() => remove(c.id)}
+                    >
+                      Remove
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Miscellaneous Charges"
-        subtitle="One-off fees (admission, exam, or custom) — separate from base tuition."
+        subtitle="One-off fees (admission, exam, or custom) — separate from base tuition. Bulk-apply to a whole cohort, or add per student."
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Add form */}
-        <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5">
-          <SectionHeader title="Add Charge" desc="Record a one-off fee for a student." />
-          <div className="space-y-3">
+      {/* ── Bulk-charge card (always visible at the top) ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50/60 to-orange-50/40 p-5"
+      >
+        <SectionHeader
+          title="Add Bulk Charge"
+          desc="Apply a one-off charge to every student in a Part (optionally filtered by department)."
+          action={
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 bg-amber-100 border border-amber-200 rounded-md px-2 py-0.5">
+              <Zap className="h-3 w-3" /> Bulk action
+            </span>
+          }
+        />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Part toggle */}
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5 block">
+              Part
+            </Label>
+            <PartToggle value={bulkPart} onChange={setBulkPart} />
+          </div>
+          {/* Department select */}
+          <Field label="Department (optional)">
+            <Select value={bulkDept} onValueChange={setBulkDept}>
+              <SelectTrigger className={`${inputCls} w-full`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Departments</SelectItem>
+                {DEPARTMENTS.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {/* Charge type — free text */}
+          <Field label="Charge Type" required>
+            <Input
+              value={bulkType}
+              onChange={(e) => setBulkType(e.target.value)}
+              placeholder="e.g. Board admission fee"
+              className={inputCls}
+            />
+          </Field>
+          {/* Amount */}
+          <Field label="Amount (PKR)" required>
+            <div className="relative">
+              <DollarSign className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Input
+                type="number"
+                min={0}
+                value={bulkAmount}
+                onChange={(e) => setBulkAmount(e.target.value)}
+                placeholder="0"
+                className={`${inputCls} pl-9`}
+              />
+            </div>
+          </Field>
+          {/* Description */}
+          <div className="md:col-span-2">
+            <Field label="Description (optional)">
+              <Textarea
+                value={bulkDesc}
+                onChange={(e) => setBulkDesc(e.target.value)}
+                rows={2}
+                placeholder="e.g. Annual board registration — March 2025"
+                className="rounded-lg border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#F26522] focus:ring-2 focus:ring-[#F26522]/12"
+              />
+            </Field>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t border-amber-200/60">
+          <p className="text-xs text-amber-800/90 leading-relaxed">
+            This charge applies to every student in{' '}
+            <span className="font-semibold">Part {bulkPart}</span>
+            {bulkDept !== 'All' ? (
+              <>
+                {' '}· <span className="font-semibold">{bulkDept}</span>
+              </>
+            ) : null}
+            .
+          </p>
+          <Button
+            className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium shrink-0"
+            onClick={applyBulk}
+            disabled={bulkSaving}
+          >
+            {bulkSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Applying…
+              </>
+            ) : (
+              <>
+                <Zap className="h-4 w-4 mr-1.5" /> Apply to All Students
+              </>
+            )}
+          </Button>
+        </div>
+      </motion.div>
+
+      {/* Search bar — always visible. Drives the flat-search fallback. */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="relative">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search charges by student name or charge type…"
+            className={`${inputCls} pl-9`}
+          />
+          {isSearching && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
+              {displayedCharges.length} match{displayedCharges.length === 1 ? '' : 'es'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Body: search results / hierarchy / drilled-in charges ── */}
+      {isSearching ? (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Search Results</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Matching charges across all students · Total {fmtMoney(total)}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() => setSearch('')}
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to hierarchy
+            </Button>
+          </div>
+          {renderChargesList('Matching Charges', `${displayedCharges.length} record(s) · Total ${fmtMoney(total)}`)}
+        </motion.div>
+      ) : !drill.dept ? (
+        // ── L1: Department cards ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Select a Department</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Drill into a department to view per-student charges for its classes.
+            </p>
+          </div>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-32 rounded-2xl" />
+              ))}
+            </div>
+          ) : (
+            <DeptCardGrid onSelect={handleSelectDept} studentCounts={studentCounts} />
+          )}
+        </motion.div>
+      ) : !drill.cls ? (
+        // ── L2: Part toggle + class cards ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb dept={drill.dept} part={drill.part} onClear={handleClearHierarchy} />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.
+              </p>
+            </div>
+            <PartToggle
+              value={drill.part}
+              onChange={(p) => setDrill((d) => ({ ...d, part: p, cls: null, section: null }))}
+            />
+          </div>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-28 rounded-xl" />
+              ))}
+            </div>
+          ) : classesInDept.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
+              <GraduationCap className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm font-medium text-gray-900">
+                No classes found for {drill.dept} · Part {drill.part}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                The Academic Office needs to create classes with program={drill.dept} and
+                part={drill.part}. Meanwhile, you can still search charges by student name above.
+              </p>
+            </div>
+          ) : (
+            <ClassCardGrid
+              classes={classesInDept}
+              onSelect={handleSelectClass}
+              getStudentCount={getStudentCountForClass}
+            />
+          )}
+        </motion.div>
+      ) : hasMultipleSections && !drill.section ? (
+        // ── L3: Section cards (only when multiple sections exist) ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            cls={drill.cls.name}
+            onClear={handleClearHierarchy}
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {drill.cls.name} — Select Section
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                This class has multiple sections. Pick one to view its charges.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() => setDrill((d) => ({ ...d, cls: null, section: null }))}
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to classes
+            </Button>
+          </div>
+          <SectionCardGrid
+            sections={sectionsOfClass}
+            onSelect={handleSelectSection}
+            getStudentCount={getStudentCountForClass}
+          />
+        </motion.div>
+      ) : (
+        // ── L4: Charges for the drilled class + section ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            cls={drill.cls.name}
+            section={(drill.section || drill.cls).section}
+            onClear={handleClearHierarchy}
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {drill.cls.name} · Section {(drill.section || drill.cls).section}
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {displayedCharges.length} charge{displayedCharges.length === 1 ? '' : 's'} · Total {fmtMoney(total)}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() =>
+                setDrill((d) => ({
+                  ...d,
+                  cls: hasMultipleSections ? d.cls : null,
+                  section: null,
+                }))
+              }
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+              {hasMultipleSections ? 'Back to sections' : 'Back to classes'}
+            </Button>
+          </div>
+          {renderChargesList(
+            `Charges — ${drill.cls.name} · Section ${(drill.section || drill.cls).section}`,
+            `${displayedCharges.length} record(s) · Total ${fmtMoney(total)}`,
+          )}
+        </motion.div>
+      )}
+
+      {/* ── Per-student Add Charge Sheet (preserved form) ── */}
+      <Sheet open={addOpen} onOpenChange={(o) => !o && setAddOpen(false)}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white">
+          <SheetHeader>
+            <SheetTitle className="text-base font-semibold text-gray-900">
+              Add Individual Charge
+            </SheetTitle>
+            <SheetDescription className="text-sm text-gray-500">
+              Record a one-off fee for a specific student.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="px-4 pb-4 space-y-4">
             {/* Searchable student picker */}
             <Field label="Student" required>
               {selStudent ? (
@@ -2181,116 +2735,36 @@ function MiscChargesView({ user, students, loading }: { user: any; students: any
                 className="rounded-lg border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#F26522] focus:ring-2 focus:ring-[#F26522]/12"
               />
             </Field>
-            <Button
-              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-10 px-4 text-sm font-medium w-full"
-              onClick={add}
-              disabled={saving}
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Saving…
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4 mr-1.5" /> Add Charge
-                </>
-              )}
-            </Button>
           </div>
-        </div>
 
-        {/* List */}
-        <div className="lg:col-span-3 rounded-xl border border-gray-200 bg-white p-5">
-          <SectionHeader
-            title="All Charges"
-            desc={`${charges.length} record(s) · Total ${fmtMoney(total)}`}
-            action={
-              <div className="relative w-44">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search…"
-                  className={`${inputCls} pl-9 h-9`}
-                />
-              </div>
-            }
-          />
-          {chargesLoading ? (
-            <SkeletonTable rows={5} />
-          ) : filteredCharges.length === 0 ? (
-            <EmptyState
-              icon={DollarSign}
-              title={charges.length === 0 ? 'No misc charges yet' : 'No matching charges'}
-              desc={
-                charges.length === 0
-                  ? 'Use the form on the left to add the first charge.'
-                  : 'Try a different search.'
-              }
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-gray-200 hover:bg-transparent">
-                    <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                      Student
-                    </TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                      Type
-                    </TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                      Amount
-                    </TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                      Description
-                    </TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                      Action
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredCharges.map((c) => (
-                    <TableRow key={c.id} className="border-gray-100 hover:bg-gray-50">
-                      <TableCell className="text-sm font-medium text-gray-900">
-                        {c.studentName}
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-700">
-                        <Badge
-                          variant="outline"
-                          className="bg-gray-50 text-gray-700 border-gray-200 text-[10px]"
-                        >
-                          {c.type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm font-semibold text-gray-900 text-right tabular-nums">
-                        {fmtMoney(c.amount)}
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-500 max-w-xs truncate">
-                        {c.description || c.desc || '—'}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2 text-xs text-gray-500 hover:text-rose-600 hover:bg-rose-50"
-                          onClick={() => remove(c.id)}
-                        >
-                          Remove
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+          <SheetFooter>
+            <div className="grid grid-cols-2 gap-2 w-full">
+              <button
+                onClick={() => setAddOpen(false)}
+                className={cn(btnSecondary, 'justify-center h-10')}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={add}
+                disabled={saving}
+                className={cn(btnPrimary, 'justify-center h-10')}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                Add Charge
+              </button>
             </div>
-          )}
-        </div>
-      </div>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
+
 
 
 // ───────────────────────── 7. Create Logins (Student + Teacher) ─────────────────────────
@@ -2306,9 +2780,7 @@ function LoginsView({
   loading: boolean;
   onUpdate: (s: any) => void;
 }) {
-  const [tab, setTab] = useState<'student' | 'teacher'>('student');
-
-  // --- Student logins state (existing flow) ---
+  // --- Student logins state ---
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'with' | 'without'>('all');
   const [creating, setCreating] = useState('');
@@ -2316,26 +2788,10 @@ function LoginsView({
     Record<string, { rollNo: string; password: string }>
   >({});
 
-  // --- Teacher login form state ---
-  // Note: the accountant only creates the teacher's LOGIN (name, ID,
-  // email, password). Subjects and classes are assigned later by the
-  // Academic Office, so they are intentionally NOT part of this form.
-  const [form, setForm] = useState({
-    name: '',
-    rollNo: '',
-    email: '',
-    password: '',
-  });
-  const [saving, setSaving] = useState(false);
-  const [created, setCreated] = useState<{ user: string; pass: string; name: string } | null>(
-    null,
-  );
-  const nameRef = useRef<HTMLInputElement>(null);
-
-  // --- Student edit + block state (Task 15) ---
+  // --- Student edit + block state ---
   // The accountant can edit a student's portal details (name, roll #,
   // email, password, class, section, guardian, contact, CNIC) and can
-  // block / unblock a student's login from the Student Logins tab.
+  // block / unblock a student's login.
   const [editStudent, setEditStudent] = useState<any | null>(null);
   const [studentForm, setStudentForm] = useState({
     name: '',
@@ -2353,64 +2809,18 @@ function LoginsView({
   const [savingStudent, setSavingStudent] = useState(false);
   const [blockingStudentId, setBlockingStudentId] = useState('');
 
-  // --- Manage-access popup state (Task 32) ---
-  // When the accountant clicks "Block" on a student or teacher, instead of
+  // --- Manage-access popup state ---
+  // When the accountant clicks "Block" on a student, instead of
   // immediately blocking we open a popup offering two choices:
   //   • Block  — temporary; the user can't log in but their data is kept.
   //   • Delete — permanent; the login AND all their data are erased forever.
-  // `manageTarget` holds the user being acted on + which list they came from.
-  // `manageMode` flips between the choice view ('choose') and the delete
-  // confirmation view ('confirm-delete') once Delete is picked.
+  // `manageTarget` holds the student being acted on. `manageMode` flips
+  // between the choice view ('choose') and the delete confirmation view
+  // ('confirm-delete') once Delete is picked.
   const [manageTarget, setManageTarget] = useState<any | null>(null);
-  const [manageKind, setManageKind] = useState<'student' | 'teacher'>('student');
   const [manageMode, setManageMode] = useState<'choose' | 'confirm-delete'>('choose');
   const [manageBusy, setManageBusy] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
-
-  // --- Teacher manage-existing state (Task 15) ---
-  // Below the creation form, the Teacher Logins tab lists every existing
-  // teacher in the branch so the accountant can edit or block them.
-  const [teachers, setTeachers] = useState<any[]>([]);
-  const [teachersLoading, setTeachersLoading] = useState(false);
-  const [teachersSearch, setTeachersSearch] = useState('');
-  const [editingTeacher, setEditingTeacher] = useState<any | null>(null);
-  const [teacherEditForm, setTeacherEditForm] = useState({
-    name: '',
-    rollNo: '',
-    email: '',
-    password: '',
-    title: '',
-  });
-  const [revealTeacherPw, setRevealTeacherPw] = useState(false);
-  const [teacherPwLoading, setTeacherPwLoading] = useState(false);
-  const [savingTeacher, setSavingTeacher] = useState(false);
-  const [blockingTeacherId, setBlockingTeacherId] = useState('');
-
-  // Fetch the list of existing teachers (role=teacher, scoped to the
-  // accountant's branch) whenever the Teacher tab is opened. The list is
-  // re-fetched after every create / edit / block so the accountant sees
-  // the latest state.
-  const loadTeachers = () => {
-    setTeachersLoading(true);
-    api
-      .platformUsers({ role: 'teacher', branchId: user?.branchId })
-      .then((r) => setTeachers(Array.isArray(r) ? r : []))
-      .catch(() => setTeachers([]))
-      .finally(() => setTeachersLoading(false));
-  };
-  useEffect(() => {
-    if (tab !== 'teacher') return;
-    loadTeachers();
-  }, [tab]);
-
-  const filteredTeachers = useMemo(() => {
-    const q = teachersSearch.trim().toLowerCase();
-    if (!q) return teachers;
-    return teachers.filter((t) =>
-      t.name?.toLowerCase().includes(q) ||
-      t.rollNo?.toLowerCase().includes(q),
-    );
-  }, [teachers, teachersSearch]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -2439,9 +2849,8 @@ function LoginsView({
       const rollNo = s.rollNo || s.email?.split('@')[0] || s.id;
       const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
       // Pre-check: the auto-generated email must not already belong to
-      // another user (e.g. a teacher was given the same handle). The
-      // server enforces this too, but we surface it here with a clearer
-      // message.
+      // another user. The server enforces this too, but we surface it here
+      // with a clearer message.
       const emailClash = students.find(
         (x) => x.id !== s.id && (x.email || '').toLowerCase() === email.toLowerCase(),
       );
@@ -2488,101 +2897,7 @@ function LoginsView({
     }
   };
 
-  // ─── Teacher form helpers ───
-
-  // --- Password strength meter (simple) ---
-  const pwLevel: 'empty' | 'weak' | 'medium' | 'strong' = (() => {
-    if (!form.password) return 'empty';
-    const len = form.password.length;
-    const hasLetter = /[a-zA-Z]/.test(form.password);
-    const hasNum = /[0-9]/.test(form.password);
-    if (len < 6) return 'weak';
-    if (len >= 10 && hasLetter && hasNum) return 'strong';
-    return 'medium';
-  })();
-
-  const strengthMeta: Record<
-    'empty' | 'weak' | 'medium' | 'strong',
-    { label: string; color: string; bar: string; width: string }
-  > = {
-    empty: { label: '', color: '', bar: '', width: '0%' },
-    weak: { label: 'Weak', color: 'text-red-600', bar: 'bg-red-500', width: '33%' },
-    medium: { label: 'Medium', color: 'text-amber-600', bar: 'bg-amber-500', width: '66%' },
-    strong: { label: 'Strong', color: 'text-emerald-600', bar: 'bg-emerald-500', width: '100%' },
-  };
-  const sm = strengthMeta[pwLevel];
-
-  const submitTeacher = async () => {
-    if (!form.name || !form.rollNo) {
-      toast({ title: 'Name and Teacher ID are required', variant: 'destructive' });
-      return;
-    }
-    // Client-side duplicate Teacher ID check (the server also enforces this,
-    // but checking here gives the accountant instant feedback without a
-    // round-trip). The `teachers` list is already loaded for the table below.
-    const rollNoTrim = form.rollNo.trim();
-    const dupTeacher = teachers.find(
-      (t) => (t.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase(),
-    );
-    if (dupTeacher) {
-      toast({
-        title: 'Duplicate Teacher ID',
-        description: `Teacher ID "${rollNoTrim}" is already used by ${dupTeacher.name}. Please use a different ID.`,
-        variant: 'destructive',
-      });
-      return;
-    }
-    // Also check the auto-generated email won't collide (rare, but possible
-    // if a student was admitted with the same ID).
-    const plannedEmail = form.email || `${rollNoTrim.toLowerCase()}@concordia.edu.pk`;
-    setSaving(true);
-    try {
-      const password = form.password || 'teacher' + Math.floor(1000 + Math.random() * 9000);
-      const email = plannedEmail;
-      // Only the login is created here. Subjects / classes are assigned
-      // later by the Academic Office.
-      await api.createPlatformUser({
-        name: form.name,
-        email,
-        rollNo: form.rollNo,
-        password,
-        role: 'teacher',
-        branchId: user?.branchId,
-        instituteId: user?.instituteId,
-        title: 'Teacher',
-      });
-      setCreated({ user: form.rollNo, pass: password, name: form.name });
-      setForm({
-        name: '',
-        rollNo: '',
-        email: '',
-        password: '',
-      });
-      // Refresh the "Manage Existing Teachers" list so the new teacher
-      // appears immediately without a manual Refresh click.
-      loadTeachers();
-      toast({
-        title: 'Teacher login created',
-        description: `${form.name} — username ${form.rollNo}`,
-      });
-    } catch (e: any) {
-      toast({
-        title: 'Failed to create login',
-        description: e?.message || 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const createAnother = () => {
-    setCreated(null);
-    // Defer focus until after the Sheet's close animation + focus-restore.
-    setTimeout(() => nameRef.current?.focus(), 300);
-  };
-
-  // ─── Student edit + block helpers (Task 15) ───
+  // ─── Student edit + block helpers ───
 
   const openEditStudent = (s: any) => {
     setEditStudent(s);
@@ -2680,13 +2995,12 @@ function LoginsView({
     }
   };
 
-  // Opens the manage-access popup for a student. (Task 32)
-  // The popup offers Block (temporary) or Delete (permanent). When the
-  // student is already blocked, the row's button reads "Unblock" and calls
-  // unblockStudent directly — no popup, since unblocking is reversible.
+  // Opens the manage-access popup for a student. Offers Block (temporary) or
+  // Delete (permanent). When the student is already blocked, the row's button
+  // reads "Unblock" and calls unblockStudent directly — no popup, since
+  // unblocking is reversible.
   const openManageStudent = (s: any) => {
     setManageTarget(s);
-    setManageKind('student');
     setManageMode('choose');
     setDeleteConfirmText('');
   };
@@ -2711,8 +3025,7 @@ function LoginsView({
     }
   };
 
-  // Legacy name kept for the Unblock button — toggling an already-blocked
-  // student off is a direct action (no popup).
+  // Toggling an already-blocked student off is a direct action (no popup).
   const toggleStudentBlock = (s: any) => {
     if (isBlocked(s)) {
       unblockStudent(s);
@@ -2721,140 +3034,7 @@ function LoginsView({
     }
   };
 
-  // ─── Teacher edit + block helpers (Task 15) ───
-
-  const openEditTeacher = (t: any) => {
-    setEditingTeacher(t);
-    setRevealTeacherPw(false);
-    setTeacherEditForm({
-      name: t.name || '',
-      rollNo: t.rollNo || '',
-      email: t.email || '',
-      password: '',
-      title: t.title || '',
-    });
-  };
-
-  const revealTeacherPassword = async () => {
-    if (!editingTeacher) return;
-    if (revealTeacherPw) {
-      setRevealTeacherPw(false);
-      return;
-    }
-    setTeacherPwLoading(true);
-    try {
-      const r = await api.getUserPassword(editingTeacher.id);
-      setTeacherEditForm((prev) => ({ ...prev, password: r?.password || '' }));
-      setRevealTeacherPw(true);
-    } catch (e: any) {
-      toast({
-        title: 'Could not fetch password',
-        description: e?.message || 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setTeacherPwLoading(false);
-    }
-  };
-
-  const saveTeacher = async () => {
-    if (!editingTeacher) return;
-    if (!teacherEditForm.name || !teacherEditForm.rollNo) {
-      toast({ title: 'Name and Teacher ID are required', variant: 'destructive' });
-      return;
-    }
-    // Client-side duplicate Teacher ID check — excludes the teacher being
-    // edited (so they can save their own existing ID).
-    const rollNoTrim = teacherEditForm.rollNo.trim();
-    const dupTeacher = teachers.find(
-      (t) =>
-        t.id !== editingTeacher.id &&
-        (t.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase(),
-    );
-    if (dupTeacher) {
-      toast({
-        title: 'Duplicate Teacher ID',
-        description: `Teacher ID "${rollNoTrim}" is already used by ${dupTeacher.name}. Please use a different ID.`,
-        variant: 'destructive',
-      });
-      return;
-    }
-    setSavingTeacher(true);
-    try {
-      // Subjects / classes are managed by the Academic Office, so we
-      // never touch them from the accountant side.
-      const body: any = {
-        name: teacherEditForm.name,
-        rollNo: teacherEditForm.rollNo,
-        email: teacherEditForm.email,
-        title: teacherEditForm.title,
-      };
-      if (teacherEditForm.password) body.password = teacherEditForm.password;
-      await api.editUser(editingTeacher.id, body);
-      setTeachers((prev) =>
-        prev.map((t) =>
-          t.id === editingTeacher.id ? { ...t, ...body } : t,
-        ),
-      );
-      toast({
-        title: 'Teacher updated',
-        description: `${teacherEditForm.name} — changes saved.`,
-      });
-      setEditingTeacher(null);
-    } catch (e: any) {
-      toast({
-        title: 'Could not save changes',
-        description: e?.message || 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setSavingTeacher(false);
-    }
-  };
-
-  // Opens the manage-access popup for a teacher. (Task 32)
-  // Same UX as students: Block (temporary) or Delete (permanent). The
-  // Unblock button still unblocks directly without a popup.
-  const openManageTeacher = (t: any) => {
-    setManageTarget(t);
-    setManageKind('teacher');
-    setManageMode('choose');
-    setDeleteConfirmText('');
-  };
-
-  const unblockTeacher = async (t: any) => {
-    setBlockingTeacherId(t.id);
-    try {
-      await api.blockUser(t.id, false);
-      setTeachers((prev) =>
-        prev.map((x) => (x.id === t.id ? { ...x, blocked: 0 } : x)),
-      );
-      toast({
-        title: 'Teacher unblocked',
-        description: `${t.name} can now sign in again.`,
-      });
-    } catch (e: any) {
-      toast({
-        title: 'Could not update block status',
-        description: e?.message || 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setBlockingTeacherId('');
-    }
-  };
-
-  const toggleTeacherBlock = (t: any) => {
-    if (isBlocked(t)) {
-      unblockTeacher(t);
-    } else {
-      openManageTeacher(t);
-    }
-  };
-
-  // ─── Manage-access popup actions (Task 32) ───
-  // Shared by both students and teachers. `manageTarget` carries the user
-  // object; `manageKind` says which list to update after the action.
+  // ─── Manage-access popup actions ───
 
   const closeManagePopup = () => {
     if (manageBusy) return;
@@ -2868,15 +3048,9 @@ function LoginsView({
     setManageBusy(true);
     try {
       await api.blockUser(manageTarget.id, true);
-      if (manageKind === 'student') {
-        onUpdate({ id: manageTarget.id, blocked: 1 });
-      } else {
-        setTeachers((prev) =>
-          prev.map((x) => (x.id === manageTarget.id ? { ...x, blocked: 1 } : x)),
-        );
-      }
+      onUpdate({ id: manageTarget.id, blocked: 1 });
       toast({
-        title: `${manageKind === 'student' ? 'Student' : 'Teacher'} blocked`,
+        title: 'Student blocked',
         description: `${manageTarget.name} has been signed out and can no longer log in. Their data is preserved — unblock anytime.`,
       });
       closeManagePopup();
@@ -2905,14 +3079,9 @@ function LoginsView({
     setManageBusy(true);
     try {
       await api.deleteUser(manageTarget.id);
-      if (manageKind === 'student') {
-        // Tell the parent component this student row should be dropped.
-        onUpdate({ id: manageTarget.id, deleted: true });
-      } else {
-        setTeachers((prev) => prev.filter((x) => x.id !== manageTarget.id));
-      }
+      onUpdate({ id: manageTarget.id, deleted: true });
       toast({
-        title: `${manageKind === 'student' ? 'Student' : 'Teacher'} deleted`,
+        title: 'Student deleted',
         description: `${manageTarget.name}'s login and all associated data have been permanently removed.`,
       });
       closeManagePopup();
@@ -2930,514 +3099,219 @@ function LoginsView({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Create Logins"
-        subtitle={
-          tab === 'student'
-            ? 'Issue login credentials to enrolled students after fee payment, or create teacher accounts.'
-            : 'Generate login credentials for teachers and students.'
-        }
+        title="Student Logins"
+        subtitle="Issue login credentials to enrolled students after fee payment, edit portal details, and block / unblock access."
       />
 
-      {/* Tab switcher */}
-      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
-        <button
-          onClick={() => setTab('student')}
-          className={cn(
-            'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
-            tab === 'student' ? 'bg-[#F26522] text-white' : 'text-gray-600 hover:bg-gray-50',
-          )}
-        >
-          Student Logins
-        </button>
-        <button
-          onClick={() => setTab('teacher')}
-          className={cn(
-            'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
-            tab === 'teacher' ? 'bg-[#F26522] text-white' : 'text-gray-600 hover:bg-gray-50',
-          )}
-        >
-          Teacher Logins
-        </button>
+      {/* Teachers note — Academic Office owns teacher creation now */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 flex gap-3">
+        <GraduationCap className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+        <div className="text-sm text-amber-800 leading-relaxed">
+          <p className="font-semibold text-amber-900">Teachers are now managed by the Academic Office.</p>
+          <p className="mt-1">
+            Teacher accounts, subjects, and class assignments are created under
+            <span className="font-medium"> Academic Office → Classes &amp; Teachers</span>. This page
+            only handles student logins.
+          </p>
+        </div>
       </div>
 
-      {/* ===== Student Logins tab (existing flow — UNCHANGED) ===== */}
-      {tab === 'student' && (
-        <>
-          {/* Info callout — gray, restrained */}
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex gap-3">
-            <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
-            <div className="text-sm text-gray-600 leading-relaxed">
-              <p className="font-semibold text-gray-900">Per spec §3 — when to issue logins.</p>
-              <p className="mt-1">
-                Student logins are created by the Accountant after the first fee payment is
-                confirmed. The username is the student&apos;s roll number and the password is a
-                system-generated default that the student must change on first sign-in.
-              </p>
-            </div>
-          </div>
+      {/* Info callout — when to issue logins */}
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex gap-3">
+        <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+        <div className="text-sm text-gray-600 leading-relaxed">
+          <p className="font-semibold text-gray-900">Per spec §3 — when to issue logins.</p>
+          <p className="mt-1">
+            Student logins are created by the Accountant after the first fee payment is
+            confirmed. The username is the student&apos;s roll number and the password is a
+            system-generated default that the student must change on first sign-in.
+          </p>
+        </div>
+      </div>
 
-          {/* KPI strip */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard icon={Users} label="Total Students" value={stats.total} sub="Enrolled" />
-            <StatCard icon={KeyRound} label="With Login" value={stats.with} sub="Credentials issued" />
-            <StatCard
-              icon={AlertCircle}
-              label="Without Login"
-              value={stats.without}
-              sub="Awaiting first payment"
+      {/* KPI strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard icon={Users} label="Total Students" value={stats.total} sub="Enrolled" />
+        <StatCard icon={KeyRound} label="With Login" value={stats.with} sub="Credentials issued" />
+        <StatCard
+          icon={AlertCircle}
+          label="Without Login"
+          value={stats.without}
+          sub="Awaiting first payment"
+        />
+      </div>
+
+      {/* Filters */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, roll #, or class…"
+              className={`${inputCls} pl-9`}
             />
           </div>
+          <Select value={filter} onValueChange={(v: any) => setFilter(v)}>
+            <SelectTrigger className={`${inputCls} w-full sm:w-48`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All students</SelectItem>
+              <SelectItem value="with">With login</SelectItem>
+              <SelectItem value="without">Without login</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
-          {/* Filters */}
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name, roll #, or class…"
-                  className={`${inputCls} pl-9`}
-                />
-              </div>
-              <Select value={filter} onValueChange={(v: any) => setFilter(v)}>
-                <SelectTrigger className={`${inputCls} w-full sm:w-48`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All students</SelectItem>
-                  <SelectItem value="with">With login</SelectItem>
-                  <SelectItem value="without">Without login</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Student list */}
-          <div className="rounded-xl border border-gray-200 bg-white p-5">
-            {loading ? (
-              <SkeletonTable rows={6} />
-            ) : filtered.length === 0 ? (
-              <EmptyState
-                icon={KeyRound}
-                title={students.length === 0 ? 'No students enrolled' : 'No matching students'}
-                desc={
-                  students.length === 0
-                    ? 'The Admission Office must enroll students first.'
-                    : 'Try a different search or filter.'
-                }
-              />
-            ) : (
-              <div className="space-y-2">
-                {filtered.map((s) => {
-                  const hasLogin = hasRealLogin(s);
-                  const creds = generated[s.id];
-                  const blocked = isBlocked(s);
-                  return (
-                    <div
-                      key={s.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border border-gray-200"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-9 w-9 rounded-lg border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
-                          <GraduationCap className="h-4 w-4 text-gray-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
-                            {blocked ? <BlockedBadge /> : null}
-                          </div>
-                          <p className="text-[11px] text-gray-500 truncate">
-                            {s.rollNo} · {s.class || '—'}
-                            {s.section ? `-${s.section}` : ''}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {creds ? (
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <div className="rounded-lg border border-emerald-100 bg-white px-3 py-1.5 text-xs">
-                              <span className="text-[10px] uppercase tracking-wider text-gray-400 block">
-                                Username (Roll #)
-                              </span>
-                              <span className="font-mono font-semibold text-gray-900 flex items-center gap-2">
-                                {creds.rollNo}
-                                <CopyButton text={creds.rollNo} />
-                              </span>
-                            </div>
-                            <div className="rounded-lg border border-emerald-100 bg-white px-3 py-1.5 text-xs">
-                              <span className="text-[10px] uppercase tracking-wider text-gray-400 block">
-                                Password
-                              </span>
-                              <span className="font-mono font-semibold text-gray-900 flex items-center gap-2">
-                                {creds.password}
-                                <CopyButton text={creds.password} />
-                              </span>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1"
-                            >
-                              <Check className="h-3 w-3" /> Login Ready
-                            </Badge>
-                          </div>
-                        ) : hasLogin ? (
-                          <Badge
-                            variant="outline"
-                            className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1"
-                          >
-                            <Check className="h-3 w-3" /> Login Active
-                          </Badge>
-                        ) : (
-                          <Button
-                            size="sm"
-                            className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-8 px-3 text-xs font-medium"
-                            onClick={() => generate(s)}
-                            disabled={creating === s.id}
-                          >
-                            {creating === s.id ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Generating…
-                              </>
-                            ) : (
-                              <>
-                                <KeyRound className="h-3.5 w-3.5 mr-1" /> Generate Login
-                              </>
-                            )}
-                          </Button>
-                        )}
-
-                        {/* Edit portal details */}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-8 px-3 text-xs font-medium"
-                          onClick={() => openEditStudent(s)}
-                        >
-                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
-                        </Button>
-
-                        {/* Block / Unblock login */}
-                        {blocked ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border border-emerald-100 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg h-8 px-3 text-xs font-medium"
-                            onClick={() => toggleStudentBlock(s)}
-                            disabled={blockingStudentId === s.id}
-                          >
-                            {blockingStudentId === s.id ? (
-                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                            ) : (
-                              <Unlock className="h-3.5 w-3.5 mr-1" />
-                            )}
-                            Unblock
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border border-rose-100 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg h-8 px-3 text-xs font-medium"
-                            onClick={() => toggleStudentBlock(s)}
-                            disabled={blockingStudentId === s.id}
-                          >
-                            {blockingStudentId === s.id ? (
-                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                            ) : (
-                              <Lock className="h-3.5 w-3.5 mr-1" />
-                            )}
-                            Block
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* ===== Teacher Logins tab (new) ===== */}
-      {tab === 'teacher' && (
-        <>
-          {/* Info callout */}
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex gap-3">
-            <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
-            <div className="text-sm text-gray-600 leading-relaxed">
-              <p className="font-semibold text-gray-900">Teacher logins are created here.</p>
-              <p className="mt-1">
-                The username is the Teacher ID and the password is auto-generated (teacher can
-                change it on first sign-in). Subjects and classes are assigned later by the
-                <span className="font-medium text-gray-900"> Academic Office</span>.
-              </p>
-            </div>
-          </div>
-
-          {/* Teacher creation form */}
-          <div className="rounded-xl border border-gray-200 bg-white p-5 max-w-2xl">
-            <SectionHeader
-              title="New Teacher Login"
-              desc="Credentials will be generated automatically if left blank."
-            />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Full Name" required>
-                <Input
-                  ref={nameRef}
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className={inputCls}
-                  placeholder="Ayesha Khan"
-                />
-              </Field>
-              <Field label="Teacher ID / Roll No" required>
-                <Input
-                  value={form.rollNo}
-                  onChange={(e) => setForm({ ...form, rollNo: e.target.value })}
-                  className={inputCls}
-                  placeholder="T001"
-                />
-              </Field>
-              <Field label="Email (optional)">
-                <Input
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className={inputCls}
-                  placeholder="auto-generated if blank"
-                />
-              </Field>
-              <Field label="Password (optional)">
-                <Input
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className={inputCls}
-                  placeholder="auto-generated if blank"
-                />
-                {pwLevel === 'empty' ? (
-                  <p className="text-[11px] text-gray-500 mt-1.5">
-                    Will be auto-generated (e.g. teacher4827).
-                  </p>
-                ) : (
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <div className="h-1 flex-1 rounded-full bg-gray-100 overflow-hidden">
-                      <div
-                        className={cn('h-full rounded-full transition-all', sm.bar)}
-                        style={{ width: sm.width }}
-                      />
-                    </div>
-                    <span className={cn('text-[11px] font-medium tabular-nums', sm.color)}>
-                      {sm.label}
-                    </span>
-                  </div>
-                )}
-              </Field>
-            </div>
-
-            {/* Workflow note — makes it explicit that course / class
-                assignment is the Academic Office's responsibility. */}
-            <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2.5 flex gap-2">
-              <GraduationCap className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-[12px] text-amber-800 leading-relaxed">
-                Subjects and classes for this teacher will be assigned by the
-                <span className="font-semibold"> Academic Office</span> after the login is
-                created. The accountant only issues credentials.
-              </p>
-            </div>
-
-            <div className="mt-5">
-              <button onClick={submitTeacher} disabled={saving} className={btnPrimary}>
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <KeyRound className="h-4 w-4" />
-                )}
-                Generate Login
-              </button>
-            </div>
-          </div>
-
-          {/* ===== Manage Existing Teachers (Task 15) ===== */}
-          <div className="rounded-xl border border-gray-200 bg-white p-5">
-            <SectionHeader
-              title="Manage Existing Teachers"
-              desc="Edit portal details or block / unblock any teacher in your branch."
-              action={
-                <button
-                  onClick={loadTeachers}
-                  disabled={teachersLoading}
-                  className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-[#F26522] font-medium disabled:opacity-60"
+      {/* Student list */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        {loading ? (
+          <SkeletonTable rows={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={KeyRound}
+            title={students.length === 0 ? 'No students enrolled' : 'No matching students'}
+            desc={
+              students.length === 0
+                ? 'The Admission Office must enroll students first.'
+                : 'Try a different search or filter.'
+            }
+          />
+        ) : (
+          <div className="space-y-2 max-h-[40rem] overflow-y-auto pr-1">
+            {filtered.map((s) => {
+              const hasLogin = hasRealLogin(s);
+              const creds = generated[s.id];
+              const blocked = isBlocked(s);
+              return (
+                <div
+                  key={s.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border border-gray-200"
                 >
-                  <Loader2 className={cn('h-3.5 w-3.5', teachersLoading && 'animate-spin')} />
-                  Refresh
-                </button>
-              }
-            />
-
-            {/* Search */}
-            <div className="relative mb-4">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input
-                value={teachersSearch}
-                onChange={(e) => setTeachersSearch(e.target.value)}
-                placeholder="Search by name or Teacher ID…"
-                className={`${inputCls} pl-9`}
-              />
-            </div>
-
-            {teachersLoading && teachers.length === 0 ? (
-              <SkeletonTable rows={4} />
-            ) : teachers.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title="No teachers found"
-                desc="Create a new teacher login above — it will appear here once created."
-              />
-            ) : filteredTeachers.length === 0 ? (
-              <EmptyState
-                icon={Search}
-                title="No matching teachers"
-                desc="Try a different search term."
-              />
-            ) : (
-              <div className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
-                {filteredTeachers.map((t) => {
-                  const blocked = isBlocked(t);
-                  return (
-                    <div
-                      key={t.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border border-gray-200"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-9 w-9 rounded-lg border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
-                          <Users className="h-4 w-4 text-gray-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-medium text-gray-900 truncate">
-                              {t.name}
-                            </p>
-                            {blocked ? (
-                              <BlockedBadge />
-                            ) : (
-                              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                                <Check className="h-3 w-3" /> Active
-                              </span>
-                            )}
-                            {t.title ? (
-                              <span className="text-[11px] text-gray-500">{t.title}</span>
-                            ) : null}
-                          </div>
-                          <p className="text-[11px] text-gray-500 truncate">
-                            {t.rollNo || '—'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-8 px-3 text-xs font-medium"
-                          onClick={() => openEditTeacher(t)}
-                        >
-                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
-                        </Button>
-                        {blocked ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border border-emerald-100 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg h-8 px-3 text-xs font-medium"
-                            onClick={() => toggleTeacherBlock(t)}
-                            disabled={blockingTeacherId === t.id}
-                          >
-                            {blockingTeacherId === t.id ? (
-                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                            ) : (
-                              <Unlock className="h-3.5 w-3.5 mr-1" />
-                            )}
-                            Unblock
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border border-rose-100 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg h-8 px-3 text-xs font-medium"
-                            onClick={() => toggleTeacherBlock(t)}
-                            disabled={blockingTeacherId === t.id}
-                          >
-                            {blockingTeacherId === t.id ? (
-                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                            ) : (
-                              <Lock className="h-3.5 w-3.5 mr-1" />
-                            )}
-                            Block
-                          </Button>
-                        )}
-                      </div>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-9 w-9 rounded-lg border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
+                      <GraduationCap className="h-4 w-4 text-gray-400" />
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </>
-      )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
+                        {blocked ? <BlockedBadge /> : null}
+                      </div>
+                      <p className="text-[11px] text-gray-500 truncate">
+                        {s.rollNo} · {s.class || '—'}
+                        {s.section ? `-${s.section}` : ''}
+                      </p>
+                    </div>
+                  </div>
 
-      {/* Credentials confirmation Sheet (teacher) */}
-      <Sheet open={!!created} onOpenChange={(o) => !o && setCreated(null)}>
-        <SheetContent className="w-full sm:max-w-sm">
-          <SheetHeader>
-            <SheetTitle className="text-gray-900">Login Created</SheetTitle>
-            <SheetDescription>Share these credentials securely.</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-6 space-y-4">
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">Name</span>
-                </div>
-                <div className="text-sm font-semibold text-gray-900">{created?.name}</div>
-              </div>
-              <div className="pt-2 border-t border-gray-200">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">Username</span>
-                  <CopyButton text={created?.user || ''} />
-                </div>
-                <div className="text-sm font-mono font-semibold text-gray-900">
-                  {created?.user}
-                </div>
-              </div>
-              <div className="pt-2 border-t border-gray-200">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">Password</span>
-                  <CopyButton text={created?.pass || ''} />
-                </div>
-                <div className="text-sm font-mono font-semibold text-gray-900">
-                  {created?.pass}
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={createAnother}
-                className={cn(btnPrimary, 'justify-center h-10')}
-              >
-                <Plus className="h-4 w-4" /> Create Another
-              </button>
-              <button
-                onClick={() => setCreated(null)}
-                className={cn(btnSecondary, 'justify-center h-10')}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {creds ? (
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div className="rounded-lg border border-emerald-100 bg-white px-3 py-1.5 text-xs">
+                          <span className="text-[10px] uppercase tracking-wider text-gray-400 block">
+                            Username (Roll #)
+                          </span>
+                          <span className="font-mono font-semibold text-gray-900 flex items-center gap-2">
+                            {creds.rollNo}
+                            <CopyButton text={creds.rollNo} />
+                          </span>
+                        </div>
+                        <div className="rounded-lg border border-emerald-100 bg-white px-3 py-1.5 text-xs">
+                          <span className="text-[10px] uppercase tracking-wider text-gray-400 block">
+                            Password
+                          </span>
+                          <span className="font-mono font-semibold text-gray-900 flex items-center gap-2">
+                            {creds.password}
+                            <CopyButton text={creds.password} />
+                          </span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1"
+                        >
+                          <Check className="h-3 w-3" /> Login Ready
+                        </Badge>
+                      </div>
+                    ) : hasLogin ? (
+                      <Badge
+                        variant="outline"
+                        className="bg-emerald-50 text-emerald-700 border-emerald-100 gap-1"
+                      >
+                        <Check className="h-3 w-3" /> Login Active
+                      </Badge>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-8 px-3 text-xs font-medium"
+                        onClick={() => generate(s)}
+                        disabled={creating === s.id}
+                      >
+                        {creating === s.id ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Generating…
+                          </>
+                        ) : (
+                          <>
+                            <KeyRound className="h-3.5 w-3.5 mr-1" /> Generate Login
+                          </>
+                        )}
+                      </Button>
+                    )}
 
-      {/* ===== Student Edit Sheet (Task 15) ===== */}
+                    {/* Edit portal details */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-8 px-3 text-xs font-medium"
+                      onClick={() => openEditStudent(s)}
+                    >
+                      <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                    </Button>
+
+                    {/* Block / Unblock login */}
+                    {blocked ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border border-emerald-100 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg h-8 px-3 text-xs font-medium"
+                        onClick={() => toggleStudentBlock(s)}
+                        disabled={blockingStudentId === s.id}
+                      >
+                        {blockingStudentId === s.id ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <Unlock className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        Unblock
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border border-rose-100 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg h-8 px-3 text-xs font-medium"
+                        onClick={() => toggleStudentBlock(s)}
+                        disabled={blockingStudentId === s.id}
+                      >
+                        {blockingStudentId === s.id ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <Lock className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        Block
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ===== Student Edit Sheet ===== */}
       <Sheet
         open={!!editStudent}
         onOpenChange={(o) => !o && setEditStudent(null)}
@@ -3581,137 +3455,9 @@ function LoginsView({
         </SheetContent>
       </Sheet>
 
-      {/* ===== Teacher Edit Sheet (Task 15) ===== */}
-      <Sheet
-        open={!!editingTeacher}
-        onOpenChange={(o) => !o && setEditingTeacher(null)}
-      >
-        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white">
-          <SheetHeader>
-            <SheetTitle className="text-base font-semibold text-gray-900">
-              Edit Teacher Portal
-            </SheetTitle>
-            <SheetDescription className="text-sm text-gray-500">
-              Update name, Teacher ID, and credentials. Subjects and classes are
-              managed by the Academic Office.
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="px-4 pb-4 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Full Name" required>
-                <Input
-                  value={teacherEditForm.name}
-                  onChange={(e) =>
-                    setTeacherEditForm({ ...teacherEditForm, name: e.target.value })
-                  }
-                  className={inputCls}
-                  placeholder="Teacher name"
-                />
-              </Field>
-              <Field label="Teacher ID / Roll No" required>
-                <Input
-                  value={teacherEditForm.rollNo}
-                  onChange={(e) =>
-                    setTeacherEditForm({ ...teacherEditForm, rollNo: e.target.value })
-                  }
-                  className={inputCls}
-                  placeholder="e.g. T001"
-                />
-              </Field>
-              <Field label="Email">
-                <Input
-                  value={teacherEditForm.email}
-                  onChange={(e) =>
-                    setTeacherEditForm({ ...teacherEditForm, email: e.target.value })
-                  }
-                  className={inputCls}
-                  placeholder="username@concordia.edu.pk"
-                />
-              </Field>
-              <Field label="Password">
-                <div className="relative">
-                  <Input
-                    type={revealTeacherPw ? 'text' : 'password'}
-                    value={teacherEditForm.password}
-                    onChange={(e) =>
-                      setTeacherEditForm({ ...teacherEditForm, password: e.target.value })
-                    }
-                    className={`${inputCls} pr-24`}
-                    placeholder="Leave blank to keep current"
-                  />
-                  <button
-                    type="button"
-                    onClick={revealTeacherPassword}
-                    disabled={teacherPwLoading}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium text-gray-500 hover:text-[#F26522] rounded-md hover:bg-gray-50 disabled:opacity-60"
-                  >
-                    {teacherPwLoading ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : revealTeacherPw ? (
-                      <EyeOff className="h-3 w-3" />
-                    ) : (
-                      <Eye className="h-3 w-3" />
-                    )}
-                    {revealTeacherPw ? 'Hide' : 'Reveal'}
-                  </button>
-                </div>
-                <p className="text-[11px] text-gray-500 mt-1.5">
-                  Tap Reveal to fetch the current password from the server.
-                </p>
-              </Field>
-              <div className="sm:col-span-2">
-                <Field label="Title">
-                  <Input
-                    value={teacherEditForm.title}
-                    onChange={(e) =>
-                      setTeacherEditForm({ ...teacherEditForm, title: e.target.value })
-                    }
-                    className={inputCls}
-                    placeholder="e.g. Senior Teacher"
-                  />
-                </Field>
-              </div>
-            </div>
-
-            {/* Academic Office owns course / class assignment. */}
-            <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2.5 flex gap-2">
-              <GraduationCap className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-[12px] text-amber-800 leading-relaxed">
-                Subjects and classes for this teacher are assigned by the
-                <span className="font-semibold"> Academic Office</span>.
-              </p>
-            </div>
-          </div>
-
-          <SheetFooter>
-            <div className="grid grid-cols-2 gap-2 w-full">
-              <button
-                onClick={() => setEditingTeacher(null)}
-                className={cn(btnSecondary, 'justify-center h-10')}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveTeacher}
-                disabled={savingTeacher}
-                className={cn(btnPrimary, 'justify-center h-10')}
-              >
-                {savingTeacher ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                )}
-                Save Changes
-              </button>
-            </div>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
-
-      {/* ===== Manage-access popup (Task 32) =====
-          Opens when the accountant clicks "Block" on a student or teacher
-          whose login is currently active. Offers two choices:
+      {/* ===== Manage-access popup =====
+          Opens when the accountant clicks "Block" on a student whose login
+          is currently active. Offers two choices:
             • Block           — temporary; data kept, can be unblocked.
             • Delete forever  — permanent; login + all data erased.
           Delete requires typing the user's name to confirm. */}
@@ -3720,15 +3466,15 @@ function LoginsView({
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-gray-900">
               <ShieldBan className="h-5 w-5 text-[#F26522]" />
-              Manage {manageKind === 'student' ? 'Student' : 'Teacher'} Access
+              Manage Student Access
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="text-gray-600">
                 Choose what to do with{' '}
                 <span className="font-semibold text-gray-900">
-                  {manageTarget?.name || 'this user'}
+                  {manageTarget?.name || 'this student'}
                 </span>
-                's login.
+                &apos;s login.
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -3738,7 +3484,7 @@ function LoginsView({
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] uppercase tracking-wider text-gray-400">
-                  {manageKind === 'student' ? 'Student' : 'Teacher'}
+                  Student
                 </span>
                 <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Login active
@@ -3776,7 +3522,7 @@ function LoginsView({
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-amber-900">Block login</div>
                     <p className="text-[12px] text-amber-800/90 mt-0.5 leading-relaxed">
-                      They'll be signed out and can't log in until you unblock them.
+                      They&apos;ll be signed out and can&apos;t log in until you unblock them.
                       <span className="font-medium"> Their data is preserved</span> —
                       attendance, results, fees, everything stays. Reversible anytime.
                     </p>
@@ -3800,9 +3546,7 @@ function LoginsView({
                     <p className="text-[12px] text-rose-800/90 mt-0.5 leading-relaxed">
                       Permanently deletes the login{' '}
                       <span className="font-medium">and all their data</span> —
-                      {manageKind === 'student'
-                        ? ' fee invoices, misc charges, attendance & results entries are erased.'
-                        : ' class assignments, course materials, diary, salary records are erased.'}
+                      fee invoices, misc charges, attendance &amp; results entries are erased.
                       <span className="font-semibold"> This cannot be undone.</span>
                     </p>
                   </div>
@@ -3819,10 +3563,8 @@ function LoginsView({
                 <div className="text-[12px] text-rose-800 leading-relaxed">
                   You are about to <span className="font-semibold">permanently delete</span>{' '}
                   <span className="font-semibold">{manageTarget?.name}</span> and{' '}
-                  {manageKind === 'student'
-                    ? 'all their fee, attendance, and result records'
-                    : 'all their class assignments, materials, and salary records'}
-                  . This action <span className="font-semibold">cannot be undone</span>.
+                  all their fee, attendance, and result records.
+                  This action <span className="font-semibold">cannot be undone</span>.
                 </div>
               </div>
               <div>
@@ -3885,3 +3627,4 @@ function LoginsView({
     </div>
   );
 }
+

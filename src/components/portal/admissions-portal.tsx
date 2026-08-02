@@ -1,24 +1,21 @@
 'use client';
 
 // ============================================================================
-// Concordia College — Admission Office Portal (spec §2)
+// Concordia College — Admission Office Portal
 //
 // Responsibilities:
-//   1. Register new students with full personal info (spec §2.1)
-//   2. Finalize & LOCK the one-time base fee — immutable after save
-//   3. Update / manage existing student personal info
+//   1. Dashboard — KPI cards + recharts analytics (Enrollments by Program)
+//   2. New Enrollment — 3-step wizard with optional base-fee lock
+//   3. Student Records — department → part → class → section drill-down
+//      hierarchy, plus per-student document manager (upload / download /
+//      delete). Search bar bypasses the hierarchy for quick lookups.
 //
-// The Admission Office does NOT create login credentials — the Accountant
-// does that after the first fee payment. So this portal never asks for
-// email/password; it generates an internal placeholder so the platform-users
-// row can be created, and the Accountant later sets the real login.
-//
-// Design language: flat, restrained, grayscale + a single orange accent
-// (#F26522) for primary actions and the section accent line. No gradients,
-// no decorative blobs, no colored icon tiles.
+// Design language: Concordia orange (#F26522) accent on a clean gray/white
+// base. shadcn/ui components, framer-motion entrance animations.
 // ============================================================================
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -50,20 +47,13 @@ import {
   SheetFooter,
 } from '@/components/ui/sheet';
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogFooter,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/components/ui/alert-dialog';
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -85,29 +75,39 @@ import {
   Info,
   KeyRound,
   Download,
-  Eye,
   Phone,
   Printer,
+  FileText,
+  Trash2,
+  Upload,
+  FileUp,
+  Inbox,
+  ArrowLeft,
+  FolderOpen,
 } from 'lucide-react';
 import {
   buildAdmissionReceipt,
   savePdf,
   printPdf,
 } from '@/lib/pdf-utils';
+import {
+  DeptCardGrid,
+  PartToggle,
+  ClassCardGrid,
+  SectionCardGrid,
+  HierarchyBreadcrumb,
+  DEPARTMENTS,
+} from './shared/concordia-hierarchy';
+import {
+  SimpleBarChart,
+  SimplePieChart,
+  ChartCard,
+} from './shared/concordia-charts';
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
 // ---------------------------------------------------------------------------
-const PROGRAMS = [
-  'ICS',
-  'I.Com',
-  'F.Sc Pre-Medical',
-  'F.Sc Pre-Engineering',
-  'FA',
-  'F.A General Science',
-  'ADP',
-  'BS Commerce',
-];
+const PROGRAMS = [...DEPARTMENTS];
 
 const fmtMoney = (n: number) => 'PKR ' + Number(n || 0).toLocaleString('en-PK');
 
@@ -120,6 +120,28 @@ const monthName = (d: Date) =>
 const genTempPassword = () =>
   'tmp-' + Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
 
+const fmtDate = (d?: string | Date | null): string => {
+  if (!d) return '—';
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '—';
+    return dt.toLocaleDateString('en-PK', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return '—';
+  }
+};
+
+const fmtBytes = (bytes: number): string => {
+  if (!bytes) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 type Props = { activeModule: string; user: any };
 
 // ---------------------------------------------------------------------------
@@ -127,20 +149,27 @@ type Props = { activeModule: string; user: any };
 // ---------------------------------------------------------------------------
 export function AdmissionsPortal({ activeModule, user }: Props) {
   const [students, setStudents] = useState<any[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial + branch-change load. The effect body performs NO synchronous
-  // setState — all state updates happen inside async promise callbacks.
+  // Initial + branch-change load. Loads both students AND classes in parallel
+  // — classes are needed by the new hierarchy Student Records view.
+  // All setState calls happen inside async promise callbacks (not in the
+  // effect body) to avoid cascading renders.
   useEffect(() => {
     let cancelled = false;
-    api
-      .platformUsers({ role: 'student', branchId: user?.branchId })
-      .then((r) => {
-        if (!cancelled) setStudents(Array.isArray(r) ? r : []);
+    Promise.all([
+      api.platformUsers({ role: 'student', branchId: user?.branchId }),
+      api.getClasses(user?.branchId),
+    ])
+      .then(([stu, cls]) => {
+        if (cancelled) return;
+        setStudents(Array.isArray(stu) ? stu : []);
+        setClasses(Array.isArray(cls) ? cls : []);
       })
       .catch((e) => {
-        if (!cancelled) setError(e.message || 'Failed to load students');
+        if (!cancelled) setError(e.message || 'Failed to load admissions data');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -150,19 +179,24 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
     };
   }, [user?.branchId]);
 
-  // Manual refresh (button clicks) may synchronously flip loading=true.
+  // Manual refresh — re-loads both lists.
   const refresh = () => {
     setLoading(true);
     setError(null);
-    api
-      .platformUsers({ role: 'student', branchId: user?.branchId })
-      .then((r) => setStudents(Array.isArray(r) ? r : []))
-      .catch((e) => setError(e.message || 'Failed to load students'))
+    Promise.all([
+      api.platformUsers({ role: 'student', branchId: user?.branchId }),
+      api.getClasses(user?.branchId),
+    ])
+      .then(([stu, cls]) => {
+        setStudents(Array.isArray(stu) ? stu : []);
+        setClasses(Array.isArray(cls) ? cls : []);
+      })
+      .catch((e) => setError(e.message || 'Failed to load admissions data'))
       .finally(() => setLoading(false));
   };
 
   // Optimistic local upsert — keeps the UI responsive while the backend
-  // (which a later task wires up for the new admissions fields) catches up.
+  // catches up.
   const upsertLocal = (s: any) =>
     setStudents((prev) => {
       const idx = prev.findIndex((x) => x.id === s.id);
@@ -187,6 +221,7 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
       <StudentRecordsView
         user={user}
         students={students}
+        classes={classes}
         loading={loading}
         error={error}
         onRefresh={refresh}
@@ -194,24 +229,37 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
       />
     );
   else if (activeModule === 'admissions-base-fee')
+    content = <ComingSoon title="Fee Records" />;
+  else
     content = (
-      <BaseFeeView
+      <OverviewView
+        user={user}
         students={students}
         loading={loading}
-        onRefresh={refresh}
-        onLocalUpsert={upsertLocal}
       />
     );
-  else content = <OverviewView user={user} students={students} loading={loading} />;
 
-  return <div className="animate-in fade-in-0 duration-200">{content}</div>;
+  return (
+    <div className="animate-in fade-in-0 duration-200">
+      {/* Local scrollbar styling — injected once for all child views. */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .concordia-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+        .concordia-scroll::-webkit-scrollbar-track { background: transparent; }
+        .concordia-scroll::-webkit-scrollbar-thumb {
+          background: rgba(0,0,0,0.15);
+          border-radius: 9999px;
+        }
+        .concordia-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+      `}} />
+      {content}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Shared presentational bits
 // ---------------------------------------------------------------------------
 
-// Clean welcome header: thin orange accent line + h1 + muted subtitle.
 function PageHeader({
   title,
   subtitle,
@@ -233,7 +281,6 @@ function PageHeader({
   );
 }
 
-// FLAT KPI card — white bg, gray border, small inline icon top-right.
 function KpiCard({
   label,
   value,
@@ -291,7 +338,6 @@ function StatusBadge({ student }: { student: any }) {
   );
 }
 
-// Gray, restrained info callout. NOT orange-tinted.
 function BaseFeeCallout() {
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex gap-3">
@@ -312,7 +358,6 @@ function BaseFeeCallout() {
   );
 }
 
-// Simple empty state — small muted icon + text. No big colored circles.
 function EmptyState({
   icon: Icon,
   title,
@@ -334,7 +379,6 @@ function EmptyState({
   );
 }
 
-// Field wrapper: label above input, small asterisk for required fields.
 function Field({
   label,
   required,
@@ -368,9 +412,29 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-// Shared input className — keeps every input visually consistent.
 const inputCls =
   'h-10 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#F26522] focus:ring-2 focus:ring-[#F26522]/12';
+
+// Custom scrollbar utility for long lists.
+const scrollListCls =
+  'max-h-96 overflow-y-auto concordia-scroll';
+
+// ---------------------------------------------------------------------------
+// Coming Soon — used for the retired admissions-base-fee module id.
+// ---------------------------------------------------------------------------
+function ComingSoon({ title }: { title: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="h-12 w-12 rounded-xl bg-[#FFF0E8] grid place-items-center mb-4">
+        <Inbox className="h-6 w-6 text-[#F26522]" />
+      </div>
+      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+      <p className="text-sm text-gray-500 mt-1 max-w-sm">
+        This module has been retired. Fee records are now managed by the Accountant.
+      </p>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 1. Overview / Dashboard
@@ -413,22 +477,27 @@ function OverviewView({
     [students],
   );
 
-  // Enrollment by program (simple muted CSS bars).
+  // Enrollment by program — counts students whose program is one of the
+  // canonical 6 departments. Always render all 6 departments in the catalog
+  // order so the chart stays stable as counts change.
   const byProgram = useMemo(() => {
     const map = new Map<string, number>();
+    for (const dept of DEPARTMENTS) map.set(dept, 0);
     for (const s of students) {
-      const p = s.program || 'Unspecified';
-      map.set(p, (map.get(p) || 0) + 1);
+      const p = (s.program || '').trim();
+      if (map.has(p)) map.set(p, (map.get(p) || 0) + 1);
     }
-    const arr = Array.from(map.entries()).map(([name, count]) => ({ name, count }));
-    arr.sort((a, b) => b.count - a.count);
-    return arr;
+    return DEPARTMENTS.map((dept) => ({
+      label: dept,
+      value: map.get(dept) || 0,
+    }));
   }, [students]);
-  const maxProgram = Math.max(1, ...byProgram.map((p) => p.count));
+
+  // Pie data — same as bar but with non-zero filter handled by SimplePieChart.
+  const pieData = byProgram;
 
   return (
     <div className="space-y-6">
-      {/* Welcome header — clean text only, no gradient banner */}
       <PageHeader
         title={`Welcome, ${user?.name?.split(' ')[0] || 'Officer'}`}
         subtitle="Register new students, finalize base fees, and manage enrollment records — all in one place."
@@ -442,7 +511,12 @@ function OverviewView({
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        >
           <KpiCard
             label="Enrolled Students"
             value={students.length}
@@ -467,109 +541,110 @@ function OverviewView({
             icon={Lock}
             hint={fmtMoney(lockedSum)}
           />
+        </motion.div>
+      )}
+
+      {/* Analytics charts */}
+      {loading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Skeleton className="h-72 rounded-xl lg:col-span-2" />
+          <Skeleton className="h-72 rounded-xl" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <ChartCard
+            title="Enrollments by Program"
+            subtitle="Student count across the 6 departments"
+            className="lg:col-span-2"
+          >
+            {students.length === 0 ? (
+              <EmptyState icon={TrendingUp} title="No enrollment data yet" desc="" />
+            ) : (
+              <SimpleBarChart
+                data={byProgram}
+                height={260}
+                yLabel="Students"
+                formatValue={(v) => `${v} student${v === 1 ? '' : 's'}`}
+              />
+            )}
+          </ChartCard>
+          <ChartCard
+            title="Enrollment Distribution"
+            subtitle="Share by department"
+          >
+            {students.length === 0 ? (
+              <EmptyState icon={TrendingUp} title="No distribution data yet" desc="" />
+            ) : (
+              <SimplePieChart data={pieData} height={260} donut />
+            )}
+          </ChartCard>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent admissions */}
-        <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">Recent Admissions</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Last 10 enrolled students</p>
-            </div>
+      {/* Recent admissions table */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Recent Admissions</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Last 10 enrolled students</p>
           </div>
-          {loading ? (
-            <SkeletonTable rows={5} />
-          ) : recent.length === 0 ? (
-            <EmptyState
-              icon={GraduationCap}
-              title="No students enrolled yet"
-              desc="Use New Enrollment to add the first one."
-            />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Name
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Class
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Roll #
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                    Base Fee
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">
-                    Status
-                  </TableHead>
+        </div>
+        {loading ? (
+          <SkeletonTable rows={5} />
+        ) : recent.length === 0 ? (
+          <EmptyState
+            icon={GraduationCap}
+            title="No students enrolled yet"
+            desc="Use New Enrollment to add the first one."
+          />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-200 hover:bg-transparent">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                  Name
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                  Class
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                  Roll #
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
+                  Base Fee
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">
+                  Status
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {recent.map((s) => (
+                <TableRow
+                  key={s.id}
+                  className="border-gray-100 hover:bg-gray-50"
+                >
+                  <TableCell className="text-sm font-medium text-gray-900">
+                    {s.name}
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-700">
+                    {s.class || '—'}
+                    {s.section ? ` · ${s.section}` : ''}
+                  </TableCell>
+                  <TableCell className="text-sm font-mono text-gray-700">
+                    {s.rollNo || '—'}
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-700 text-right">
+                    {isLocked(s) ? fmtMoney(Number(s.baseFee)) : '—'}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <StatusBadge student={s} />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recent.map((s) => (
-                  <TableRow
-                    key={s.id}
-                    className="border-gray-100 hover:bg-gray-50"
-                  >
-                    <TableCell className="text-sm font-medium text-gray-900">
-                      {s.name}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.class || '—'}
-                      {s.section ? ` · ${s.section}` : ''}
-                    </TableCell>
-                    <TableCell className="text-sm font-mono text-gray-700">
-                      {s.rollNo || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700 text-right">
-                      {isLocked(s) ? fmtMoney(Number(s.baseFee)) : '—'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <StatusBadge student={s} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
-
-        {/* Enrollment by program */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <div className="mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">Enrollment by Program</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Distribution across courses</p>
-          </div>
-          {loading ? (
-            <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-8 w-full rounded-lg" />
               ))}
-            </div>
-          ) : byProgram.length === 0 ? (
-            <EmptyState icon={GraduationCap} title="No program data yet" desc="" />
-          ) : (
-            <div className="space-y-3">
-              {byProgram.map((p) => (
-                <div key={p.name}>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="font-medium text-gray-900 truncate">{p.name}</span>
-                    <span className="text-gray-500 tabular-nums">{p.count}</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gray-400"
-                      style={{ width: `${(p.count / maxProgram) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+            </TableBody>
+          </Table>
+        )}
       </div>
     </div>
   );
@@ -580,9 +655,6 @@ function OverviewView({
 // ---------------------------------------------------------------------------
 type EnrollForm = {
   name: string;
-  // fatherName is kept on the type for backward-compat with the submit
-  // body (the fatherName column mirrors `guardian`), but the form itself
-  // only collects `guardian` ("Father / Guardian Name").
   fatherName: string;
   cnic: string;
   dob: string;
@@ -631,15 +703,10 @@ function NewEnrollmentView({
   const [feeLocked, setFeeLocked] = useState(false);
   const [created, setCreated] = useState<any>(null);
 
-  // --- Wizard state ---
-  // step tracks the current 1..3 step; touched tracks fields the user has
-  // blurred so we only show inline hints after they've interacted; cnicWarning
-  // holds the duplicate-CNIC notice (warning, not a block).
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [cnicWarning, setCnicWarning] = useState<string | null>(null);
 
-  // Fetch classes + reference once on mount.
   useEffect(() => {
     if (user?.branchId) {
       api
@@ -653,21 +720,14 @@ function NewEnrollmentView({
       .catch(() => setReference({ sections: ['A', 'B', 'C'] }));
   }, [user?.branchId]);
 
-  // Class-scoped roll-number suggestion: when the user picks a class on
-  // Step 2, auto-suggest STU-{year}-{classSeq:03d} based on how many students
-  // are already in THAT class (not the whole branch). Field stays editable.
   useEffect(() => {
     if (!form.classId) return;
     const inClass = students.filter((s) => s.classId === form.classId);
     const year = new Date().getFullYear();
     const seq = inClass.length + 1;
     setForm((f) => ({ ...f, rollNo: `STU-${year}-${String(seq).padStart(3, '0')}` }));
-    // Only re-run when classId changes — we don't want a students refresh to
-    // overwrite a value the user has manually edited.
   }, [form.classId]);
 
-  // Debounced (400ms) duplicate-CNIC detection. Warns but does not block —
-  // the user can still save after acknowledging.
   useEffect(() => {
     const cnic = form.cnic.trim();
     if (!cnic) {
@@ -695,15 +755,11 @@ function NewEnrollmentView({
   const markTouched = (k: string) =>
     setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
 
-  // Inline validation hint — small red helper below the input, shown only
-  // when the field has been touched (blurred) and is still empty.
   const err = (k: keyof EnrollForm, label: string): React.ReactNode =>
     touched[k] && !form[k].trim() ? (
       <p className="text-[11px] text-red-500 mt-1">{label} is required.</p>
     ) : null;
 
-  // Validate the required fields for a given step. Marks missing fields as
-  // touched so their inline hints appear, and shows a single toast.
   const validateStep = (n: 1 | 2 | 3): boolean => {
     if (n === 1) {
       const required: (keyof EnrollForm)[] = ['name', 'guardian', 'cnic'];
@@ -769,8 +825,6 @@ function NewEnrollmentView({
   };
 
   const submit = async () => {
-    // Defensive: re-validate every step before saving (each step's Continue
-    // already validated, but this guards against refreshes or back-edits).
     if (!validateStep(1)) {
       setStep(1);
       return;
@@ -782,10 +836,6 @@ function NewEnrollmentView({
 
     const selectedClass = classes.find((c) => c.id === form.classId);
 
-    // ─── Client-side duplicate Roll Number pre-check ───
-    // The server (POST platform/users) also enforces this and returns 409,
-    // but checking here gives the admissions officer instant feedback and
-    // prevents the optimistic-fallback below from masking the error.
     const rollNoTrim = form.rollNo.trim();
     const dupStudent = students.find(
       (s) => (s.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase(),
@@ -803,7 +853,6 @@ function NewEnrollmentView({
     const body: any = {
       name: form.name.trim(),
       rollNo: rollNoTrim,
-      // Internal placeholder — the Accountant sets the real login later.
       password: genTempPassword(),
       email: `${rollNoTrim.toLowerCase()}@pending.concordia.edu.pk`,
       role: 'student',
@@ -813,11 +862,8 @@ function NewEnrollmentView({
       classId: form.classId,
       section: form.section || selectedClass?.section || 'A',
       guardian: form.guardian.trim() || null,
-      // Merged field — also mirrors guardian into the legacy fatherName
-      // column for backward compat with the academic portal / CSV / etc.
       fatherName: form.guardian.trim(),
       guardianPhone: form.guardianPhone.trim() || null,
-      // Concordia admissions fields (spec §2.1)
       cnic: form.cnic.trim(),
       dob: form.dob || null,
       address: form.address.trim() || null,
@@ -844,10 +890,6 @@ function NewEnrollmentView({
       onCreated();
       setCreated(newStudent);
     } catch (e: any) {
-      // If the server rejected this as a duplicate (roll number / email /
-      // CNIC already in use), surface the error and STOP — do NOT fall
-      // back to a local record, because that would silently create a
-      // second student with the same identifier.
       const msg = (e?.message || '').toLowerCase();
       const isDuplicate =
         e?.status === 409 ||
@@ -863,8 +905,6 @@ function NewEnrollmentView({
         setStep(2);
         return;
       }
-      // For genuine network / backend-outage errors only, fall back to a
-      // local record so the demo still flows.
       const newStudent: any = {
         id: `local-${Date.now()}`,
         ...body,
@@ -885,7 +925,6 @@ function NewEnrollmentView({
     }
   };
 
-  // Reset to Step 1 (not Step 3) when the user wants to enroll another.
   const reset = () => {
     setForm({ ...emptyForm });
     setFeeLocked(false);
@@ -895,7 +934,6 @@ function NewEnrollmentView({
     setCnicWarning(null);
   };
 
-  // === Branded PDF receipt — download or print ===
   const [receiptBusy, setReceiptBusy] = useState<'download' | 'print' | null>(null);
 
   const buildReceiptDoc = async () => {
@@ -955,15 +993,9 @@ function NewEnrollmentView({
     }
   };
 
-  // === Confirmation screen (with print support) ===
   if (created) {
     return (
       <div className="max-w-xl mx-auto">
-        {/*
-          Print CSS — uses the visibility trick to hide everything outside
-          .print-receipt when the user prints. .no-print elements (the action
-          buttons) are removed entirely via display:none.
-        */}
         <style
           dangerouslySetInnerHTML={{
             __html: `
@@ -1063,17 +1095,11 @@ function NewEnrollmentView({
     );
   }
 
-  // === Sticky step indicator (3 numbered circles + thin connecting line) ===
-  // Current step is highlighted in #F26522; completed steps show a checkmark;
-  // future steps are gray. A separate progress line fills orange as steps
-  // complete, sitting on top of a gray background line.
   const stepLabels = ['Personal', 'Academic', 'Fees'];
   const stepIndicator = (
     <div className="sticky top-0 z-20 py-3 bg-white/95 backdrop-blur border-y border-gray-200">
       <div className="relative max-w-md mx-auto">
-        {/* Background line — gray, sits at the circle's vertical center (h-9/2 = 18px) */}
         <div className="absolute left-4 right-4 top-[18px] h-px bg-gray-200" />
-        {/* Progress line — orange, fills 0% / 50% / 100% as steps complete */}
         <div
           className="absolute left-4 top-[18px] h-px bg-[#F26522] transition-all duration-300"
           style={{
@@ -1085,7 +1111,6 @@ function NewEnrollmentView({
                   : 'calc(100% - 2rem)',
           }}
         />
-        {/* Circles + labels */}
         <div className="relative flex justify-between items-start">
           {[1, 2, 3].map((n, i) => {
             const isActive = step === n;
@@ -1409,7 +1434,6 @@ function NewEnrollmentView({
             </p>
           </div>
 
-          {/* Review summary before save */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <div className="mb-3">
               <h2 className="text-sm font-semibold text-gray-900">Review &amp; Save</h2>
@@ -1472,11 +1496,19 @@ function NewEnrollmentView({
 }
 
 // ---------------------------------------------------------------------------
-// 3. Student Records
+// 3. Student Records — department → part → class → section → student table
 // ---------------------------------------------------------------------------
+type Drill = {
+  dept: string | null;
+  part: string;          // '1' | '2' — default '1'
+  cls: { id: string; name: string; section: string } | null;
+  section: { id: string; name: string; section: string } | null;
+};
+
 function StudentRecordsView({
   user,
   students,
+  classes,
   loading,
   error,
   onRefresh,
@@ -1484,182 +1516,356 @@ function StudentRecordsView({
 }: {
   user: any;
   students: any[];
+  classes: any[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
   onLocalUpsert: (s: any) => void;
 }) {
   const [search, setSearch] = useState('');
-  const [classFilter, setClassFilter] = useState('all');
+  const [drill, setDrill] = useState<Drill>({ dept: null, part: '1', cls: null, section: null });
   const [editing, setEditing] = useState<any | null>(null);
+  const [docStudent, setDocStudent] = useState<any | null>(null);
 
-  const classOptions = useMemo(() => {
-    const set = new Set<string>();
-    students.forEach((s) => s.class && set.add(s.class));
-    return Array.from(set).sort();
+  // ── Counts per department — count students whose program matches one of
+  // the canonical 6 departments. Legacy programs (ICS, F.Sc Pre-Medical, …)
+  // are silently excluded from the per-department count but still searchable.
+  const studentCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const dept of DEPARTMENTS) map[dept] = 0;
+    for (const s of students) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return map;
   }, [students]);
 
-  const filtered = useMemo(() => {
+  // ── Search results — flat table bypassing the hierarchy when the user
+  // types anything into the search box.
+  const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return students.filter((s) => {
-      if (classFilter !== 'all' && s.class !== classFilter) return false;
-      if (!q) return true;
-      return (
-        s.name?.toLowerCase().includes(q) ||
-        s.guardian?.toLowerCase().includes(q) ||
-        s.fatherName?.toLowerCase().includes(q) ||
-        s.rollNo?.toLowerCase().includes(q) ||
-        s.cnic?.toLowerCase().includes(q)
-      );
-    });
-  }, [students, search, classFilter]);
+    if (!q) return [];
+    return students.filter((s) =>
+      s.name?.toLowerCase().includes(q) ||
+      s.guardian?.toLowerCase().includes(q) ||
+      s.fatherName?.toLowerCase().includes(q) ||
+      s.rollNo?.toLowerCase().includes(q) ||
+      s.cnic?.toLowerCase().includes(q)
+    );
+  }, [students, search]);
+
+  const isSearching = search.trim().length > 0;
+
+  // ── Classes for the currently-selected department + part. A class row in
+  // the `classes` table may have program + part columns; legacy rows have
+  // nulls and won't match — that's fine, they won't show in the hierarchy
+  // but their students are still searchable.
+  const classesInDept = useMemo(() => {
+    if (!drill.dept) return [];
+    return classes.filter(
+      (c) =>
+        (c.program || '').trim() === drill.dept &&
+        String(c.part || '') === drill.part,
+    );
+  }, [classes, drill.dept, drill.part]);
+
+  // ── Sections of the currently-selected class (same name, different
+  // section letters). Used to decide whether to show the SectionCardGrid or
+  // skip straight to the student table.
+  const sectionsOfClass = useMemo(() => {
+    if (!drill.cls) return [];
+    return classes.filter((c) => c.name === drill.cls!.name);
+  }, [classes, drill.cls]);
+
+  const hasMultipleSections = sectionsOfClass.length > 1;
+
+  // ── Final student list to show in the student table.
+  // Match by TEXT on (student.class === cls.name && student.section === cls.section).
+  // If multiple sections, drill.section drives the match; otherwise drill.cls.
+  const tableStudents = useMemo(() => {
+    const target = drill.section || drill.cls;
+    if (!target) return [];
+    return students.filter(
+      (s) =>
+        (s.class || '') === target.name &&
+        (s.section || '') === target.section,
+    );
+  }, [students, drill.cls, drill.section]);
+
+  // ── Student count helpers for the card grids.
+  const getStudentCountForClass = (clsId: string) => {
+    const c = classes.find((x) => x.id === clsId);
+    if (!c) return 0;
+    return students.filter(
+      (s) => (s.class || '') === c.name && (s.section || '') === c.section,
+    ).length;
+  };
+
+  const handleSelectDept = (dept: string) =>
+    setDrill({ dept, part: '1', cls: null, section: null });
+
+  const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
+    // If the class has multiple sections, clear the section selection so the
+    // SectionCardGrid shows; otherwise pre-fill section with the single
+    // section so the table renders immediately.
+    const secs = classes.filter((c) => c.name === cls.name);
+    if (secs.length > 1) {
+      setDrill({ ...drill, cls, section: null });
+    } else {
+      setDrill({ ...drill, cls, section: cls });
+    }
+  };
+
+  const handleSelectSection = (section: {
+    id: string;
+    name: string;
+    section: string;
+  }) => setDrill({ ...drill, section });
+
+  const handleClearHierarchy = () =>
+    setDrill({ dept: null, part: '1', cls: null, section: null });
+
+  // ── Header actions: refresh only.
+  const headerActions = (
+    <Button
+      variant="outline"
+      className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
+      onClick={onRefresh}
+    >
+      <Loader2 className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+      Refresh
+    </Button>
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Student Records"
-        subtitle="Search, filter, and edit personal information for enrolled students."
-        actions={
-          <Button
-            variant="outline"
-            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
-            onClick={onRefresh}
-          >
-            <Loader2
-              className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`}
-            />
-            Refresh
-          </Button>
-        }
+        subtitle="Browse by department → part → class → section, or search by name, roll #, or CNIC for a quick lookup."
+        actions={headerActions}
       />
 
-      {/* Filters */}
+      {/* Search bar — always visible. Drives the flat-search fallback. */}
       <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, father / guardian, roll #, or CNIC…"
-              className={`${inputCls} pl-9`}
-            />
-          </div>
-          <Select value={classFilter} onValueChange={setClassFilter}>
-            <SelectTrigger className={`${inputCls} w-full sm:w-52`}>
-              <SelectValue placeholder="All classes" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All classes</SelectItem>
-              {classOptions.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="relative">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, father / guardian, roll #, or CNIC…"
+            className={`${inputCls} pl-9`}
+          />
+          {isSearching && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
+              {searchResults.length} match{searchResults.length === 1 ? '' : 'es'}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        {error ? (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+      {error ? (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+        </div>
+      ) : isSearching ? (
+        // ── Flat search results — bypass hierarchy ──
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Search Results</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Matching students across all departments
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() => setSearch('')}
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to hierarchy
+            </Button>
           </div>
-        ) : loading ? (
-          <SkeletonTable rows={6} />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={GraduationCap}
-            title={students.length === 0 ? 'No students enrolled yet' : 'No matching records'}
-            desc={
+          <StudentTable
+            students={searchResults}
+            loading={loading}
+            onEdit={setEditing}
+            onDocs={setDocStudent}
+            emptyTitle={students.length === 0 ? 'No students enrolled yet' : 'No matching records'}
+            emptyDesc={
               students.length === 0
                 ? 'Start by enrolling your first student from the New Enrollment tab.'
-                : 'Try adjusting your search or class filter.'
+                : 'Try adjusting your search query.'
             }
           />
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Roll #
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Name
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Father / Guardian
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Contact
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Class
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Program
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                    Base Fee
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">
-                    Status
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((s) => (
-                  <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
-                    <TableCell className="text-sm font-mono text-gray-700">
-                      {s.rollNo || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm font-medium text-gray-900">
-                      {s.name}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.guardian || s.fatherName || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.guardianPhone || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.class || '—'}
-                      {s.section ? (
-                        <span className="text-gray-400"> · {s.section}</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.program || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700 text-right">
-                      {isLocked(s) ? fmtMoney(Number(s.baseFee)) : '—'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <StatusBadge student={s} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                        onClick={() => setEditing(s)}
-                      >
-                        <Edit className="h-3.5 w-3.5 mr-1" /> Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+        </div>
+      ) : !drill.dept ? (
+        // ── Level 1: Department cards ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Select a Department</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Browse the 6 Concordia departments to drill into their classes and students.
+            </p>
           </div>
-        )}
-      </div>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-32 rounded-2xl" />
+              ))}
+            </div>
+          ) : (
+            <DeptCardGrid
+              onSelect={handleSelectDept}
+              studentCounts={studentCounts}
+            />
+          )}
+        </motion.div>
+      ) : !drill.cls ? (
+        // ── Level 2: Part toggle + class cards ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            onClear={handleClearHierarchy}
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.
+              </p>
+            </div>
+            <PartToggle value={drill.part} onChange={(p) =>
+              setDrill((d) => ({ ...d, part: p, cls: null, section: null }))
+            } />
+          </div>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-28 rounded-xl" />
+              ))}
+            </div>
+          ) : classesInDept.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
+              <FolderOpen className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm font-medium text-gray-900">
+                No classes found for {drill.dept} · Part {drill.part}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                The Academic Office needs to create classes with program={drill.dept} and
+                part={drill.part}. Meanwhile, you can still search students by name or CNIC
+                above.
+              </p>
+            </div>
+          ) : (
+            <ClassCardGrid
+              classes={classesInDept}
+              onSelect={handleSelectClass}
+              getStudentCount={getStudentCountForClass}
+            />
+          )}
+        </motion.div>
+      ) : hasMultipleSections && !drill.section ? (
+        // ── Level 3a: Section cards (only when multiple sections exist) ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            cls={drill.cls.name}
+            onClear={handleClearHierarchy}
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {drill.cls.name} — Select Section
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                This class has multiple sections. Pick one to view its students.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              onClick={() => setDrill((d) => ({ ...d, cls: null, section: null }))}
+            >
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to classes
+            </Button>
+          </div>
+          <SectionCardGrid
+            sections={sectionsOfClass}
+            onSelect={handleSelectSection}
+            getStudentCount={getStudentCountForClass}
+          />
+        </motion.div>
+      ) : (
+        // ── Level 4: Student table ──
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-4"
+        >
+          <HierarchyBreadcrumb
+            dept={drill.dept}
+            part={drill.part}
+            cls={drill.cls.name}
+            section={(drill.section || drill.cls).section}
+            onClear={handleClearHierarchy}
+          />
+          <div className="rounded-xl border border-gray-200 bg-white p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {drill.cls.name} · Section {(drill.section || drill.cls).section}
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {tableStudents.length} student{tableStudents.length === 1 ? '' : 's'} enrolled
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                onClick={() =>
+                  setDrill((d) => ({
+                    ...d,
+                    cls: hasMultipleSections ? d.cls : null,
+                    section: null,
+                  }))
+                }
+              >
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                {hasMultipleSections ? 'Back to sections' : 'Back to classes'}
+              </Button>
+            </div>
+            <StudentTable
+              students={tableStudents}
+              loading={loading}
+              onEdit={setEditing}
+              onDocs={setDocStudent}
+              emptyTitle="No students in this class yet"
+              emptyDesc="Enroll students from the New Enrollment tab to populate this class."
+            />
+          </div>
+        </motion.div>
+      )}
 
       {/* Edit sheet */}
       <EditStudentSheet
@@ -1671,10 +1877,466 @@ function StudentRecordsView({
           setEditing(null);
         }}
       />
+
+      {/* Document manager dialog */}
+      <DocumentManagerDialog
+        student={docStudent}
+        onClose={() => setDocStudent(null)}
+      />
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// StudentTable — shared table used by both the hierarchy drill-down and the
+// flat search results.
+// ---------------------------------------------------------------------------
+function StudentTable({
+  students,
+  loading,
+  onEdit,
+  onDocs,
+  emptyTitle,
+  emptyDesc,
+}: {
+  students: any[];
+  loading: boolean;
+  onEdit: (s: any) => void;
+  onDocs: (s: any) => void;
+  emptyTitle: string;
+  emptyDesc: string;
+}) {
+  if (loading) return <SkeletonTable rows={6} />;
+  if (students.length === 0)
+    return (
+      <EmptyState
+        icon={GraduationCap}
+        title={emptyTitle}
+        desc={emptyDesc}
+      />
+    );
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-gray-200 hover:bg-transparent">
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+              Roll #
+            </TableHead>
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+              Name
+            </TableHead>
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+              Father / Guardian
+            </TableHead>
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+              Contact
+            </TableHead>
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+              CNIC
+            </TableHead>
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
+              Program
+            </TableHead>
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
+              Documents
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {students.map((s) => (
+            <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
+              <TableCell className="text-sm font-mono text-gray-700">
+                {s.rollNo || '—'}
+              </TableCell>
+              <TableCell className="text-sm font-medium text-gray-900">
+                {s.name}
+              </TableCell>
+              <TableCell className="text-sm text-gray-700">
+                {s.guardian || s.fatherName || '—'}
+              </TableCell>
+              <TableCell className="text-sm text-gray-700">
+                {s.guardianPhone || '—'}
+              </TableCell>
+              <TableCell className="text-sm font-mono text-gray-700">
+                {s.cnic || '—'}
+              </TableCell>
+              <TableCell className="text-sm text-gray-700">
+                {s.program || '—'}
+              </TableCell>
+              <TableCell className="text-right">
+                <div className="inline-flex items-center gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                    onClick={() => onEdit(s)}
+                  >
+                    <Edit className="h-3.5 w-3.5 mr-1" /> Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs text-[#F26522] hover:text-[#D4541E] hover:bg-[#FFF0E8]"
+                    onClick={() => onDocs(s)}
+                  >
+                    <FileText className="h-3.5 w-3.5 mr-1" /> Add Documents
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DocumentManagerDialog — upload / list / download / delete per-student docs.
+// ---------------------------------------------------------------------------
+const DOC_ACCEPT =
+  '.jpg,.jpeg,.png,.pdf,.doc,.docx,image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const DOC_MAX_BYTES = 5 * 1024 * 1024; // 5 MB safety cap — base64 will inflate by ~33%
+
+function DocumentManagerDialog({
+  student,
+  onClose,
+}: {
+  student: any | null;
+  onClose: () => void;
+}) {
+  const [docs, setDocs] = useState<any[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [docName, setDocName] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load documents whenever a new student is opened.
+  useEffect(() => {
+    if (!student) {
+      setDocs([]);
+      setDocName('');
+      setFile(null);
+      return;
+    }
+    setLoadingDocs(true);
+    api
+      .getStudentDocuments(student.id)
+      .then((r) => setDocs(Array.isArray(r) ? r : []))
+      .catch((e) => {
+        toast({
+          title: 'Could not load documents',
+          description: e?.message || 'Please try again.',
+          variant: 'destructive',
+        });
+        setDocs([]);
+      })
+      .finally(() => setLoadingDocs(false));
+  }, [student]);
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] || null;
+    setFile(f);
+    // Auto-fill the document name from the file name (without extension) if empty.
+    if (f && !docName.trim()) {
+      const baseName = f.name.replace(/\.[^/.]+$/, '');
+      setDocName(baseName);
+    }
+  };
+
+  const onUpload = async () => {
+    if (!student) return;
+    if (!file) {
+      toast({
+        title: 'Select a file',
+        description: 'Pick a file to upload before clicking Upload.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (file.size > DOC_MAX_BYTES) {
+      toast({
+        title: 'File too large',
+        description: `Maximum allowed size is ${(DOC_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    const name = docName.trim() || file.name.replace(/\.[^/.]+$/, '');
+    if (!name) {
+      toast({
+        title: 'Enter a document name',
+        description: 'e.g. Father CNIC, Student B-Form, Previous Results.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      // Convert to base64 data URL via FileReader.
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const created = await api.uploadStudentDocument({
+        studentId: student.id,
+        name,
+        fileName: file.name,
+        fileType: file.type || '',
+        fileSize: file.size,
+        dataUrl,
+      });
+
+      setDocs((prev) => [created, ...prev]);
+      setDocName('');
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      toast({
+        title: 'Document uploaded',
+        description: `${name} — ${file.name}`,
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Upload failed',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onDownload = async (id: string) => {
+    setDownloadingId(id);
+    try {
+      const res = await api.downloadStudentDocument(id);
+      const dataUrl: string | undefined = res?.dataUrl;
+      if (!dataUrl) {
+        toast({
+          title: 'Download failed',
+          description: 'No file content returned.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      // Open the data URL in a new tab. For images and PDFs, this displays
+      // them in the browser; for binary Office docs, the browser will offer
+      // a download.
+      const win = window.open();
+      if (win) {
+        win.location.href = dataUrl;
+      } else {
+        // Fallback — trigger a direct download via an <a> click.
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = res?.fileName || 'document';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (e: any) {
+      toast({
+        title: 'Download failed',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const onDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setDeletingId(id);
+    try {
+      await api.deleteStudentDocument(id);
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+      toast({ title: 'Document deleted', description: name });
+    } catch (e: any) {
+      toast({
+        title: 'Delete failed',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <Dialog open={!!student} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl bg-white max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <FolderOpen className="h-4 w-4 text-[#F26522]" />
+            Student Documents
+          </DialogTitle>
+          <DialogDescription className="text-sm text-gray-500">
+            Upload and manage scanned documents for this student.
+          </DialogDescription>
+        </DialogHeader>
+
+        {student && (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full border border-gray-200 bg-white grid place-items-center shrink-0">
+              <GraduationCap className="h-5 w-5 text-gray-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900 truncate">
+                {student.name}
+              </p>
+              <p className="text-xs font-mono text-gray-500">
+                Roll # {student.rollNo || '—'}
+                {student.class ? ` · ${student.class}` : ''}
+                {student.section ? ` · ${student.section}` : ''}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Existing documents list */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-gray-700">
+            Existing Documents {docs.length > 0 && `(${docs.length})`}
+          </p>
+          <div className={`${scrollListCls} rounded-lg border border-gray-200 bg-white`}>
+            {loadingDocs ? (
+              <div className="p-4 space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : docs.length === 0 ? (
+              <div className="p-5 text-center">
+                <FileText className="h-6 w-6 text-gray-300 mx-auto mb-2" />
+                <p className="text-xs text-gray-500">
+                  No documents uploaded yet.
+                </p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {docs.map((d) => (
+                  <li
+                    key={d.id}
+                    className="px-3 py-2.5 flex items-center gap-3 hover:bg-gray-50"
+                  >
+                    <div className="h-9 w-9 rounded-lg border border-gray-200 bg-white grid place-items-center shrink-0">
+                      <FileText className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {d.name}
+                      </p>
+                      <p className="text-[11px] text-gray-500 truncate">
+                        {d.fileName || '—'} · {fmtBytes(Number(d.fileSize || 0))}
+                        {d.uploadedByName ? ` · by ${d.uploadedByName}` : ''}
+                        {d.createdAt ? ` · ${fmtDate(d.createdAt)}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+                        onClick={() => onDownload(d.id)}
+                        disabled={downloadingId === d.id}
+                        aria-label={`Download ${d.name}`}
+                      >
+                        {downloadingId === d.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-gray-500 hover:text-rose-600 hover:bg-rose-50"
+                        onClick={() => onDelete(d.id, d.name)}
+                        disabled={deletingId === d.id}
+                        aria-label={`Delete ${d.name}`}
+                      >
+                        {deletingId === d.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Upload form */}
+        <div className="rounded-lg border border-[#F26522]/30 bg-[#FFF0E8]/40 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#D4541E]">
+            <FileUp className="h-4 w-4" />
+            Upload New Document
+          </div>
+          <Field label="Document Name" required>
+            <Input
+              value={docName}
+              onChange={(e) => setDocName(e.target.value)}
+              placeholder="e.g. Father CNIC, Student B-Form, Previous Results"
+              className={inputCls}
+            />
+          </Field>
+          <Field label="File" required>
+            <Input
+              ref={fileInputRef}
+              type="file"
+              accept={DOC_ACCEPT}
+              onChange={onFileChange}
+              className="h-10 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 file:mr-3 file:ml-0 file:rounded-md file:border-0 file:bg-[#F26522] file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-[#D4541E] cursor-pointer"
+            />
+            {file && (
+              <p className="text-[11px] text-gray-500 mt-1">
+                {file.name} · {fmtBytes(file.size)}
+              </p>
+            )}
+            <p className="text-[11px] text-gray-500 mt-1">
+              Accepted: JPG, PNG, PDF, DOC, DOCX · max{' '}
+              {(DOC_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB
+            </p>
+          </Field>
+          <DialogFooter>
+            <Button
+              type="button"
+              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium w-full sm:w-auto"
+              onClick={onUpload}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Uploading…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-1.5" /> Upload Document
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 4. EditStudentSheet — unchanged from prior implementation.
+// ---------------------------------------------------------------------------
 function EditStudentSheet({
   student,
   user,
@@ -1716,8 +2378,6 @@ function EditStudentSheet({
     setSaving(true);
     const body: any = {
       name: form.name.trim(),
-      // admissions fields (a later backend task persists these via the same PATCH)
-      // Merged field — fatherName mirrors guardian for backward compat.
       fatherName: form.guardian.trim(),
       guardian: form.guardian.trim(),
       guardianPhone: form.guardianPhone.trim(),
@@ -1750,8 +2410,7 @@ function EditStudentSheet({
             Edit Student
           </SheetTitle>
           <SheetDescription className="text-sm text-gray-500">
-            Update personal information. Base fee is managed separately in Base Fee
-            Finalization.
+            Update personal information.
           </SheetDescription>
         </SheetHeader>
 
@@ -1872,877 +2531,5 @@ function EditStudentSheet({
         </SheetFooter>
       </SheetContent>
     </Sheet>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 4. Fee Records — unified table of all students + their base fee status.
-//    The actual fee LOCKING happens during New Enrollment. This page is a
-//    read-oriented registry: it shows every enrolled student with their
-//    class, program, base fee amount, and locked/pending status. Pending
-//    students can still be locked inline (for cases where it was skipped
-//    during enrollment).
-// ---------------------------------------------------------------------------
-
-// CSV export — emits a fee-records-{YYYY-MM-DD}.csv download from the
-// in-memory filtered list. No backend round-trip.
-function exportFeeCsv(students: any[]) {
-  const headers = [
-    'RollNo',
-    'Name',
-    'Father/Guardian',
-    'Contact',
-    'Class',
-    'Section',
-    'Program',
-    'BaseFee',
-    'Status',
-  ];
-  const escapeCell = (v: string) => {
-    const s = String(v ?? '');
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const rows = students.map((s) =>
-    [
-      s.rollNo || '',
-      s.name || '',
-      s.guardian || s.fatherName || '',
-      s.guardianPhone || '',
-      s.class || '',
-      s.section || '',
-      s.program || '',
-      isLocked(s) ? String(s.baseFee ?? 0) : '',
-      isLocked(s) ? 'Locked' : 'Pending',
-    ]
-      .map(escapeCell)
-      .join(','),
-  );
-  const csv = [headers.map(escapeCell).join(','), ...rows].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const today = new Date().toISOString().slice(0, 10);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `fee-records-${today}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-// Per-student fee detail sheet — shown when clicking the "View" button on a
-// LOCKED row. Surfaces the locked base fee amount + locked date + the
-// Admission-Office-set-it note. Pending rows disable the View button.
-function StudentFeeDetailSheet({
-  student,
-  onClose,
-}: {
-  student: any | null;
-  onClose: () => void;
-}) {
-  const formatDate = (d: any) => {
-    if (!d) return '—';
-    try {
-      const dt = new Date(d);
-      if (isNaN(dt.getTime())) return '—';
-      return dt.toLocaleDateString('en-PK', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      });
-    } catch {
-      return '—';
-    }
-  };
-
-  const lockedDate = formatDate(
-    student?.updated_at || student?.updatedAt || student?.createdAt,
-  );
-
-  return (
-    <Sheet open={!!student} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-lg overflow-y-auto bg-white"
-      >
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold text-gray-900">
-            Fee Detail
-          </SheetTitle>
-          <SheetDescription className="text-sm text-gray-500">
-            Base fee record for this student.
-          </SheetDescription>
-        </SheetHeader>
-
-        {student && (
-          <div className="px-4 pb-4 space-y-5">
-            {/* Header: photo + name + roll + class · section · program */}
-            <div className="flex items-center gap-4">
-              {student.photoUrl ? (
-                <img
-                  src={student.photoUrl}
-                  alt={student.name}
-                  className="h-16 w-16 rounded-full border border-gray-200 object-cover shrink-0"
-                />
-              ) : (
-                <div className="h-16 w-16 rounded-full border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
-                  <GraduationCap className="h-7 w-7 text-gray-400" />
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="text-base font-semibold text-gray-900 truncate">
-                  {student.name}
-                </p>
-                <p className="text-xs font-mono text-gray-500">
-                  {student.rollNo || '—'}
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {student.class || '—'}
-                  {student.section ? ` · ${student.section}` : ''} ·{' '}
-                  {student.program || '—'}
-                </p>
-              </div>
-            </div>
-
-            {/* Personal info */}
-            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-              <Row label="Father / Guardian" value={student.guardian || student.fatherName || '—'} />
-              {student.guardianPhone && (
-                <Row label="Father / Guardian Contact" value={student.guardianPhone} />
-              )}
-              <Row label="CNIC / B-Form" value={student.cnic || '—'} mono />
-              <Row label="Date of Birth" value={formatDate(student.dob)} />
-            </div>
-
-            {/* Base fee amount (big) */}
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                Base Fee
-              </p>
-              <p className="text-3xl font-bold text-gray-900 mt-1">
-                {fmtMoney(Number(student.baseFee))}
-              </p>
-              <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
-                <StatusBadge student={student} />
-                <span className="text-xs text-gray-500">
-                  · Locked on {lockedDate}
-                </span>
-              </div>
-            </div>
-
-            {/* Admission-office note */}
-            <div className="rounded-lg border border-gray-200 bg-white p-3 flex gap-2.5">
-              <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-gray-600 leading-relaxed">
-                Set by Admission Office · Accountant may split into installments
-                but cannot change the base amount.
-              </p>
-            </div>
-          </div>
-        )}
-
-        <SheetFooter>
-          <Button
-            variant="outline"
-            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium w-full"
-            onClick={onClose}
-          >
-            Close
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// Bulk lock by program sheet — pick a program + an amount, preview the
-// pending students in that program, then lock them sequentially with
-// progress feedback. Continues past individual failures.
-function BulkLockSheet({
-  open,
-  onOpenChange,
-  students,
-  onDone,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  students: any[];
-  onDone: () => void;
-}) {
-  const programs = useMemo(() => {
-    const set = new Set<string>();
-    students.forEach((s) => {
-      if (s.program) set.add(s.program);
-    });
-    return Array.from(set).sort();
-  }, [students]);
-
-  const [program, setProgram] = useState('');
-  const [amount, setAmount] = useState('');
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number }>({
-    done: 0,
-    total: 0,
-  });
-
-  // Default-select the first program when none has been chosen yet. Derived
-  // (no setState-in-effect) so it stays in sync as the students list changes.
-  const effectiveProgram = program || (programs.length > 0 ? programs[0] : '');
-
-  // Reset transient fields when the sheet closes — done in onOpenChange so we
-  // don't trigger synchronous setState in an effect.
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen) {
-      setAmount('');
-      setProgress({ done: 0, total: 0 });
-      if (running) return; // don't allow close while a bulk run is in flight
-    }
-    onOpenChange(nextOpen);
-  };
-
-  const pendingInProgram = useMemo(() => {
-    if (!effectiveProgram) return [];
-    return students.filter(
-      (s) => s.program === effectiveProgram && !isLocked(s),
-    );
-  }, [students, effectiveProgram]);
-
-  const amt = Number(amount);
-  const amountValid = !!amount && !isNaN(amt) && amt > 0;
-
-  const runLock = async () => {
-    if (!amountValid || pendingInProgram.length === 0) return;
-    setRunning(true);
-    const failed: string[] = [];
-    const total = pendingInProgram.length;
-    let done = 0;
-    setProgress({ done: 0, total });
-    for (const s of pendingInProgram) {
-      try {
-        await api.editUser(s.id, { baseFee: amt, baseFeeLocked: true });
-      } catch {
-        failed.push(s.name || s.rollNo || s.id);
-      }
-      done += 1;
-      setProgress({ done, total });
-    }
-    setRunning(false);
-    const succeeded = total - failed.length;
-    if (failed.length === 0) {
-      toast({
-        title: `Locked ${total} student${total === 1 ? '' : 's'}`,
-        description: `${effectiveProgram} · ${fmtMoney(amt)} each`,
-      });
-    } else {
-      toast({
-        title: `Locked ${succeeded} of ${total}`,
-        description: `Failed: ${failed.join(', ')}`,
-        variant: 'destructive',
-      });
-    }
-    onDone();
-    handleOpenChange(false);
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-lg overflow-y-auto bg-white"
-      >
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold text-gray-900">
-            Bulk Lock by Program
-          </SheetTitle>
-          <SheetDescription className="text-sm text-gray-500">
-            Lock the same base fee for every pending student in a program.
-            This cannot be undone.
-          </SheetDescription>
-        </SheetHeader>
-
-        <div className="px-4 pb-4 space-y-4">
-          <Field label="Program" required>
-            <Select value={effectiveProgram} onValueChange={setProgram}>
-              <SelectTrigger className={`${inputCls} w-full`}>
-                <SelectValue placeholder="Select program" />
-              </SelectTrigger>
-              <SelectContent>
-                {programs.length === 0 ? (
-                  <SelectItem value="_none" disabled>
-                    No programs available
-                  </SelectItem>
-                ) : (
-                  programs.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Base Fee (PKR)" required>
-            <div className="relative">
-              <DollarSign className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input
-                type="number"
-                min={0}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="e.g. 25000"
-                className={`${inputCls} pl-9`}
-                disabled={running}
-              />
-            </div>
-          </Field>
-
-          {/* Preview list */}
-          <div>
-            <p className="text-xs font-semibold text-gray-700 mb-2">
-              Pending students {effectiveProgram ? `in ${effectiveProgram}` : ''} (
-              {pendingInProgram.length})
-            </p>
-            <div className="rounded-lg border border-gray-200 bg-gray-50 max-h-72 overflow-y-auto">
-              {pendingInProgram.length === 0 ? (
-                <div className="p-5 text-center">
-                  <CheckCircle2 className="h-5 w-5 text-gray-300 mx-auto mb-2" />
-                  <p className="text-xs text-gray-500">
-                    {effectiveProgram
-                      ? `All students in ${effectiveProgram} are already locked.`
-                      : 'Select a program to see pending students.'}
-                  </p>
-                </div>
-              ) : (
-                <ul className="divide-y divide-gray-200">
-                  {pendingInProgram.map((s) => (
-                    <li
-                      key={s.id}
-                      className="px-3 py-2 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {s.name}
-                        </p>
-                        <p className="text-xs font-mono text-gray-500">
-                          {s.rollNo || '—'}
-                        </p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="bg-amber-50 text-amber-700 border-transparent gap-1 shrink-0"
-                      >
-                        <Clock className="h-3 w-3" /> Pending
-                      </Badge>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* Progress */}
-          {running && (
-            <div className="rounded-lg border border-gray-200 bg-white p-3 flex items-center gap-3">
-              <Loader2 className="h-4 w-4 animate-spin text-[#F26522]" />
-              <p className="text-sm text-gray-700">
-                Locking {progress.done} of {progress.total}…
-              </p>
-            </div>
-          )}
-        </div>
-
-        <SheetFooter>
-          <div className="flex gap-2 w-full">
-            <Button
-              variant="outline"
-              className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium flex-1"
-              onClick={() => handleOpenChange(false)}
-              disabled={running}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium flex-1 disabled:opacity-60"
-              onClick={runLock}
-              disabled={running || !amountValid || pendingInProgram.length === 0}
-            >
-              {running ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                  Locking…
-                </>
-              ) : (
-                <>
-                  <Lock className="h-4 w-4 mr-1.5" />
-                  Lock {pendingInProgram.length} Student
-                  {pendingInProgram.length === 1 ? '' : 's'}
-                </>
-              )}
-            </Button>
-          </div>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-function BaseFeeView({
-  students,
-  loading,
-  onRefresh,
-  onLocalUpsert,
-}: {
-  students: any[];
-  loading: boolean;
-  onRefresh: () => void;
-  onLocalUpsert: (s: any) => void;
-}) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [detailStudent, setDetailStudent] = useState<any | null>(null);
-
-  const locked = useMemo(() => students.filter((s) => isLocked(s)), [students]);
-  const pending = useMemo(() => students.filter((s) => !isLocked(s)), [students]);
-  const lockedTotal = locked.reduce((acc, s) => acc + Number(s.baseFee || 0), 0);
-
-  const filtered = useMemo(() => {
-    let list = students;
-    if (statusFilter === 'locked') list = list.filter(isLocked);
-    else if (statusFilter === 'pending') list = list.filter((s) => !isLocked(s));
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((s) =>
-        (s.name || '').toLowerCase().includes(q) ||
-        (s.rollNo || '').toLowerCase().includes(q) ||
-        (s.class || '').toLowerCase().includes(q) ||
-        (s.program || '').toLowerCase().includes(q)
-      );
-    }
-    // Locked first, then pending; alphabetically within each group
-    return [...list].sort((a, b) => {
-      const la = isLocked(a) ? 0 : 1;
-      const lb = isLocked(b) ? 0 : 1;
-      if (la !== lb) return la - lb;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-  }, [students, search, statusFilter]);
-
-  const filtersActive = !!search.trim() || statusFilter !== 'all';
-  const clearFilters = () => {
-    setSearch('');
-    setStatusFilter('all');
-  };
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Fee Records"
-        subtitle="All enrolled students and their base fee status. Fees are locked during New Enrollment."
-        actions={
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              variant="outline"
-              className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
-              onClick={onRefresh}
-            >
-              <Loader2 className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button
-              variant="outline"
-              className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium disabled:opacity-50"
-              onClick={() => exportFeeCsv(filtered)}
-              disabled={loading || filtered.length === 0}
-            >
-              <Download className="h-4 w-4 mr-1.5" />
-              Export CSV
-            </Button>
-            <Button
-              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium disabled:opacity-50"
-              onClick={() => setBulkOpen(true)}
-              disabled={loading || students.length === 0}
-            >
-              <Lock className="h-4 w-4 mr-1.5" />
-              Bulk Lock
-            </Button>
-          </div>
-        }
-      />
-
-      {/* Summary stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={GraduationCap} label="Total Students" value={String(students.length)} hint="All enrolled" />
-        <KpiCard icon={Lock} label="Fee Locked" value={String(locked.length)} hint="Finalized" />
-        <KpiCard icon={Clock} label="Pending" value={String(pending.length)} hint="Awaiting lock" />
-        <KpiCard icon={DollarSign} label="Total Locked" value={fmtMoney(lockedTotal)} hint="Sum of locked fees" />
-      </div>
-
-      {/* Search + filter bar */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, roll #, class, or program…"
-              className={`${inputCls} pl-9`}
-            />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className={`${inputCls} w-full sm:w-44`}>
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="locked">Locked only</SelectItem>
-              <SelectItem value="pending">Pending only</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Unified records table */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        {loading ? (
-          <SkeletonTable rows={6} />
-        ) : filtered.length === 0 ? (
-          students.length === 0 ? (
-            <EmptyState
-              icon={DollarSign}
-              title="No students enrolled yet"
-              desc="Enroll students from the New Enrollment tab to see their fee records here."
-            />
-          ) : (
-            <EmptyState
-              icon={Search}
-              title="No students match your filters"
-              desc="Try clearing the search or selecting 'All statuses'."
-              action={
-                <Button
-                  variant="outline"
-                  onClick={clearFilters}
-                  disabled={!filtersActive}
-                  className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium disabled:opacity-50"
-                >
-                  Clear filters
-                </Button>
-              }
-            />
-          )
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Roll #
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Name
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Class
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                    Program
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                    Base Fee
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">
-                    Status
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((s) => (
-                  <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
-                    <TableCell className="text-sm font-mono text-gray-700">
-                      {s.rollNo || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm font-medium text-gray-900">
-                      {s.name}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.class || '—'}
-                      {s.section ? <span className="text-gray-400"> · {s.section}</span> : null}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700">
-                      {s.program || '—'}
-                    </TableCell>
-                    <TableCell className="text-sm font-semibold text-gray-900 text-right">
-                      {isLocked(s) ? fmtMoney(Number(s.baseFee)) : '—'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {isLocked(s) ? (
-                        <StatusBadge student={s} />
-                      ) : (
-                        <PendingFeeRow student={s} onLock={onLocalUpsert} compact />
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isLocked(s) ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-                          onClick={() => setDetailStudent(s)}
-                          aria-label={`View fee detail for ${s.name}`}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 text-gray-300 cursor-not-allowed"
-                                disabled
-                                aria-label="View detail disabled — finalize base fee first"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>Finalize base fee first</TooltipContent>
-                        </Tooltip>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
-
-      <BulkLockSheet
-        open={bulkOpen}
-        onOpenChange={setBulkOpen}
-        students={students}
-        onDone={onRefresh}
-      />
-      <StudentFeeDetailSheet
-        student={detailStudent}
-        onClose={() => setDetailStudent(null)}
-      />
-    </div>
-  );
-}
-
-function PendingFeeRow({
-  student,
-  onLock,
-  compact = false,
-}: {
-  student: any;
-  onLock: (s: any) => void;
-  compact?: boolean;
-}) {
-  const [amount, setAmount] = useState('');
-  const [locking, setLocking] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-
-  const amt = Number(amount);
-  const amountValid = !!amount && !isNaN(amt) && amt > 0;
-
-  // Validate first, then open the confirm dialog. The actual API call only
-  // fires once the user clicks "Confirm & Lock" inside the dialog.
-  const tryLock = () => {
-    if (!amountValid) {
-      toast({
-        title: 'Enter a valid amount',
-        description: 'Base fee must be a positive number.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    setDialogOpen(true);
-  };
-
-  const confirmLock = async (e?: React.MouseEvent) => {
-    // Stop AlertDialogAction from auto-closing — we close manually after the
-    // API call finishes so the spinner stays visible during the request.
-    e?.preventDefault();
-    if (!amountValid) return;
-    setLocking(true);
-    const patch = { baseFee: amt, baseFeeLocked: true };
-    try {
-      await api.editUser(student.id, patch);
-      toast({ title: 'Base fee locked', description: `${student.name} — ${fmtMoney(amt)}` });
-    } catch (err: any) {
-      // Optimistic fallback — keep the change visible locally so the user
-      // can move on even if the backend is temporarily unavailable.
-      toast({
-        title: 'Locked in this session',
-        description:
-          (err?.message || 'Backend sync failed') +
-          ' — visible here, will persist once the API is wired.',
-      });
-    } finally {
-      setLocking(false);
-      setDialogOpen(false);
-      onLock({ ...student, ...patch });
-    }
-  };
-
-  // Shared AlertDialog body — used for both compact + full modes.
-  const confirmDialog = (
-    <AlertDialog
-      open={dialogOpen}
-      onOpenChange={(o) => {
-        if (!locking) setDialogOpen(o);
-      }}
-    >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Lock base fee for {student.name}?</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-sm text-gray-600">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500">Student</span>
-                <span className="font-medium text-gray-900">{student.name}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500">Roll #</span>
-                <span className="font-mono text-xs text-gray-900">
-                  {student.rollNo || '—'}
-                </span>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                  Base fee to lock
-                </p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">
-                  {fmtMoney(amt)}
-                </p>
-              </div>
-              <p className="flex gap-1.5 text-xs text-gray-500">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-500 mt-0.5" />
-                <span>
-                  This action cannot be undone. The Accountant will see this amount
-                  as the immutable base for all future invoices.
-                </span>
-              </p>
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel
-            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg"
-            disabled={locking}
-          >
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            onClick={confirmLock}
-            disabled={locking}
-            className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg"
-          >
-            {locking ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                Locking…
-              </>
-            ) : (
-              <>
-                <Lock className="h-4 w-4 mr-1.5" />
-                Confirm & Lock
-              </>
-            )}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-
-  // Compact mode: inline badge + small lock input for table rows
-  if (compact) {
-    return (
-      <>
-        <div className="inline-flex items-center gap-1.5">
-          <Badge
-            variant="outline"
-            className="bg-amber-50 text-amber-700 border-transparent gap-1"
-          >
-            <Clock className="h-3 w-3" /> Pending
-          </Badge>
-          <div className="relative">
-            <DollarSign className="h-3 w-3 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" />
-            <Input
-              type="number"
-              min={0}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Amount"
-              className="h-7 w-24 rounded-md border border-gray-200 bg-white text-xs pl-6 pr-1 text-gray-900 focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522]/12"
-            />
-          </div>
-          <button
-            onClick={tryLock}
-            disabled={locking}
-            className="h-7 px-2 rounded-md bg-[#F26522] hover:bg-[#D4541E] text-white text-[11px] font-medium inline-flex items-center gap-1 disabled:opacity-60"
-          >
-            {locking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Lock className="h-3 w-3" />}
-            Lock
-          </button>
-        </div>
-        {confirmDialog}
-      </>
-    );
-  }
-
-  return (
-    <>
-      <div className="rounded-lg border border-gray-200 bg-white p-4 flex flex-col sm:flex-row sm:items-center gap-3 hover:border-gray-300 transition-colors">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="h-9 w-9 rounded-lg border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
-            <GraduationCap className="h-4 w-4 text-gray-400" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{student.name}</p>
-            <p className="text-xs text-gray-500 truncate">
-              {student.rollNo} · {student.class || '—'}{' '}
-              {student.section ? `· ${student.section}` : ''} ·{' '}
-              {student.program || 'No program'}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="relative">
-            <DollarSign className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              type="number"
-              min={0}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Amount"
-              className={`${inputCls} pl-9 w-36`}
-            />
-          </div>
-          <Button
-            className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-10 px-4 text-sm font-medium"
-            onClick={tryLock}
-            disabled={locking}
-          >
-            {locking ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <Lock className="h-4 w-4 mr-1.5" />
-            )}
-            Lock
-          </Button>
-        </div>
-      </div>
-      {confirmDialog}
-    </>
   );
 }

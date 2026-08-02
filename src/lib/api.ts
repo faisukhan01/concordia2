@@ -246,8 +246,11 @@ export const api = {
   reference: () => cachedGet<{ classes: string[]; sections: string[]; subjects: string[]; programs: string[] }>('reference'),
   // classes & courses
   getClasses: (branchId?: string) => request<any[]>(branchId ? `classes?branchId=${branchId}` : 'classes'),
-  createClass: (name: string, section: string, branchId?: string) =>
-    request<any>('classes', { method: 'POST', body: JSON.stringify({ name, section, branchId }) }),
+  // `program` and `part` are optional — pre-existing callers that omit them
+  // still work (the backend defaults them to NULL / '1'). New Academic
+  // Office flows pass program + part to drive the department hierarchy.
+  createClass: (name: string, section: string, branchId?: string, program?: string, part?: string) =>
+    request<any>('classes', { method: 'POST', body: JSON.stringify({ name, section, branchId, program, part }) }),
   getCourses: (params?: { branchId?: string; classId?: string }) => {
     const q = new URLSearchParams();
     if (params?.branchId) q.set('branchId', params.branchId);
@@ -464,6 +467,40 @@ export const api = {
   // Health records — full medical record for a single student.
   getHealthRecords: (studentId?: string) =>
     request<HealthRecordBundle>(studentId ? `health/records?studentId=${encodeURIComponent(studentId)}` : 'health/records'),
+
+  // ───────────────────────────────────────────────────────────
+  // Student Documents (Admissions → Student Records → Add Documents)
+  // ───────────────────────────────────────────────────────────
+  getStudentDocuments: (studentId: string) =>
+    request<any[]>(`student-documents?studentId=${encodeURIComponent(studentId)}`),
+  uploadStudentDocument: (data: { studentId: string; name: string; fileName: string; fileType: string; fileSize: number; dataUrl: string }) =>
+    request<any>('student-documents', { method: 'POST', body: JSON.stringify(data) }),
+  downloadStudentDocument: (id: string) =>
+    request<any>(`student-documents/${id}/download`),
+  deleteStudentDocument: (id: string) =>
+    request<{ success: boolean }>(`student-documents/${id}`, { method: 'DELETE' }),
+
+  // ───────────────────────────────────────────────────────────
+  // Date Sheets (Academic → Exams & Date Sheets)
+  // ───────────────────────────────────────────────────────────
+  getDateSheets: (params?: { examId?: string; part?: string; branchId?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.examId) q.set('examId', params.examId);
+    if (params?.part) q.set('part', params.part);
+    if (params?.branchId) q.set('branchId', params.branchId);
+    const qs = q.toString();
+    return request<any[]>(qs ? `date-sheets?${qs}` : 'date-sheets');
+  },
+  saveDateSheet: (data: { examId: string; examName?: string; part: string; branchId?: string; entries: { subject: string; examDate: string; examTime?: string; roomName?: string }[] }) =>
+    request<any>('date-sheets', { method: 'POST', body: JSON.stringify(data) }),
+  deleteDateSheet: (id: string) =>
+    request<{ success: boolean }>(`date-sheets/${id}`, { method: 'DELETE' }),
+
+  // ───────────────────────────────────────────────────────────
+  // Bulk Misc Charges (Accountant → Misc Charges → bulk add by Part)
+  // ───────────────────────────────────────────────────────────
+  bulkAddMiscCharges: (data: { part: string; program?: string; branchId?: string; type: string; amount: number; description?: string }) =>
+    request<{ success: boolean; created: number; total: number }>('misc-charges/bulk', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // === Shared types for the v1.5.0 module APIs ===

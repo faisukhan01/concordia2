@@ -44,6 +44,7 @@ import {
   Lock,
   Clock,
   UserPlus,
+  TrendingUp,
 } from 'lucide-react';
 
 // Sub-portal components — the admin accesses every role's full portal.
@@ -51,6 +52,9 @@ import { AdmissionsPortal } from './admissions-portal';
 import { AccountantPortal } from './accountant-portal';
 import { AcademicPortal } from './academic-portal';
 import { useApp } from '@/lib/store';
+import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
+import { DEPARTMENTS } from './shared/concordia-hierarchy';
+import { motion } from 'framer-motion';
 
 type Props = { activeModule: string; user: any };
 
@@ -202,7 +206,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
       setStats(s);
       setUsers(Array.isArray(u) ? u : []);
       setAnnouncements(Array.isArray(a) ? a.slice(0, 5) : []);
-      setFees(Array.isArray(f) ? f.slice(0, 6) : []);
+      setFees(Array.isArray(f) ? f.slice(0, 200) : []);
       setLoading(false);
     });
     return () => {
@@ -240,6 +244,54 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
     [students],
   );
 
+  // ── Chart data ──
+  // Students per program — counts by the 6-department catalog
+  const studentsByProgram = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of DEPARTMENTS) map[d] = 0;
+    for (const s of students) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+  }, [students]);
+
+  // Monthly fee collection — last 6 months from paid invoices
+  const monthlyCollection = useMemo(() => {
+    const now = new Date();
+    const buckets: { label: string; value: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const total = fees
+        .filter((f) => {
+          if ((f.status || '').toLowerCase() !== 'paid') return false;
+          const pd = f.paidAt ? new Date(f.paidAt) : null;
+          return !!pd && pd.getMonth() === m && pd.getFullYear() === y;
+        })
+        .reduce((acc, f) => acc + Number(f.paidAmount || f.amount || 0), 0);
+      buckets.push({ label: d.toLocaleString('en-US', { month: 'short' }), value: total });
+    }
+    return buckets;
+  }, [fees]);
+
+  // Fee status distribution — Paid vs Pending vs Overdue
+  const feeStatusDist = useMemo(() => {
+    let paid = 0, pending = 0, overdue = 0;
+    for (const f of fees) {
+      const st = (f.status || '').toLowerCase();
+      if (st === 'paid') paid++;
+      else if (st === 'overdue') overdue++;
+      else pending++;
+    }
+    return [
+      { label: 'Paid', value: paid },
+      { label: 'Pending', value: pending },
+      { label: 'Overdue', value: overdue },
+    ].filter((d) => d.value > 0);
+  }, [fees]);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -261,14 +313,14 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             label="Total Students"
             value={stats?.totalStudents ?? students.length}
             sub="Enrolled across all classes"
-            onClick={() => setActiveModule('academic:academic-students')}
+            onClick={() => setActiveModule('academic:academic-classes')}
           />
           <StatCard
             icon={Users}
             label="Teachers"
             value={stats?.totalTeachers ?? teachers.length}
             sub="Active faculty members"
-            onClick={() => setActiveModule('academic:academic-teachers')}
+            onClick={() => setActiveModule('academic:academic-classes')}
           />
           <StatCard
             icon={UserCog}
@@ -281,10 +333,101 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             label="Fee Collected"
             value={fmtMoney(feeCollected)}
             sub="Collected this period"
-            onClick={() => setActiveModule('accountant:accountant-collect')}
+            onClick={() => setActiveModule('accountant:accountant-challans')}
           />
         </div>
       )}
+
+      {/* ── Analytics charts ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+      >
+        {/* Chart 1: Students per Program (bar, 2/3) */}
+        <ChartCard
+          title="Students per Program"
+          subtitle="Enrollment across the 6 Concordia departments"
+          className="lg:col-span-2"
+        >
+          {loading ? (
+            <Skeleton className="h-[260px] w-full rounded-lg" />
+          ) : students.length === 0 ? (
+            <EmptyState
+              icon={TrendingUp}
+              title="No enrollment data yet"
+              desc="Students will appear here once the Admissions Office enrolls them."
+            />
+          ) : (
+            <SimpleBarChart
+              data={studentsByProgram}
+              height={260}
+              yLabel="Students"
+              formatValue={(v) => `${v} student${v === 1 ? '' : 's'}`}
+            />
+          )}
+        </ChartCard>
+
+        {/* Chart 2: Enrollment Distribution (pie, 1/3) */}
+        <ChartCard
+          title="Enrollment Distribution"
+          subtitle="By department"
+        >
+          {loading ? (
+            <Skeleton className="h-[260px] w-full rounded-lg" />
+          ) : studentsByProgram.filter((d) => d.value > 0).length === 0 ? (
+            <EmptyState
+              icon={TrendingUp}
+              title="No enrollment data yet"
+              desc="Students will appear here once the Admissions Office enrolls them."
+            />
+          ) : (
+            <SimplePieChart data={studentsByProgram} height={260} donut />
+          )}
+        </ChartCard>
+
+        {/* Chart 3: Fee Collection — Last 6 Months (bar, 2/3) */}
+        <ChartCard
+          title="Fee Collection — Last 6 Months"
+          subtitle="Total collected per month"
+          className="lg:col-span-2"
+        >
+          {loading ? (
+            <Skeleton className="h-[240px] w-full rounded-lg" />
+          ) : fees.length === 0 ? (
+            <EmptyState
+              icon={TrendingUp}
+              title="No fee data yet"
+              desc="Collections will appear here once invoices are paid."
+            />
+          ) : (
+            <SimpleBarChart
+              data={monthlyCollection}
+              height={240}
+              formatValue={(v) => fmtMoney(v)}
+            />
+          )}
+        </ChartCard>
+
+        {/* Chart 4: Fee Status (pie, 1/3) */}
+        <ChartCard
+          title="Fee Status"
+          subtitle="Paid vs Pending vs Overdue"
+        >
+          {loading ? (
+            <Skeleton className="h-[240px] w-full rounded-lg" />
+          ) : feeStatusDist.length === 0 ? (
+            <EmptyState
+              icon={TrendingUp}
+              title="No fee data yet"
+              desc="Fee status will appear here once invoices exist."
+            />
+          ) : (
+            <SimplePieChart data={feeStatusDist} height={240} donut />
+          )}
+        </ChartCard>
+      </motion.div>
 
       {/* ── Two-column: announcements + at-a-glance ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -373,10 +516,10 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
           action={
             <button
               type="button"
-              onClick={() => setActiveModule('admissions:admissions-base-fee')}
+              onClick={() => setActiveModule('admissions:admissions-students')}
               className="text-[11px] font-semibold text-[#F26522] hover:text-[#D4541E] inline-flex items-center gap-1"
             >
-              View Fee Records →
+              View Student Records →
             </button>
           }
         />
@@ -406,7 +549,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             </div>
             <button
               type="button"
-              onClick={() => setActiveModule('admissions:admissions-base-fee')}
+              onClick={() => setActiveModule('admissions:admissions-students')}
               className="text-left rounded-lg border border-amber-200 bg-amber-50/50 p-4 hover:border-amber-300 hover:bg-amber-50 transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-amber-700/80">
