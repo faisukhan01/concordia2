@@ -79,3 +79,7 @@ db/*.db-journal
 
 # Skills directory
 /skills/
+# Token files — never commit
+.gh-token
+.gh-token-2
+gh-token.txt

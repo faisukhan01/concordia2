@@ -227,10 +227,23 @@ export default function DownloadPage() {
               </div>
             </div>
 
-            {/* App icon card + QR card */}
+            {/* App thumbnail banner + QR card — matching the official app-store thumbnail:
+                navy gradient + glassmorphism + orange squircle icon + white wordmark +
+                a viewfinder/scan reticle on the right. */}
             <div className="mt-8 flex flex-wrap items-stretch gap-3">
-              <div className="flex items-center gap-3 rounded-2xl border border-orange-100 bg-white p-3 pr-5 shadow-sm">
-                <div className="relative h-14 w-14 overflow-hidden rounded-2xl shadow-md ring-1 ring-black/5">
+              {/* ── App thumbnail banner ── */}
+              <div className="relative flex min-w-[260px] flex-1 items-center gap-4 overflow-hidden rounded-2xl p-4 shadow-[0_12px_32px_-12px_rgba(30,58,95,0.45)] sm:p-5">
+                {/* Navy gradient background */}
+                <div className="absolute inset-0 bg-gradient-to-br from-[#5B7FA5] via-[#3A5A7C] to-[#1E3A5F]" />
+                {/* Frosted glass overlay */}
+                <div className="absolute inset-0 bg-white/10 backdrop-blur-md" />
+                {/* Subtle top sheen */}
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/10 to-transparent" />
+                {/* Decorative orbit glow behind icon */}
+                <div className="pointer-events-none absolute left-2 top-1/2 h-32 w-32 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,_rgba(255,140,66,0.35),_transparent_65%)] blur-xl" />
+
+                {/* Orange squircle app icon */}
+                <div className="relative z-10 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[22%] bg-gradient-to-br from-[#FF9A4B] to-[#F26522] shadow-[0_8px_20px_-6px_rgba(242,101,34,0.6)] ring-1 ring-white/20 sm:h-[72px] sm:w-[72px]">
                   <Image
                     src="/app-icon-512.png"
                     alt="Concordia College app icon"
@@ -239,12 +252,41 @@ export default function DownloadPage() {
                     priority
                   />
                 </div>
-                <div>
-                  <p className="text-sm font-bold text-[#1A1A1A]">Concordia College</p>
-                  <p className="text-xs text-gray-500">Student &amp; Staff Portal</p>
+                {/* Wordmark */}
+                <div className="relative z-10 min-w-0 flex-1">
+                  <p className="text-base font-semibold tracking-tight text-white sm:text-lg">
+                    Concordia College
+                  </p>
+                  <p className="mt-0.5 text-xs font-medium text-blue-100/80 sm:text-sm">
+                    Management Portal
+                  </p>
+                </div>
+
+                {/* Viewfinder / scan reticle (decorative) */}
+                <div className="relative z-10 hidden shrink-0 items-center justify-center sm:flex">
+                  <svg
+                    viewBox="0 0 48 48"
+                    fill="none"
+                    className="h-9 w-9 text-blue-100/70"
+                    aria-hidden
+                  >
+                    {/* corner brackets */}
+                    <path d="M8 14 V10 a2 2 0 0 1 2-2 H14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                    <path d="M34 8 H38 a2 2 0 0 1 2 2 V14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                    <path d="M40 34 V38 a2 2 0 0 1 -2 2 H34" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                    <path d="M14 40 H10 a2 2 0 0 1 -2 -2 V34" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                    {/* center location pin */}
+                    <path
+                      d="M24 18 a5 5 0 0 0 -5 5 c0 3.5 5 8 5 8 s5-4.5 5-8 a5 5 0 0 0 -5-5 Z"
+                      fill="currentColor"
+                      fillOpacity="0.9"
+                    />
+                    <circle cx="24" cy="23" r="1.8" fill="#1E3A5F" />
+                  </svg>
                 </div>
               </div>
 
+              {/* ── QR code card ── */}
               <div className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-orange-100 bg-white p-3 shadow-sm">
                 {/* QR code from api.qrserver.com — using a plain <img> to avoid configuring next/image remote patterns */}
                 <img
