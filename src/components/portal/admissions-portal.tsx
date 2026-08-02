@@ -1505,7 +1505,10 @@ type Drill = {
   section: { id: string; name: string; section: string } | null;
 };
 
-function StudentRecordsView({
+// Exported so the Accountant portal can render the EXACT same Student Records
+// page (hierarchy + search + document manager + edit sheet) without duplicating
+// ~400 lines of code. See accountant-portal.tsx → case 'accountant-students'.
+export function StudentRecordsView({
   user,
   students,
   classes,
@@ -1977,10 +1980,10 @@ function StudentTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 px-2 text-xs text-[#F26522] hover:text-[#D4541E] hover:bg-[#FFF0E8]"
+                    className="h-8 px-2 text-xs text-[#F26522] hover:text-[#D4541E] hover:bg-[#FFF0E8] font-semibold"
                     onClick={() => onDocs(s)}
                   >
-                    <FileText className="h-3.5 w-3.5 mr-1" /> Add Documents
+                    <FolderOpen className="h-3.5 w-3.5 mr-1" /> View &amp; Add Docs
                   </Button>
                 </div>
               </TableCell>
@@ -2173,8 +2176,8 @@ function DocumentManagerDialog({
 
   return (
     <Dialog open={!!student} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-2xl bg-white max-h-[90vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="w-[95vw] sm:max-w-2xl bg-white max-h-[92vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
           <DialogTitle className="text-base font-semibold text-gray-900 flex items-center gap-2">
             <FolderOpen className="h-4 w-4 text-[#F26522]" />
             Student Documents
@@ -2184,6 +2187,10 @@ function DocumentManagerDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* Scrollable body — holds student info + docs list + upload form.
+            The DialogHeader (above) and the upload button row (below) stay
+            pinned so the button never bleeds outside the dialog on small screens. */}
+        <div className="flex-1 overflow-y-auto concordia-scroll px-5 py-4 space-y-4 min-h-0">
         {student && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center gap-3">
             <div className="h-10 w-10 rounded-full border border-gray-200 bg-white grid place-items-center shrink-0">
@@ -2310,24 +2317,36 @@ function DocumentManagerDialog({
               {(DOC_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB
             </p>
           </Field>
-          <DialogFooter>
-            <Button
-              type="button"
-              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium w-full sm:w-auto"
-              onClick={onUpload}
-              disabled={uploading}
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Uploading…
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4 mr-1.5" /> Upload Document
-                </>
-              )}
-            </Button>
-          </DialogFooter>
+        </div>
+        </div>
+
+        {/* Pinned footer — upload button. Sits outside the scrollable body
+            so it never overflows the dialog, even on small screens. */}
+        <div className="px-5 py-3.5 border-t border-gray-100 bg-white shrink-0 flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-9 px-4 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+            onClick={onClose}
+          >
+            Close
+          </Button>
+          <Button
+            type="button"
+            className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium"
+            onClick={onUpload}
+            disabled={uploading || !file}
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Uploading…
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4 mr-1.5" /> Upload Document
+              </>
+            )}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
