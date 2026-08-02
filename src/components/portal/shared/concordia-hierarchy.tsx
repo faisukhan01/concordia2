@@ -122,29 +122,56 @@ export function DeptCardGrid(props: {
 }
 
 // ── Part Toggle (Part 1 / Part 2) ──
+// A polished two-option segmented control with icons, gradient active state,
+// and a subtle lift on hover. Used everywhere the hierarchy drill-down appears
+// (Admissions Student Records, Academics Timetable / Result Cards, Accountant
+// Fee & Installments / Misc Charges).
 export function PartToggle(props: {
   value: string;
   onChange: (part: string) => void;
 }) {
   const { value, onChange } = props;
+  const options: { key: string; label: string; sub: string; icon: LucideIcon }[] = [
+    { key: '1', label: 'Part 1', sub: '1st Year', icon: BookOpen },
+    { key: '2', label: 'Part 2', sub: '2nd Year', icon: GraduationCap },
+  ];
   return (
-    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/50 border border-border/50">
-      {['1', '2'].map((p) => (
-        <button
-          key={p}
-          onClick={() => onChange(p)}
-          className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
-            value === p
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-          }`}
-        >
-          Part {p}
-          <span className="block text-[10px] font-normal opacity-70">
-            {p === '1' ? '1st Year' : '2nd Year'}
-          </span>
-        </button>
-      ))}
+    <div className="inline-flex items-stretch gap-1.5 p-1.5 rounded-2xl bg-muted/60 border border-border/60 shadow-sm">
+      {options.map((opt) => {
+        const Icon = opt.icon;
+        const active = value === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onChange(opt.key)}
+            className={`group relative flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-left transition-all duration-200 overflow-hidden ${
+              active
+                ? 'bg-gradient-to-br from-primary to-primary/85 text-primary-foreground shadow-md scale-[1.02]'
+                : 'text-muted-foreground hover:text-foreground hover:bg-background/70'
+            }`}
+          >
+            <span
+              className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 transition-colors ${
+                active
+                  ? 'bg-white/20 backdrop-blur-sm border border-white/25'
+                  : 'bg-background/80 border border-border/60 group-hover:border-primary/30'
+              }`}
+            >
+              <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-muted-foreground group-hover:text-primary'}`} />
+            </span>
+            <span className="flex flex-col leading-tight">
+              <span className="text-sm font-bold tracking-tight">{opt.label}</span>
+              <span className={`text-[10px] font-medium ${active ? 'text-white/80' : 'text-muted-foreground/80'}`}>
+                {opt.sub}
+              </span>
+            </span>
+            {active && (
+              <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-primary/20" />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

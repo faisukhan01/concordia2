@@ -43,6 +43,9 @@ import {
   SimplePieChart,
   ChartCard,
 } from '@/components/portal/shared/concordia-charts';
+// Reuse the EXACT same Student Records page (hierarchy + search + document
+// manager + edit sheet) as the Admission Office — single source of truth.
+import { StudentRecordsView } from './admissions-portal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -519,7 +522,19 @@ export function AccountantPortal({ activeModule, user }: Props) {
     });
 
   let content: React.ReactNode;
-  if (
+  if (activeModule === 'accountant-students')
+    content = (
+      <StudentRecordsView
+        user={user}
+        students={students}
+        classes={classes}
+        loading={loading}
+        error={error}
+        onRefresh={refresh}
+        onLocalUpsert={upsertStudent}
+      />
+    );
+  else if (
     activeModule === 'accountant-challans' ||
     activeModule === 'accountant-collect' ||
     activeModule === 'accountant-installments'
@@ -3102,19 +3117,6 @@ function LoginsView({
         title="Student Logins"
         subtitle="Issue login credentials to enrolled students after fee payment, edit portal details, and block / unblock access."
       />
-
-      {/* Teachers note — Academic Office owns teacher creation now */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 flex gap-3">
-        <GraduationCap className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-        <div className="text-sm text-amber-800 leading-relaxed">
-          <p className="font-semibold text-amber-900">Teachers are now managed by the Academic Office.</p>
-          <p className="mt-1">
-            Teacher accounts, subjects, and class assignments are created under
-            <span className="font-medium"> Academic Office → Classes &amp; Teachers</span>. This page
-            only handles student logins.
-          </p>
-        </div>
-      </div>
 
       {/* Info callout — when to issue logins */}
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex gap-3">

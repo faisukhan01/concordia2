@@ -113,6 +113,7 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'admissions:admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
     ]},
     { group: 'Accountant', items: [
+      { id: 'accountant:accountant-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant:accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
       { id: 'accountant:accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
       { id: 'accountant:accountant-logins', name: 'Create Logins', icon: KeyRound, color: PRIMARY },
@@ -151,6 +152,7 @@ export const ROLE_MODULES: RoleModules = {
   'accountant': [
     { group: 'Finance', items: [
       { id: 'accountant-overview', name: 'Dashboard', icon: LayoutDashboard, color: PRIMARY },
+      { id: 'accountant-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
       { id: 'accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
       { id: 'accountant-logins', name: 'Create Logins', icon: KeyRound, color: PRIMARY },
