@@ -315,13 +315,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'POST' && path === 'platform/users') {
       const user = await requireAuth(req);
       requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
-      const { name, email, password, role, instituteId, branchId, rollNo, class: cls, section, subjects, classes, classId, courseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked } = body || {};
+      const { name, email, password, role, instituteId, branchId, rollNo, class: cls, section, part, subjects, classes, classId, courseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked } = body || {};
       if (!name || !password || !role) return NextResponse.json({ error: 'Name, password and role required' }, { status: 400 });
       if (role === 'teacher' || role === 'student') {
         if (!rollNo) return NextResponse.json({ error: 'Roll Number/ID is required' }, { status: 400 });
       }
       const instId = instituteId || user.instituteId;
       const brId = branchId || user.branchId;
+      const prt = part === '2' ? '2' : '1';
 
       if (email) {
         const existing = await db.execute({ sql: 'SELECT id FROM users WHERE LOWER(email) = ?', args: [email.toLowerCase()] });
@@ -337,11 +338,11 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const classesJson = classes ? JSON.stringify(classes) : null;
 
       await db.execute({
-        sql: `INSERT INTO users (id, name, email, rollNo, password, role, status, title, mustChangePassword, blocked, instituteId, branchId, class, section, guardian, guardianPhone, fatherName, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, subjects, classes, createdById)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: `INSERT INTO users (id, name, email, rollNo, password, role, status, title, mustChangePassword, blocked, instituteId, branchId, class, section, part, guardian, guardianPhone, fatherName, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, subjects, classes, createdById)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [id, name, email || null, rollNo || null, password, role, 'Active',
           role === 'teacher' ? 'Teacher' : role === 'student' ? 'Student' : role, 1, 0,
-          instId, brId, cls || null, section || 'A', guardian || null, guardianPhone || null,
+          instId, brId, cls || null, section || 'A', prt, guardian || null, guardianPhone || null,
           fatherName || null, cnic || null, dob || null, address || null, prevResult || null,
           program || null, photoUrl || null, baseFee != null ? Number(baseFee) : null,
           baseFeeLocked ? 1 : 0, subjectsJson, classesJson, user.id],
@@ -369,7 +370,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'PATCH' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments.length === 3) {
       const user = await requireAuth(req);
       const id = pathSegments[2];
-      const { name, email, password, blocked, classId, addCourseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, class: cls, section, subjects, classes, rollNo } = body || {};
+      const { name, email, password, blocked, classId, addCourseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, class: cls, section, part, subjects, classes, rollNo } = body || {};
       const r = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
       if (r.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
       const target = r.rows[0] as any;
@@ -425,6 +426,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (baseFeeLocked !== undefined) await db.execute({ sql: 'UPDATE users SET baseFeeLocked = ? WHERE id = ?', args: [baseFeeLocked ? 1 : 0, target.id] });
       if (cls !== undefined) await db.execute({ sql: 'UPDATE users SET class = ? WHERE id = ?', args: [cls || null, target.id] });
       if (section !== undefined) await db.execute({ sql: 'UPDATE users SET section = ? WHERE id = ?', args: [section || null, target.id] });
+      if (part !== undefined) await db.execute({ sql: 'UPDATE users SET part = ? WHERE id = ?', args: [part === '2' ? '2' : '1', target.id] });
       if (subjects !== undefined) await db.execute({ sql: 'UPDATE users SET subjects = ? WHERE id = ?', args: [subjects ? JSON.stringify(subjects) : null, target.id] });
       if (classes !== undefined) await db.execute({ sql: 'UPDATE users SET classes = ? WHERE id = ?', args: [classes ? JSON.stringify(classes) : null, target.id] });
       if (rollNo !== undefined) await db.execute({ sql: 'UPDATE users SET rollNo = ? WHERE id = ?', args: [rollNo || null, target.id] });
@@ -630,10 +632,10 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         'Fine Arts', 'Physical Education',
       ];
 
-      // Default programs — Concordia's HSSC/ADP/BS course catalog.
+      // Default programs — Concordia's 6-department HSSC catalog.
+      // (Updated per user spec: FSC Pre Med, FSC Pre Eng, ICS Phy, ICS Stats, FA, FA IT)
       const defaultPrograms = [
-        'ICS', 'I.Com', 'F.Sc Pre-Medical', 'F.Sc Pre-Engineering',
-        'FA', 'F.A General Science', 'ADP', 'BS Commerce',
+        'FSC Pre Med', 'FSC Pre Eng', 'ICS Phy', 'ICS Stats', 'FA', 'FA IT',
       ];
 
       let classes: string[] = [];
@@ -685,11 +687,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'POST' && path === 'classes') {
       const user = await requireAuth(req);
       requireRole(user, 'branch-manager', 'institute-admin');
-      const { name, section, branchId } = body || {};
+      const { name, section, branchId, program, part } = body || {};
       if (!name || !name.trim()) return NextResponse.json({ error: 'Class name is required' }, { status: 400 });
       const brId = branchId || user.branchId;
       if (!brId) return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
       const sec = (section || 'A').trim().toUpperCase() || 'A';
+      const prog = program || null;
+      const prt = part === '2' ? '2' : '1';
       // Prevent exact duplicates (same name + same section in same branch)
       const existing = await db.execute({
         sql: 'SELECT id FROM classes WHERE branchId = ? AND name = ? AND section = ?',
@@ -698,10 +702,10 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (existing.rows.length > 0) return NextResponse.json({ error: 'A class with this name and section already exists' }, { status: 409 });
       const id = nextId('CLS');
       await db.execute({
-        sql: 'INSERT INTO classes (id, branchId, name, section) VALUES (?, ?, ?, ?)',
-        args: [id, brId, name.trim(), sec],
+        sql: 'INSERT INTO classes (id, branchId, name, section, program, part) VALUES (?, ?, ?, ?, ?, ?)',
+        args: [id, brId, name.trim(), sec, prog, prt],
       });
-      return NextResponse.json({ id, branchId: brId, name: name.trim(), section: sec }, { status: 201 });
+      return NextResponse.json({ id, branchId: brId, name: name.trim(), section: sec, program: prog, part: prt }, { status: 201 });
     }
 
     if (method === 'GET' && path === 'courses') {
@@ -3150,6 +3154,166 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       };
 
       return NextResponse.json(data);
+    }
+
+    // ===================== STUDENT DOCUMENTS (Admissions) =====================
+    // Upload, list, download, and delete student documents (Father CNIC,
+    // Student B-Form/CNIC, Previous Results, etc.). Files are stored as
+    // base64 data URLs in the student_documents table.
+
+    if (method === 'GET' && path === 'student-documents') {
+      const user = await requireAuth(req);
+      const { studentId } = query;
+      if (!studentId) return NextResponse.json({ error: 'studentId is required' }, { status: 400 });
+      const r = await db.execute({
+        sql: 'SELECT id, studentId, name, fileName, fileType, fileSize, uploadedByName, createdAt, updatedAt FROM student_documents WHERE studentId = ? ORDER BY createdAt DESC',
+        args: [studentId],
+      });
+      return NextResponse.json(r.rows);
+    }
+
+    if (method === 'POST' && path === 'student-documents') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const { studentId, name, fileName, fileType, fileSize, dataUrl } = body || {};
+      if (!studentId || !name || !fileName || !dataUrl) {
+        return NextResponse.json({ error: 'studentId, name, fileName, and dataUrl are required' }, { status: 400 });
+      }
+      // Verify the student exists and belongs to the same branch
+      const stu = await db.execute({ sql: 'SELECT id, branchId, instituteId FROM users WHERE id = ?', args: [studentId] });
+      if (stu.rows.length === 0) return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+      const s = stu.rows[0] as any;
+      const id = nextId('DOC');
+      await db.execute({
+        sql: `INSERT INTO student_documents (id, studentId, branchId, instituteId, name, fileName, fileType, fileSize, dataUrl, uploadedBy, uploadedByName)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, studentId, s.branchId, s.instituteId, name.trim(), fileName, fileType || 'application/octet-stream', Number(fileSize) || 0, dataUrl, user.id, user.name || ''],
+      });
+      return NextResponse.json({ id, studentId, name: name.trim(), fileName, fileType, fileSize, uploadedByName: user.name || '' }, { status: 201 });
+    }
+
+    if (method === 'GET' && pathSegments[0] === 'student-documents' && pathSegments[2] === 'download') {
+      const user = await requireAuth(req);
+      const id = pathSegments[1];
+      const r = await db.execute({ sql: 'SELECT * FROM student_documents WHERE id = ?', args: [id] });
+      if (r.rows.length === 0) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+      const doc = r.rows[0] as any;
+      return NextResponse.json(doc);
+    }
+
+    if (method === 'DELETE' && pathSegments[0] === 'student-documents' && pathSegments.length === 2) {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const id = pathSegments[1];
+      await db.execute({ sql: 'DELETE FROM student_documents WHERE id = ?', args: [id] });
+      return NextResponse.json({ success: true });
+    }
+
+    // ===================== DATE SHEETS (Academic → Exams & Date Sheets) =====================
+    // A date sheet belongs to one (exam, part) combination. Each date sheet
+    // has multiple entries (subject + date + time).
+
+    if (method === 'GET' && path === 'date-sheets') {
+      const user = await requireAuth(req);
+      const { examId, part, branchId } = query;
+      const brId = branchId || user.branchId;
+      let sql = 'SELECT * FROM date_sheets WHERE 1=1';
+      const args: any[] = [];
+      if (brId) { sql += ' AND branchId = ?'; args.push(brId); }
+      if (examId) { sql += ' AND examId = ?'; args.push(examId); }
+      if (part) { sql += ' AND part = ?'; args.push(part); }
+      sql += ' ORDER BY createdAt DESC';
+      const r = await db.execute({ sql, args });
+      const sheets = r.rows as any[];
+      // Fetch entries for each sheet
+      for (const sheet of sheets) {
+        const eR = await db.execute({ sql: 'SELECT * FROM date_sheet_entries WHERE dateSheetId = ? ORDER BY examDate, examTime', args: [sheet.id] });
+        sheet.entries = eR.rows;
+      }
+      return NextResponse.json(sheets);
+    }
+
+    if (method === 'POST' && path === 'date-sheets') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const { examId, examName, part, branchId, entries } = body || {};
+      if (!examId) return NextResponse.json({ error: 'examId is required' }, { status: 400 });
+      const brId = branchId || user.branchId;
+      const prt = part === '2' ? '2' : '1';
+      // Check if a date sheet already exists for this exam+part
+      const existing = await db.execute({
+        sql: 'SELECT id FROM date_sheets WHERE examId = ? AND part = ? AND branchId = ?',
+        args: [examId, prt, brId],
+      });
+      let sheetId: string;
+      if (existing.rows.length > 0) {
+        sheetId = (existing.rows[0] as any).id;
+        // Delete old entries (replace)
+        await db.execute({ sql: 'DELETE FROM date_sheet_entries WHERE dateSheetId = ?', args: [sheetId] });
+      } else {
+        sheetId = nextId('DS');
+        await db.execute({
+          sql: 'INSERT INTO date_sheets (id, branchId, instituteId, examId, examName, part, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          args: [sheetId, brId, user.instituteId, examId, examName || '', prt, user.id],
+        });
+      }
+      // Insert new entries
+      if (entries && Array.isArray(entries)) {
+        for (const e of entries) {
+          if (!e.subject || !e.examDate) continue;
+          const eId = nextId('DSE');
+          await db.execute({
+            sql: 'INSERT INTO date_sheet_entries (id, dateSheetId, subject, examDate, examTime, roomName) VALUES (?, ?, ?, ?, ?, ?)',
+            args: [eId, sheetId, e.subject, e.examDate, e.examTime || '', e.roomName || ''],
+          });
+        }
+      }
+      return NextResponse.json({ id: sheetId, examId, part: prt, success: true }, { status: 201 });
+    }
+
+    if (method === 'DELETE' && pathSegments[0] === 'date-sheets' && pathSegments.length === 2) {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const id = pathSegments[1];
+      await db.execute({ sql: 'DELETE FROM date_sheet_entries WHERE dateSheetId = ?', args: [id] });
+      await db.execute({ sql: 'DELETE FROM date_sheets WHERE id = ?', args: [id] });
+      return NextResponse.json({ success: true });
+    }
+
+    // ===================== BULK MISC CHARGES (Accountant) =====================
+    // Add a charge to ALL students of a given part (and optionally program).
+    // The charge type is entered manually by the accountant (e.g. "Board
+    // Admission Fee").
+
+    if (method === 'POST' && path === 'misc-charges/bulk') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const { part, program, branchId, type, amount, description } = body || {};
+      if (!type || !type.trim()) return NextResponse.json({ error: 'Charge type is required' }, { status: 400 });
+      if (!amount || Number(amount) <= 0) return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 });
+      const brId = branchId || user.branchId;
+      if (!brId) return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
+      const prt = part === '2' ? '2' : '1';
+      // Find all students matching the part (+ optional program)
+      let sql = 'SELECT id, name, rollNo, branchId, instituteId FROM users WHERE role = ? AND branchId = ? AND (part = ? OR part IS NULL OR part = ?)';
+      const args: any[] = ['student', brId, prt, ''];
+      if (program) {
+        sql += ' AND program = ?';
+        args.push(program);
+      }
+      const r = await db.execute({ sql, args });
+      const students = r.rows as any[];
+      if (students.length === 0) return NextResponse.json({ error: 'No students found matching the criteria' }, { status: 404 });
+      let created = 0;
+      for (const s of students) {
+        const id = nextId('MC');
+        await db.execute({
+          sql: 'INSERT INTO misc_charges (id, studentId, studentName, branchId, instituteId, type, amount, description, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          args: [id, s.id, s.name, s.branchId, s.instituteId, type.trim(), Number(amount), description || '', user.id],
+        });
+        created++;
+      }
+      return NextResponse.json({ success: true, created, total: students.length }, { status: 201 });
     }
 
     // ===================== FALLBACK =====================

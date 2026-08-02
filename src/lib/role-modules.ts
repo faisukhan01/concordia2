@@ -111,20 +111,17 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Admission Office', items: [
       { id: 'admissions:admissions-new', name: 'New Enrollment', icon: UserPlus, color: PRIMARY },
       { id: 'admissions:admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
-      { id: 'admissions:admissions-base-fee', name: 'Fee Records', icon: DollarSign, color: SECONDARY },
     ]},
     { group: 'Accountant', items: [
-      { id: 'accountant:accountant-students', name: 'Students (Class-wise)', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant:accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
       { id: 'accountant:accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
       { id: 'accountant:accountant-logins', name: 'Create Logins', icon: KeyRound, color: PRIMARY },
     ]},
     { group: 'Academic Office', items: [
       { id: 'academic:academic-announcements', name: 'Announcements', icon: Megaphone, color: PRIMARY },
-      { id: 'academic:academic-classes', name: 'Classes', icon: BookOpen, color: PRIMARY },
+      { id: 'academic:academic-classes', name: 'Classes & Teachers', icon: BookOpen, color: PRIMARY },
       { id: 'academic:timetable', name: 'Timetable', icon: Calendar, color: SECONDARY },
-      { id: 'academic:academic-datesheet', name: 'Date Sheets', icon: CalendarDays, color: SECONDARY },
-      { id: 'academic:academic-tests', name: 'Exams', icon: FileText, color: PRIMARY },
+      { id: 'academic:academic-exams', name: 'Exams & Date Sheets', icon: FileText, color: PRIMARY },
       { id: 'academic:report-cards', name: 'Result Cards', icon: Award, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
@@ -141,7 +138,6 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'admissions-overview', name: 'Dashboard', icon: LayoutDashboard, color: PRIMARY },
       { id: 'admissions-new', name: 'New Enrollment', icon: UserPlus, color: PRIMARY },
       { id: 'admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
-      { id: 'admissions-base-fee', name: 'Fee Records', icon: DollarSign, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
@@ -155,7 +151,6 @@ export const ROLE_MODULES: RoleModules = {
   'accountant': [
     { group: 'Finance', items: [
       { id: 'accountant-overview', name: 'Dashboard', icon: LayoutDashboard, color: PRIMARY },
-      { id: 'accountant-students', name: 'Students (Class-wise)', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
       { id: 'accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
       { id: 'accountant-logins', name: 'Create Logins', icon: KeyRound, color: PRIMARY },
@@ -181,10 +176,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'academic-announcements', name: 'Announcements', icon: Megaphone, color: PRIMARY },
     ]},
     { group: 'Classes & Academics', items: [
-      { id: 'academic-classes', name: 'Classes', icon: BookOpen, color: PRIMARY },
+      { id: 'academic-classes', name: 'Classes & Teachers', icon: BookOpen, color: PRIMARY },
       { id: 'timetable', name: 'Timetable', icon: Calendar, color: SECONDARY },
-      { id: 'academic-datesheet', name: 'Date Sheets', icon: CalendarDays, color: SECONDARY },
-      { id: 'academic-tests', name: 'Exams', icon: FileText, color: PRIMARY },
+      { id: 'academic-exams', name: 'Exams & Date Sheets', icon: FileText, color: PRIMARY },
       { id: 'report-cards', name: 'Result Cards', icon: Award, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [

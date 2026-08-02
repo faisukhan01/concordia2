@@ -53,10 +53,10 @@ let initPromise: Promise<void> | null = null;
 // instead of ~50 separate ones.
 const SCHEMA_STATEMENTS: string[] = [
   // ── Tables ──
-  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT, rollNo TEXT, password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'student', status TEXT NOT NULL DEFAULT 'Active', title TEXT DEFAULT '', mustChangePassword INTEGER NOT NULL DEFAULT 0, blocked INTEGER NOT NULL DEFAULT 0, blockedReason TEXT, instituteId TEXT, branchId TEXT, class TEXT, section TEXT DEFAULT 'A', guardian TEXT, ward TEXT, wardId TEXT, subjects TEXT, classes TEXT, createdById TEXT, createdAt TEXT DEFAULT (datetime('now')), baseFee REAL, baseFeeLocked INTEGER NOT NULL DEFAULT 0, fatherName TEXT, cnic TEXT, dob TEXT, address TEXT, prevResult TEXT, program TEXT, photoUrl TEXT, guardianPhone TEXT)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT, rollNo TEXT, password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'student', status TEXT NOT NULL DEFAULT 'Active', title TEXT DEFAULT '', mustChangePassword INTEGER NOT NULL DEFAULT 0, blocked INTEGER NOT NULL DEFAULT 0, blockedReason TEXT, instituteId TEXT, branchId TEXT, class TEXT, section TEXT DEFAULT 'A', part TEXT DEFAULT '1', guardian TEXT, ward TEXT, wardId TEXT, subjects TEXT, classes TEXT, createdById TEXT, createdAt TEXT DEFAULT (datetime('now')), baseFee REAL, baseFeeLocked INTEGER NOT NULL DEFAULT 0, fatherName TEXT, cnic TEXT, dob TEXT, address TEXT, prevResult TEXT, program TEXT, photoUrl TEXT, guardianPhone TEXT)`,
   `CREATE TABLE IF NOT EXISTS institutes (id TEXT PRIMARY KEY, name TEXT NOT NULL, short TEXT, city TEXT DEFAULT '', country TEXT DEFAULT 'USA', plan TEXT DEFAULT 'Starter', status TEXT DEFAULT 'Trial', adminName TEXT, adminEmail TEXT, branches INTEGER DEFAULT 0, students INTEGER DEFAULT 0, staff INTEGER DEFAULT 0, revenue REAL DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')), color TEXT DEFAULT 'emerald', domain TEXT DEFAULT 'edu', blocked INTEGER NOT NULL DEFAULT 0, blockedReason TEXT)`,
   `CREATE TABLE IF NOT EXISTS branches (id TEXT PRIMARY KEY, instituteId TEXT NOT NULL, name TEXT NOT NULL, city TEXT DEFAULT '', manager TEXT, managerEmail TEXT, students INTEGER DEFAULT 0, teachers INTEGER DEFAULT 0, status TEXT DEFAULT 'Active', createdAt TEXT DEFAULT (datetime('now')), blocked INTEGER NOT NULL DEFAULT 0, blockedReason TEXT)`,
-  `CREATE TABLE IF NOT EXISTS classes (id TEXT PRIMARY KEY, branchId TEXT NOT NULL, name TEXT NOT NULL, section TEXT DEFAULT 'A', teacherId TEXT)`,
+  `CREATE TABLE IF NOT EXISTS classes (id TEXT PRIMARY KEY, branchId TEXT NOT NULL, name TEXT NOT NULL, section TEXT DEFAULT 'A', program TEXT, part TEXT DEFAULT '1', teacherId TEXT)`,
   `CREATE TABLE IF NOT EXISTS courses (id TEXT PRIMARY KEY, branchId TEXT NOT NULL, name TEXT NOT NULL, code TEXT)`,
   `CREATE TABLE IF NOT EXISTS class_courses (id TEXT PRIMARY KEY, classId TEXT NOT NULL, courseId TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS teacher_class_courses (id TEXT PRIMARY KEY, teacherId TEXT NOT NULL, classId TEXT NOT NULL, courseId TEXT NOT NULL)`,
@@ -78,6 +78,15 @@ const SCHEMA_STATEMENTS: string[] = [
   // Each branch can have many exams; names must be unique per branch so
   // teachers, date sheets, and result cards can reference them unambiguously.
   `CREATE TABLE IF NOT EXISTS exams (id TEXT PRIMARY KEY, branchId TEXT NOT NULL, instituteId TEXT, name TEXT NOT NULL, type TEXT DEFAULT 'Monthly Test', createdBy TEXT, createdAt TEXT DEFAULT (datetime('now')))`,
+  // ── Student Documents (Admissions → Student Records → Add Documents) ──
+  // Stores Father CNIC, Student B-Form/CNIC, Previous Results, etc.
+  // Files are embedded as base64 data URLs (no external file storage needed).
+  `CREATE TABLE IF NOT EXISTS student_documents (id TEXT PRIMARY KEY, studentId TEXT NOT NULL, branchId TEXT, instituteId TEXT, name TEXT NOT NULL, fileName TEXT NOT NULL, fileType TEXT NOT NULL, fileSize INTEGER DEFAULT 0, dataUrl TEXT NOT NULL, uploadedBy TEXT, uploadedByName TEXT, createdAt TEXT DEFAULT (datetime('now')), updatedAt TEXT DEFAULT (datetime('now')))`,
+  // ── Date Sheets (Academic → Exams & Date Sheets) ──
+  // A date sheet belongs to one (exam, part) combination — e.g. "Monthly
+  // Test 1, Part 1". Each date sheet has multiple entries (subject+date+time).
+  `CREATE TABLE IF NOT EXISTS date_sheets (id TEXT PRIMARY KEY, branchId TEXT NOT NULL, instituteId TEXT, examId TEXT NOT NULL, examName TEXT, part TEXT NOT NULL DEFAULT '1', createdBy TEXT, createdAt TEXT DEFAULT (datetime('now')))`,
+  `CREATE TABLE IF NOT EXISTS date_sheet_entries (id TEXT PRIMARY KEY, dateSheetId TEXT NOT NULL, subject TEXT NOT NULL, examDate TEXT NOT NULL, examTime TEXT, roomName TEXT, createdAt TEXT DEFAULT (datetime('now')))`,
   // NOTE: legacy tables (diary, sms_log, complaints, library_books,
   // transport_routes, course_materials, royalty_settings, royalty_invoices)
   // are intentionally NOT created here — they are unused by the Concordia
@@ -91,7 +100,10 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_users_rollNo ON users(rollNo)`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(LOWER(email))`,
   `CREATE INDEX IF NOT EXISTS idx_users_class ON users(class)`,
+  `CREATE INDEX IF NOT EXISTS idx_users_part ON users(part)`,
   `CREATE INDEX IF NOT EXISTS idx_classes_branchId ON classes(branchId)`,
+  `CREATE INDEX IF NOT EXISTS idx_classes_program ON classes(program)`,
+  `CREATE INDEX IF NOT EXISTS idx_classes_part ON classes(part)`,
   `CREATE INDEX IF NOT EXISTS idx_courses_branchId ON courses(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_class_courses_classId ON class_courses(classId)`,
   `CREATE INDEX IF NOT EXISTS idx_class_courses_courseId ON class_courses(courseId)`,
@@ -114,16 +126,68 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_timetable_classId ON timetable(classId)`,
   `CREATE INDEX IF NOT EXISTS idx_timetable_branchId ON timetable(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_timetable_class_day_period ON timetable(classId, day, period)`,
+  `CREATE INDEX IF NOT EXISTS idx_timetable_teacherId ON timetable(teacherId)`,
+  `CREATE INDEX IF NOT EXISTS idx_timetable_teacher_day_period ON timetable(teacherId, day, period)`,
   `CREATE INDEX IF NOT EXISTS idx_report_cards_studentId ON report_cards(studentId)`,
   `CREATE INDEX IF NOT EXISTS idx_report_cards_branchId ON report_cards(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_misc_charges_studentId ON misc_charges(studentId)`,
   `CREATE INDEX IF NOT EXISTS idx_misc_charges_branchId ON misc_charges(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_exams_branchId ON exams(branchId)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_exams_branch_name ON exams(branchId, name)`,
+  `CREATE INDEX IF NOT EXISTS idx_student_documents_studentId ON student_documents(studentId)`,
+  `CREATE INDEX IF NOT EXISTS idx_student_documents_branchId ON student_documents(branchId)`,
+  `CREATE INDEX IF NOT EXISTS idx_date_sheets_examId ON date_sheets(examId)`,
+  `CREATE INDEX IF NOT EXISTS idx_date_sheets_branchId ON date_sheets(branchId)`,
+  `CREATE INDEX IF NOT EXISTS idx_date_sheet_entries_dateSheetId ON date_sheet_entries(dateSheetId)`,
   `CREATE INDEX IF NOT EXISTS idx_teacher_salaries_teacherId ON teacher_salaries(teacherId)`,
   `CREATE INDEX IF NOT EXISTS idx_salary_payments_teacherId ON salary_payments(teacherId)`,
   `CREATE INDEX IF NOT EXISTS idx_events_branchId ON events(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_manual_revenue_branchId ON manual_revenue(branchId)`,
+];
+
+// === Migration statements — add columns to EXISTING tables ===
+// SQLite doesn't support ADD COLUMN IF NOT EXISTS, so we run each ALTER
+// individually and silently catch "duplicate column name" errors for
+// tables that already have the column from a previous init.
+const MIGRATION_STATEMENTS: string[] = [
+  `ALTER TABLE users ADD COLUMN part TEXT DEFAULT '1'`,
+  `ALTER TABLE classes ADD COLUMN program TEXT`,
+  `ALTER TABLE classes ADD COLUMN part TEXT DEFAULT '1'`,
+];
+
+// === Data migration — backfill program+part on existing classes from name ===
+// Maps legacy class names to the new 6-department catalog + part.
+const DATA_MIGRATION_STATEMENTS: string[] = [
+  // Backfill classes.program from class name patterns
+  `UPDATE classes SET program = CASE
+    WHEN name LIKE '%FSc%Med%' OR name LIKE '%Pre%Med%' THEN 'FSC Pre Med'
+    WHEN name LIKE '%FSc%Eng%' OR name LIKE '%Pre%Eng%' THEN 'FSC Pre Eng'
+    WHEN name LIKE '%ICS%Stat%' THEN 'ICS Stats'
+    WHEN name LIKE '%ICS%' THEN 'ICS Phy'
+    WHEN name LIKE '%FA%IT%' THEN 'FA IT'
+    WHEN name LIKE '%FA%' THEN 'FA'
+    ELSE program
+  END WHERE program IS NULL OR program = ''`,
+  // Backfill classes.part from class name patterns (e.g. "ICS-1-A" → part 1)
+  `UPDATE classes SET part = CASE
+    WHEN name LIKE '%-1-%' OR name LIKE '%Part 1%' OR name LIKE '%1st Year%' THEN '1'
+    WHEN name LIKE '%-2-%' OR name LIKE '%Part 2%' OR name LIKE '%2nd Year%' THEN '2'
+    ELSE '1'
+  END WHERE part IS NULL OR part = ''`,
+  // Backfill users.part from their class's part
+  `UPDATE users SET part = (
+    SELECT COALESCE(c.part, '1') FROM classes c
+    WHERE c.name = users.class AND c.branchId = users.branchId
+  ) WHERE (part IS NULL OR part = '') AND role = 'student'`,
+  // Migrate legacy program names on students to the new 6-dept catalog
+  `UPDATE users SET program = CASE
+    WHEN program = 'F.Sc Pre-Medical' THEN 'FSC Pre Med'
+    WHEN program = 'F.Sc Pre-Engineering' THEN 'FSC Pre Eng'
+    WHEN program = 'ICS' THEN 'ICS Phy'
+    WHEN program = 'F.A General Science' THEN 'FA'
+    WHEN program IN ('I.Com', 'ADP', 'BS Commerce') THEN 'FA'
+    ELSE program
+  END WHERE program IS NOT NULL AND program != ''`,
 ];
 
 // === One-time cleanup statements — drop unused legacy tables ===
@@ -178,6 +242,22 @@ export async function initDB() {
       await db.batch(CLEANUP_DROP_TABLES.map(sql => ({ sql, args: [] as any[] })));
     } catch {
       for (const sql of CLEANUP_DROP_TABLES) {
+        try { await db.execute({ sql, args: [] }); } catch {}
+      }
+    }
+
+    // ── Step 2b: run column migrations (ALTER TABLE ADD COLUMN) ──
+    // Each statement is run individually — "duplicate column name" errors
+    // are silently ignored (column already exists from a prior init).
+    for (const sql of MIGRATION_STATEMENTS) {
+      try { await db.execute({ sql, args: [] }); } catch {}
+    }
+
+    // ── Step 2c: run data migrations (backfill program+part) ──
+    try {
+      await db.batch(DATA_MIGRATION_STATEMENTS.map(sql => ({ sql, args: [] as any[] })));
+    } catch {
+      for (const sql of DATA_MIGRATION_STATEMENTS) {
         try { await db.execute({ sql, args: [] }); } catch {}
       }
     }

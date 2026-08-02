@@ -1,32 +1,41 @@
 'use client';
 
 // ============================================================================
-// Concordia College — Academic Office Portal (spec §4)
+// Concordia College — Academic Office Portal (WEB-ACADEMIC-1 rewrite)
 //
-// Responsibilities:
-//   1. Post announcements (targeted audiences or everyone)
-//   2. Manage teachers — add, view, assign class + section + subject
-//   3. Create + manage timetables and date sheets
-//   4. Oversee monthly tests + result-card generation
-//   5. View enrolled students across classes
+// Six modules (router at the bottom):
+//   1. academic-overview    → Dashboard with KPIs + recharts analytics
+//   2. academic-announcements → Post + list announcements (unchanged)
+//   3. academic-classes     → "Classes & Teachers" — add class form with
+//                             program + part fields, add-teacher form copied
+//                             from the Accountant portal's LoginsView,
+//                             class list with detail sheet + assign teacher,
+//                             and a "Manage Teachers" list.
+//   4. timetable            → Department hierarchy drill-down (Dept → Part →
+//                             Class → Section → period grid). Clash detection
+//                             is preserved (client + server).
+//   5. academic-exams       → "Exams & Date Sheets" — merged page with two
+//                             part tabs, exam creation, per-exam date-sheet
+//                             builder backed by the date_sheets table.
+//                             Backward-compat: academic-tests and
+//                             academic-datesheet both route here.
+//   6. report-cards         → Department hierarchy drill-down → per-section
+//                             student results table with per-row PDF download
+//                             + print.
 //
-// Design language (matches admissions / admin / accountant portals):
-//   • Flat, restrained, grayscale + a single orange (#F26522) accent.
-//   • No gradient welcome banners, no decorative blobs, no colored icon
-//     tiles, no glassmorphism, no framer-motion.
-//   • White cards on 1px gray borders, rounded-xl.
-//   • Tables: uppercase muted headers, hover row tint, subtle status badges.
+// Design language: Concordia orange (#F26522) accent on a clean gray/white
+// base. shadcn/ui components, framer-motion entrance animations. Uses the
+// shared concordia-hierarchy + concordia-charts components.
 // ============================================================================
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
-import { useApp } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -69,10 +78,31 @@ import {
 import { toast } from '@/hooks/use-toast';
 import {
   Users, GraduationCap, BookOpen, Calendar, FileText, Award,
-  Megaphone, CalendarDays, ClipboardList, Loader2, Search, Copy, Check,
-  Bell, Plus, Lock, AlertCircle, TrendingUp, CheckCircle2, ChevronRight, Eye,
+  Megaphone, ClipboardList, Loader2, Search, Copy, Check,
+  Bell, Plus, Lock, AlertCircle,
   UserPlus, UserMinus, Trash2, Download, CalendarPlus, Clock,
+  Printer, Pencil, ShieldAlert, KeyRound, ArrowLeft,
+  TrendingUp,
 } from 'lucide-react';
+import {
+  buildReportCard,
+  savePdf,
+  printPdf,
+  gradeFromPct,
+} from '@/lib/pdf-utils';
+import {
+  DeptCardGrid,
+  PartToggle,
+  ClassCardGrid,
+  SectionCardGrid,
+  HierarchyBreadcrumb,
+  DEPARTMENTS,
+} from './shared/concordia-hierarchy';
+import {
+  SimpleBarChart,
+  SimplePieChart,
+  ChartCard,
+} from './shared/concordia-charts';
 
 type Props = { activeModule: string; user: any };
 
@@ -118,7 +148,7 @@ function SectionHeader({ title, desc, action }: { title: string; desc?: string; 
   );
 }
 
-function Skeleton({ className }: { className?: string }) {
+function SkeletonBox({ className }: { className?: string }) {
   return <div className={cn('animate-pulse rounded-md bg-gray-100', className)} />;
 }
 
@@ -126,7 +156,7 @@ function SkeletonTable({ rows = 5 }: { rows?: number }) {
   return (
     <div className="space-y-2">
       {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} className="h-11 w-full rounded-md" />
+        <SkeletonBox key={i} className="h-11 w-full rounded-md" />
       ))}
     </div>
   );
@@ -143,7 +173,7 @@ function EmptyState({ icon: Icon, title, desc, action }: { icon: any; title: str
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({ label, required, children }: { label?: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div>
       <Label className="text-xs font-semibold text-gray-700 mb-1.5 block">
@@ -170,7 +200,6 @@ function CopyButton({ text }: { text: string }) {
 }
 
 const inputCls = 'h-10 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#F26522] focus:ring-2 focus:ring-[#F26522]/12';
-
 const btnPrimary = 'bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60';
 const btnSecondary = 'border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors';
 const btnGhost = 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg h-9 px-3 text-sm font-medium inline-flex items-center gap-1.5 transition-colors';
@@ -180,6 +209,25 @@ const fmtDate = (iso?: string) => {
   try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
   catch { return '—'; }
 };
+
+const isBlocked = (u: any) => u?.blocked === 1 || u?.blocked === true;
+
+function BlockedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border border-rose-100 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+      <ShieldAlert className="h-3 w-3" /> Blocked
+    </span>
+  );
+}
+
+// Parse a teacher's `classes` / `subjects` JSON field (string OR array).
+function parseTeacherField(raw: any): string[] {
+  try {
+    if (!raw) return [];
+    const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [];
+  } catch { return []; }
+}
 
 // ───────────────────────── Dashboard ─────────────────────────
 function AcademicOverview({ user }: { user: any }) {
@@ -192,10 +240,10 @@ function AcademicOverview({ user }: { user: any }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      api.platformUsers({ role: 'teacher' }).catch(() => []),
-      api.platformUsers({ role: 'student' }).catch(() => []),
+      api.platformUsers({ role: 'teacher', branchId: user?.branchId }).catch(() => []),
+      api.platformUsers({ role: 'student', branchId: user?.branchId }).catch(() => []),
       api.getAnnouncements().catch(() => []),
-      api.getResults({}).catch(() => []),
+      api.getResults({ branchId: user?.branchId }).catch(() => []),
     ]).then(([t, s, a, r]) => {
       if (cancelled) return;
       setTeachers(Array.isArray(t) ? t : []);
@@ -205,7 +253,40 @@ function AcademicOverview({ user }: { user: any }) {
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.branchId]);
+
+  // ── Students-per-Program bar data — counts of students whose program
+  // matches one of the canonical 6 departments.
+  const studentsByProgram = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of DEPARTMENTS) map[d] = 0;
+    for (const s of students) {
+      const p = (s.program || '').trim();
+      if (map[p] != null) map[p] += 1;
+    }
+    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+  }, [students]);
+
+  // ── Teacher distribution by subject — collapses every teacher's subjects
+  // array into { subject, count } pairs, sorted desc and capped at 6.
+  const teacherSubjectDist = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const t of teachers) {
+      const subs = parseTeacherField(t.subjects);
+      if (subs.length === 0) {
+        map['Unassigned'] = (map['Unassigned'] || 0) + 1;
+      } else {
+        for (const sub of subs) {
+          map[sub] = (map[sub] || 0) + 1;
+        }
+      }
+    }
+    const arr = Object.entries(map)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+    return arr;
+  }, [teachers]);
 
   return (
     <div className="space-y-6">
@@ -213,16 +294,55 @@ function AcademicOverview({ user }: { user: any }) {
 
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[0,1,2,3].map(i => <Skeleton key={i} className="h-28 rounded-xl" />)}
+          {[0,1,2,3].map(i => <SkeletonBox key={i} className="h-28 rounded-xl" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        >
           <StatCard icon={Users} label="Total Teachers" value={teachers.length} sub="active faculty" />
           <StatCard icon={GraduationCap} label="Total Students" value={students.length} sub="enrolled" />
           <StatCard icon={ClipboardList} label="Pending Results" value={results.length} sub="awaiting review" />
           <StatCard icon={Megaphone} label="Announcements" value={announcements.length} sub="published" />
-        </div>
+        </motion.div>
       )}
+
+      {/* Analytics charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <ChartCard
+          title="Students per Program"
+          subtitle="Enrollment across the 6 Concordia departments"
+          className="lg:col-span-2"
+        >
+          {loading ? (
+            <SkeletonBox className="h-[260px] w-full rounded-lg" />
+          ) : students.length === 0 ? (
+            <EmptyState icon={TrendingUp} title="No enrollment data yet" desc="Students will appear here once the Admissions Office enrolls them." />
+          ) : (
+            <SimpleBarChart
+              data={studentsByProgram}
+              height={260}
+              yLabel="Students"
+              formatValue={(v) => `${v} student${v === 1 ? '' : 's'}`}
+            />
+          )}
+        </ChartCard>
+        <ChartCard
+          title="Teacher Distribution by Subject"
+          subtitle="How faculty are spread across subjects"
+        >
+          {loading ? (
+            <SkeletonBox className="h-[260px] w-full rounded-lg" />
+          ) : teachers.length === 0 ? (
+            <EmptyState icon={Users} title="No teachers yet" desc="Add teachers from the Classes & Teachers page." />
+          ) : (
+            <SimplePieChart data={teacherSubjectDist} height={260} donut />
+          )}
+        </ChartCard>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
@@ -230,7 +350,7 @@ function AcademicOverview({ user }: { user: any }) {
           {announcements.length === 0 ? (
             <EmptyState icon={Megaphone} title="No announcements yet" />
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-1 max-h-72 overflow-y-auto concordia-scroll pr-1">
               {announcements.map((a, i) => (
                 <div key={a.id || i} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-gray-50">
                   <Megaphone className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
@@ -248,10 +368,9 @@ function AcademicOverview({ user }: { user: any }) {
           {teachers.length === 0 ? (
             <EmptyState icon={Users} title="No teachers yet" />
           ) : (
-            <div className="space-y-0">
-              {teachers.slice(0, 6).map(t => {
-                let subs: string[] = [];
-                try { subs = t.subjects ? (typeof t.subjects === 'string' ? JSON.parse(t.subjects) : t.subjects) : []; } catch {}
+            <div className="space-y-0 max-h-72 overflow-y-auto concordia-scroll pr-1">
+              {teachers.slice(0, 8).map(t => {
+                const subs = parseTeacherField(t.subjects);
                 return (
                   <div key={t.id} className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
                     <span className="text-sm font-medium text-gray-900">{t.name}</span>
@@ -356,7 +475,7 @@ function AnnouncementsView({ user }: { user: any }) {
         ) : items.length === 0 ? (
           <EmptyState icon={Bell} title="No announcements yet" desc="Published announcements will appear here." />
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1 max-h-96 overflow-y-auto concordia-scroll pr-1">
             {items.map((a, i) => (
               <div key={a.id || i} className="flex items-start gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50">
                 <Megaphone className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
@@ -377,221 +496,859 @@ function AnnouncementsView({ user }: { user: any }) {
   );
 }
 
-// ───────────────────────── Teachers ─────────────────────────
-function TeachersView({ user }: { user: any }) {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [q, setQ] = useState('');
-  const [form, setForm] = useState({ name: '', email: '', rollNo: '', password: '', subjects: '', classes: '', title: '' });
-  const [saving, setSaving] = useState(false);
-  const [created, setCreated] = useState<{ rollNo: string; password: string } | null>(null);
+// ───────────────────────── Classes & Teachers ─────────────────────────
+type ClassRow = { id: string; name: string; section: string; branchId?: string; program?: string | null; part?: string | null } & Record<string, any>;
 
+function ClassesAndTeachersView({ user }: { user: any }) {
+  const [tab, setTab] = useState<'class' | 'teacher'>('class');
+
+  // Shared loaded data
+  const [classes, setClasses] = useState<ClassRow[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Add-class form state
+  const [mode, setMode] = useState<'single' | 'bulk'>('single');
+  const [name, setName] = useState('');
+  const [section, setSection] = useState('A');
+  const [program, setProgram] = useState<string>(DEPARTMENTS[0]);
+  const [part, setPart] = useState<'1' | '2'>('1');
+  const [bulkSections, setBulkSections] = useState('');
+  const [savingClass, setSavingClass] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // Class detail sheet state
+  const [detailClass, setDetailClass] = useState<ClassRow | null>(null);
+  const [showAllStudents, setShowAllStudents] = useState(false);
+  const [assignTeacherId, setAssignTeacherId] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [removingTeacherId, setRemovingTeacherId] = useState<string | null>(null);
+
+  // Delete class dialog
+  const [deleteTarget, setDeleteTarget] = useState<ClassRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Class list search
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 200);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // ── Add-teacher form state (COPIED from accountant-portal LoginsView Teacher tab)
+  const [teacherForm, setTeacherForm] = useState({ name: '', rollNo: '', email: '', password: '' });
+  const [savingTeacher, setSavingTeacher] = useState(false);
+  const [created, setCreated] = useState<{ user: string; pass: string; name: string } | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  // Manage-existing-teachers state
+  const [teachersSearch, setTeachersSearch] = useState('');
+  const [editingTeacher, setEditingTeacher] = useState<any | null>(null);
+  const [teacherEditForm, setTeacherEditForm] = useState({ name: '', rollNo: '', email: '', password: '', title: '' });
+  const [revealTeacherPw, setRevealTeacherPw] = useState(false);
+  const [teacherPwLoading, setTeacherPwLoading] = useState(false);
+  const [savingTeacherEdit, setSavingTeacherEdit] = useState(false);
+  const [blockingTeacherId, setBlockingTeacherId] = useState('');
+
+  // ── Password strength meter (copied from accountant)
+  const pwLevel: 'empty' | 'weak' | 'medium' | 'strong' = (() => {
+    if (!teacherForm.password) return 'empty';
+    const len = teacherForm.password.length;
+    const hasLetter = /[a-zA-Z]/.test(teacherForm.password);
+    const hasNum = /[0-9]/.test(teacherForm.password);
+    if (len < 6) return 'weak';
+    if (len >= 10 && hasLetter && hasNum) return 'strong';
+    return 'medium';
+  })();
+  const strengthMeta: Record<'empty' | 'weak' | 'medium' | 'strong', { label: string; color: string; bar: string; width: string }> = {
+    empty: { label: '', color: '', bar: '', width: '0%' },
+    weak: { label: 'Weak', color: 'text-red-600', bar: 'bg-red-500', width: '33%' },
+    medium: { label: 'Medium', color: 'text-amber-600', bar: 'bg-amber-500', width: '66%' },
+    strong: { label: 'Strong', color: 'text-emerald-600', bar: 'bg-emerald-500', width: '100%' },
+  };
+  const sm = strengthMeta[pwLevel];
+
+  // ── Data load (parallel: classes + students + teachers)
   const load = useCallback(() => {
-    api.platformUsers({ role: 'teacher' }).then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
+    setLoading(true);
+    Promise.all([
+      api.getClasses(user?.branchId).catch(() => []),
+      api.platformUsers({ role: 'student', branchId: user?.branchId }).catch(() => []),
+      api.platformUsers({ role: 'teacher', branchId: user?.branchId }).catch(() => []),
+    ]).then(([c, s, t]) => {
+      setClasses(Array.isArray(c) ? c : []);
+      setStudents(Array.isArray(s) ? s : []);
+      setTeachers(Array.isArray(t) ? t : []);
+    }).finally(() => setLoading(false));
+  }, [user?.branchId]);
   useEffect(() => { load(); }, [load]);
 
-  const submit = async () => {
-    if (!form.name || !form.rollNo) { toast({ title: 'Name and ID are required', variant: 'destructive' }); return; }
-    setSaving(true);
+  // ── Add-class single submit — passes program + part so the new class shows
+  // up in the Timetable / Result Cards hierarchy drill-downs.
+  const submitClass = async () => {
+    if (!name.trim()) { toast({ title: 'Class name is required', variant: 'destructive' }); return; }
+    setSavingClass(true);
     try {
-      const password = form.password || 'teacher' + Math.floor(1000 + Math.random() * 9000);
-      await api.createPlatformUser({
-        name: form.name, email: form.email || `${form.rollNo.toLowerCase()}@concordia.edu.pk`,
-        rollNo: form.rollNo, password, role: 'teacher',
-        branchId: user?.branchId, instituteId: user?.instituteId,
-        subjects: JSON.stringify(form.subjects.split(',').map(s => s.trim()).filter(Boolean)),
-        classes: JSON.stringify(form.classes.split(',').map(s => s.trim()).filter(Boolean)),
-        title: form.title || 'Teacher',
-      });
-      setCreated({ rollNo: form.rollNo, password });
-      setForm({ name: '', email: '', rollNo: '', password: '', subjects: '', classes: '', title: '' });
-      setShowAdd(false);
+      await api.createClass(name.trim(), section.trim() || 'A', user?.branchId, program, part);
+      toast({ title: 'Class created', description: `${name.trim()} — Section ${section.trim() || 'A'} (${program} · Part ${part})` });
+      setName(''); setSection('A');
       load();
-    } catch {
-      toast({ title: 'Failed to create teacher', variant: 'destructive' });
-    } finally { setSaving(false); }
+    } catch (e: any) {
+      toast({ title: 'Failed to create class', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setSavingClass(false); }
   };
 
-  const filtered = data.filter(t => !q || (t.name + t.email + (t.rollNo || '')).toLowerCase().includes(q.toLowerCase()));
+  const bulkList = Array.from(new Set(
+    bulkSections.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean),
+  ));
+  const submitBulk = async () => {
+    if (!name.trim()) { toast({ title: 'Class name is required', variant: 'destructive' }); return; }
+    if (bulkList.length === 0) { toast({ title: 'Enter at least one section', variant: 'destructive' }); return; }
+    setSavingClass(true);
+    setBulkProgress({ current: 0, total: bulkList.length });
+    const failures: string[] = [];
+    const successes: string[] = [];
+    for (let i = 0; i < bulkList.length; i++) {
+      const sec = bulkList[i];
+      setBulkProgress({ current: i + 1, total: bulkList.length });
+      try {
+        await api.createClass(name.trim(), sec, user?.branchId, program, part);
+        successes.push(sec);
+      } catch (e: any) {
+        failures.push(`${sec} (${e?.message || 'failed'})`);
+      }
+    }
+    setBulkProgress(null);
+    setSavingClass(false);
+    if (successes.length > 0) {
+      toast({ title: `${successes.length} section(s) created`, description: `${name.trim()} — ${successes.join(', ')}` });
+      setName(''); setBulkSections('');
+      load();
+    }
+    if (failures.length > 0) {
+      toast({ title: `${failures.length} section(s) failed`, description: failures.join('; '), variant: 'destructive' });
+    }
+  };
+
+  // ── Add-teacher submit (COPIED from accountant LoginsView Teacher tab).
+  const submitTeacher = async () => {
+    if (!teacherForm.name || !teacherForm.rollNo) {
+      toast({ title: 'Name and Teacher ID are required', variant: 'destructive' });
+      return;
+    }
+    const rollNoTrim = teacherForm.rollNo.trim();
+    const dupTeacher = teachers.find(
+      (t) => (t.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase(),
+    );
+    if (dupTeacher) {
+      toast({
+        title: 'Duplicate Teacher ID',
+        description: `Teacher ID "${rollNoTrim}" is already used by ${dupTeacher.name}. Please use a different ID.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    const plannedEmail = teacherForm.email || `${rollNoTrim.toLowerCase()}@concordia.edu.pk`;
+    setSavingTeacher(true);
+    try {
+      const password = teacherForm.password || 'teacher' + Math.floor(1000 + Math.random() * 9000);
+      await api.createPlatformUser({
+        name: teacherForm.name,
+        email: plannedEmail,
+        rollNo: teacherForm.rollNo,
+        password,
+        role: 'teacher',
+        branchId: user?.branchId,
+        instituteId: user?.instituteId,
+        title: 'Teacher',
+      });
+      setCreated({ user: teacherForm.rollNo, pass: password, name: teacherForm.name });
+      setFormBlank();
+      load();
+      toast({ title: 'Teacher login created', description: `${teacherForm.name} — username ${teacherForm.rollNo}` });
+    } catch (e: any) {
+      toast({ title: 'Failed to create login', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setSavingTeacher(false); }
+  };
+  const setFormBlank = () => setTeacherForm({ name: '', rollNo: '', email: '', password: '' });
+
+  // ── Teacher edit helpers (copied from accountant)
+  const openEditTeacher = (t: any) => {
+    setEditingTeacher(t);
+    setRevealTeacherPw(false);
+    setTeacherEditForm({ name: t.name || '', rollNo: t.rollNo || '', email: t.email || '', password: '', title: t.title || '' });
+  };
+  const revealTeacherPassword = async () => {
+    if (!editingTeacher) return;
+    if (revealTeacherPw) { setRevealTeacherPw(false); return; }
+    setTeacherPwLoading(true);
+    try {
+      const r = await api.getUserPassword(editingTeacher.id);
+      setTeacherEditForm((prev) => ({ ...prev, password: r?.password || '' }));
+      setRevealTeacherPw(true);
+    } catch (e: any) {
+      toast({ title: 'Could not fetch password', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setTeacherPwLoading(false); }
+  };
+  const saveTeacher = async () => {
+    if (!editingTeacher) return;
+    if (!teacherEditForm.name || !teacherEditForm.rollNo) {
+      toast({ title: 'Name and Teacher ID are required', variant: 'destructive' });
+      return;
+    }
+    const rollNoTrim = teacherEditForm.rollNo.trim();
+    const dup = teachers.find((t) => t.id !== editingTeacher.id && (t.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase());
+    if (dup) {
+      toast({ title: 'Duplicate Teacher ID', description: `Teacher ID "${rollNoTrim}" is already used by ${dup.name}.`, variant: 'destructive' });
+      return;
+    }
+    setSavingTeacherEdit(true);
+    try {
+      const body: any = { name: teacherEditForm.name, rollNo: teacherEditForm.rollNo, email: teacherEditForm.email, title: teacherEditForm.title };
+      if (teacherEditForm.password) body.password = teacherEditForm.password;
+      await api.editUser(editingTeacher.id, body);
+      setTeachers((prev) => prev.map((t) => (t.id === editingTeacher.id ? { ...t, ...body } : t)));
+      toast({ title: 'Teacher updated', description: `${teacherEditForm.name} — changes saved.` });
+      setEditingTeacher(null);
+    } catch (e: any) {
+      toast({ title: 'Could not save changes', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setSavingTeacherEdit(false); }
+  };
+  const toggleTeacherBlock = async (t: any) => {
+    if (isBlocked(t)) {
+      // Unblock directly
+      setBlockingTeacherId(t.id);
+      try {
+        await api.blockUser(t.id, false);
+        setTeachers((prev) => prev.map((x) => (x.id === t.id ? { ...x, blocked: 0 } : x)));
+        toast({ title: 'Teacher unblocked', description: `${t.name} can now sign in again.` });
+      } catch (e: any) {
+        toast({ title: 'Could not update block status', description: e?.message || 'Please try again.', variant: 'destructive' });
+      } finally { setBlockingTeacherId(''); }
+      return;
+    }
+    // Block directly (simpler than the accountant's popup — academic office
+    // is the teacher's primary owner and the confirm flow is overkill here).
+    if (!confirm(`Block ${t.name}? They will be signed out and can't log in until unblocked.`)) return;
+    setBlockingTeacherId(t.id);
+    try {
+      await api.blockUser(t.id, true);
+      setTeachers((prev) => prev.map((x) => (x.id === t.id ? { ...x, blocked: 1 } : x)));
+      toast({ title: 'Teacher blocked', description: `${t.name} has been signed out.` });
+    } catch (e: any) {
+      toast({ title: 'Could not update block status', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setBlockingTeacherId(''); }
+  };
+
+  // ── Class list helpers
+  const studentCount = (cls: ClassRow) =>
+    students.filter((s) => s.class === cls.name && s.section === cls.section).length;
+  const enrolledStudents = (cls: ClassRow) =>
+    students.filter((s) => s.class === cls.name && s.section === cls.section);
+  const classTeachers = (cls: ClassRow) => teachers.filter((t) => {
+    const arr = parseTeacherField(t.classes);
+    if (arr.length === 0) return false;
+    const combinedDash = `${cls.name}-${cls.section}`;
+    const combinedSpace = `${cls.name} ${cls.section}`;
+    return arr.some((c) => c === cls.name || c === combinedDash || c === combinedSpace);
+  });
+
+  const assignTeacher = async () => {
+    if (!detailClass) return;
+    if (!assignTeacherId) { toast({ title: 'Pick a teacher to assign', variant: 'destructive' }); return; }
+    const teacher = teachers.find((t) => t.id === assignTeacherId);
+    if (!teacher) return;
+    const current = parseTeacherField(teacher.classes);
+    const combinedDash = `${detailClass.name}-${detailClass.section}`;
+    const combinedSpace = `${detailClass.name} ${detailClass.section}`;
+    if (current.some((c) => c === detailClass.name || c === combinedDash || c === combinedSpace)) {
+      toast({ title: 'Teacher is already assigned to this class', variant: 'destructive' });
+      return;
+    }
+    const next = [...current, combinedDash];
+    setAssignSaving(true);
+    try {
+      await api.editUser(teacher.id, { classes: next });
+      toast({ title: 'Teacher assigned', description: `${teacher.name} now teaches ${detailClass.name} — Section ${detailClass.section}` });
+      setAssignTeacherId('');
+      load();
+    } catch (e: any) {
+      toast({ title: 'Failed to assign teacher', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setAssignSaving(false); }
+  };
+
+  const removeTeacher = async (teacher: any) => {
+    if (!detailClass || !teacher?.id) return;
+    if (!confirm(`Remove ${teacher.name} from ${detailClass.name} — Section ${detailClass.section}?`)) return;
+    const current = parseTeacherField(teacher.classes);
+    const combinedDash = `${detailClass.name}-${detailClass.section}`;
+    const combinedSpace = `${detailClass.name} ${detailClass.section}`;
+    const next = current.filter((c) => c !== detailClass.name && c !== combinedDash && c !== combinedSpace);
+    setRemovingTeacherId(teacher.id);
+    try {
+      await api.editUser(teacher.id, { classes: next });
+      toast({ title: 'Teacher removed', description: `${teacher.name} unassigned from ${detailClass.name} — Section ${detailClass.section}` });
+      load();
+    } catch (e: any) {
+      toast({ title: 'Failed to remove teacher', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setRemovingTeacherId(null); }
+  };
+
+  const confirmDeleteClass = async () => {
+    const cls = deleteTarget;
+    if (!cls) return;
+    setDeleting(true);
+    try {
+      await api.deleteClassSection(cls.id);
+      toast({ title: 'Class deleted', description: `${cls.name} — Section ${cls.section} has been removed.` });
+      if (detailClass?.id === cls.id) setDetailClass(null);
+      setDeleteTarget(null);
+      load();
+    } catch (e: any) {
+      toast({ title: 'Could not delete class', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setDeleting(false); }
+  };
+
+  const filteredClasses = classes.filter((c) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (c.name || '').toLowerCase().includes(q) || (c.section || '').toLowerCase().includes(q)
+      || (c.program || '').toLowerCase().includes(q);
+  });
+  const filteredTeachers = useMemo(() => {
+    const q = teachersSearch.trim().toLowerCase();
+    if (!q) return teachers;
+    return teachers.filter((t) => t.name?.toLowerCase().includes(q) || t.rollNo?.toLowerCase().includes(q));
+  }, [teachers, teachersSearch]);
+
+  const totalSections = classes.length;
+  const uniqueNames = new Set(classes.map((c) => c.name)).size;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Teachers"
-        subtitle="Add, view and manage teacher accounts."
-        action={<button onClick={() => setShowAdd(true)} className={btnPrimary}><Plus className="h-4 w-4" /> Add Teacher</button>}
+        title="Classes & Teachers"
+        subtitle="Create class sections with program + part, add teacher logins, and assign teachers to classes."
       />
 
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard icon={BookOpen} label="Total Sections" value={totalSections} sub={`${uniqueNames} unique class name(s)`} />
+        <StatCard icon={GraduationCap} label="Total Students" value={students.length} sub="Across all classes" />
+        <StatCard icon={Users} label="Total Teachers" value={teachers.length} sub="Active faculty" />
+      </div>
+
+      {/* Tab switcher — Add Class / Add Teacher */}
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
+        <button
+          onClick={() => setTab('class')}
+          className={cn('px-4 py-1.5 rounded-md text-sm font-medium transition-colors', tab === 'class' ? 'bg-[#F26522] text-white' : 'text-gray-600 hover:bg-gray-50')}
+        >
+          Add Class
+        </button>
+        <button
+          onClick={() => setTab('teacher')}
+          className={cn('px-4 py-1.5 rounded-md text-sm font-medium transition-colors', tab === 'teacher' ? 'bg-[#F26522] text-white' : 'text-gray-600 hover:bg-gray-50')}
+        >
+          Add Teacher
+        </button>
+      </div>
+
+      {tab === 'class' && (
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <SectionHeader title="New Class" desc="Pick a department + part so the class shows up in the Timetable & Result Cards hierarchy." />
+          <Tabs value={mode} onValueChange={(v) => setMode(v as 'single' | 'bulk')}>
+            <TabsList className="mb-4">
+              <TabsTrigger value="single">Single Section</TabsTrigger>
+              <TabsTrigger value="bulk">Bulk Sections</TabsTrigger>
+            </TabsList>
+
+            {/* SINGLE MODE — now includes program + part */}
+            <TabsContent value="single">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 items-end">
+                <Field label="Class Name" required>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Grade 10, Prep" />
+                </Field>
+                <Field label="Section">
+                  <Input value={section} onChange={(e) => setSection(e.target.value)} className={inputCls} placeholder="A" maxLength={3} />
+                </Field>
+                <Field label="Department (Program)" required>
+                  <Select value={program} onValueChange={setProgram}>
+                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Part">
+                  <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+                </Field>
+                <div className="md:col-span-2 flex justify-end">
+                  <button onClick={submitClass} disabled={savingClass} className={cn(btnPrimary, 'h-10')}>
+                    {savingClass ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Create Class
+                  </button>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-3">
+                Classes are tagged with <span className="font-semibold">{program}</span> · Part {part}. They will appear under this department in the Timetable and Result Cards drill-downs.
+              </p>
+            </TabsContent>
+
+            {/* BULK MODE — also program + part */}
+            <TabsContent value="bulk">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 items-end">
+                <Field label="Class Name" required>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Grade 10" />
+                </Field>
+                <Field label="Sections (comma-separated)" required>
+                  <Input value={bulkSections} onChange={(e) => setBulkSections(e.target.value)} className={inputCls} placeholder="A, B, C, D" />
+                </Field>
+                <Field label="Department (Program)" required>
+                  <Select value={program} onValueChange={setProgram}>
+                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Part">
+                  <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+                </Field>
+                <div className="md:col-span-2 flex justify-end">
+                  <button onClick={submitBulk} disabled={savingClass || !!bulkProgress} className={cn(btnPrimary, 'h-10')}>
+                    {savingClass ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Create{bulkList.length > 0 ? ` ${bulkList.length}` : ''} Sections
+                  </button>
+                </div>
+              </div>
+              {bulkProgress && (
+                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div className="flex items-center gap-2 text-xs text-gray-700">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[#F26522]" />
+                    <span>Creating {bulkProgress.current} of {bulkProgress.total}…</span>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
+                    <div className="h-full bg-[#F26522] transition-all" style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
+
+      {tab === 'teacher' && (
+        <>
+          {/* Add-teacher form (COPIED from accountant LoginsView Teacher tab) */}
+          <div className="rounded-xl border border-gray-200 bg-white p-5 max-w-2xl">
+            <SectionHeader
+              title="New Teacher Login"
+              desc="Credentials auto-generate if you leave email / password blank."
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Full Name" required>
+                <Input ref={nameRef} value={teacherForm.name} onChange={(e) => setTeacherForm({ ...teacherForm, name: e.target.value })} className={inputCls} placeholder="Ayesha Khan" />
+              </Field>
+              <Field label="Teacher ID / Roll No" required>
+                <Input value={teacherForm.rollNo} onChange={(e) => setTeacherForm({ ...teacherForm, rollNo: e.target.value })} className={inputCls} placeholder="T001" />
+              </Field>
+              <Field label="Email (optional)">
+                <Input value={teacherForm.email} onChange={(e) => setTeacherForm({ ...teacherForm, email: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
+              </Field>
+              <Field label="Password (optional)">
+                <Input value={teacherForm.password} onChange={(e) => setTeacherForm({ ...teacherForm, password: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
+                {pwLevel === 'empty' ? (
+                  <p className="text-[11px] text-gray-500 mt-1.5">Will be auto-generated (e.g. teacher4827).</p>
+                ) : (
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <div className="h-1 flex-1 rounded-full bg-gray-100 overflow-hidden">
+                      <div className={cn('h-full rounded-full transition-all', sm.bar)} style={{ width: sm.width }} />
+                    </div>
+                    <span className={cn('text-[11px] font-medium tabular-nums', sm.color)}>{sm.label}</span>
+                  </div>
+                )}
+              </Field>
+            </div>
+            <div className="mt-5">
+              <button onClick={submitTeacher} disabled={savingTeacher} className={btnPrimary}>
+                {savingTeacher ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Generate Login
+              </button>
+            </div>
+          </div>
+
+          {/* Manage Existing Teachers list (COPIED from accountant) */}
+          <div className="rounded-xl border border-gray-200 bg-white p-5">
+            <SectionHeader
+              title="Manage Existing Teachers"
+              desc="Edit portal details or block / unblock any teacher in your branch."
+              action={
+                <button onClick={load} disabled={loading} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-[#F26522] font-medium disabled:opacity-60">
+                  <Loader2 className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
+                </button>
+              }
+            />
+            <div className="relative mb-4">
+              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Input value={teachersSearch} onChange={(e) => setTeachersSearch(e.target.value)} placeholder="Search by name or Teacher ID…" className={cn(inputCls, 'pl-9')} />
+            </div>
+            {loading && teachers.length === 0 ? (
+              <SkeletonTable rows={4} />
+            ) : teachers.length === 0 ? (
+              <EmptyState icon={Users} title="No teachers found" desc="Create a new teacher login above — it will appear here once created." />
+            ) : filteredTeachers.length === 0 ? (
+              <EmptyState icon={Search} title="No matching teachers" desc="Try a different search term." />
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto concordia-scroll pr-1">
+                {filteredTeachers.map((t) => {
+                  const blocked = isBlocked(t);
+                  return (
+                    <div key={t.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border border-gray-200">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-9 w-9 rounded-lg border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
+                          <Users className="h-4 w-4 text-gray-400" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
+                            {blocked ? <BlockedBadge /> : (
+                              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                                <Check className="h-3 w-3" /> Active
+                              </span>
+                            )}
+                            {t.title ? <span className="text-[11px] text-gray-500">{t.title}</span> : null}
+                          </div>
+                          <p className="text-[11px] text-gray-500 truncate">
+                            {t.rollNo || '—'}{t.email ? ` · ${t.email}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button size="sm" variant="outline" className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-8 px-3 text-xs font-medium" onClick={() => openEditTeacher(t)}>
+                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                        </Button>
+                        {blocked ? (
+                          <Button size="sm" variant="outline" className="border border-emerald-100 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg h-8 px-3 text-xs font-medium" onClick={() => toggleTeacherBlock(t)} disabled={blockingTeacherId === t.id}>
+                            {blockingTeacherId === t.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Lock className="h-3.5 w-3.5 mr-1" />} Unblock
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" className="border border-rose-100 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg h-8 px-3 text-xs font-medium" onClick={() => toggleTeacherBlock(t)} disabled={blockingTeacherId === t.id}>
+                            {blockingTeacherId === t.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Lock className="h-3.5 w-3.5 mr-1" />} Block
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Class list (always visible below the tab forms) */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <div className="relative mb-4 max-w-xs">
+        <SectionHeader title="All Classes" desc={`${totalSections} section(s) in this campus`} />
+        <div className="relative mb-4 w-full sm:max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search teachers…" className={cn(inputCls, 'pl-9')} />
+          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search by class name or section…" className={cn(inputCls, 'pl-9 h-9')} />
         </div>
         {loading ? (
-          <SkeletonTable rows={5} />
-        ) : filtered.length === 0 ? (
-          <EmptyState icon={Users} title="No teachers found" desc="Add a teacher to get started." />
+          <SkeletonTable rows={4} />
+        ) : classes.length === 0 ? (
+          <EmptyState icon={BookOpen} title="No classes yet" desc="Create your first class section using the Add Class tab above." />
+        ) : filteredClasses.length === 0 ? (
+          <EmptyState icon={Search} title="No matches" desc={`No classes match "${searchQuery}".`} />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-gray-200">
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">ID</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Name</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Subjects</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Classes</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map(t => {
-                let subs: string[] = []; let cls: string[] = [];
-                try { subs = t.subjects ? (typeof t.subjects === 'string' ? JSON.parse(t.subjects) : t.subjects) : []; } catch {}
-                try { cls = t.classes ? (typeof t.classes === 'string' ? JSON.parse(t.classes) : t.classes) : []; } catch {}
-                return (
-                  <TableRow key={t.id} className="border-gray-100 hover:bg-gray-50">
-                    <TableCell className="text-sm text-gray-700 font-mono">{t.rollNo || '—'}</TableCell>
-                    <TableCell className="text-sm font-medium text-gray-900">{t.name}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{subs.join(', ') || '—'}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{cls.join(', ') || '—'}</TableCell>
-                    <TableCell><span className="inline-flex items-center rounded-md border bg-emerald-50 text-emerald-700 border-emerald-100 px-2 py-0.5 text-[11px] font-medium">Active</span></TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-200 hover:bg-transparent">
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Class Name</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Section</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Department</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Part</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">Students</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredClasses.map((c) => {
+                  const count = studentCount(c);
+                  return (
+                    <TableRow key={c.id} className="border-gray-100 hover:bg-gray-50">
+                      <TableCell className="text-sm font-medium text-gray-900">{c.name}</TableCell>
+                      <TableCell className="text-sm text-gray-700">{c.section}</TableCell>
+                      <TableCell className="text-sm text-gray-600">{c.program || '—'}</TableCell>
+                      <TableCell className="text-sm text-gray-600">{c.part ? `Part ${c.part}` : '—'}</TableCell>
+                      <TableCell className="text-sm text-gray-700 text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          {count > 0 ? (
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          ) : (
+                            <span className="inline-flex items-center rounded-md border border-gray-200 bg-gray-100 text-gray-500 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">Empty</span>
+                          )}
+                          <span className="tabular-nums">{count}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button onClick={() => { setDetailClass(c); setShowAllStudents(false); setAssignTeacherId(''); }} className="h-8 px-2 text-xs text-gray-600 hover:text-[#F26522] hover:bg-orange-50 rounded inline-flex items-center gap-1">
+                            <Users className="h-3.5 w-3.5" /> View
+                          </button>
+                          <button onClick={() => setDeleteTarget(c)} className="h-8 px-2 text-xs text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded inline-flex items-center gap-1">
+                            <AlertCircle className="h-3.5 w-3.5" /> Delete
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </div>
 
-      {/* Add Teacher Sheet */}
-      <Sheet open={showAdd} onOpenChange={setShowAdd}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+      {/* Class detail sheet (kept from old ClassesView) */}
+      <Sheet open={!!detailClass} onOpenChange={(o) => !o && setDetailClass(null)}>
+        <SheetContent className="w-full sm:max-w-lg">
+          {detailClass && (() => {
+            const count = studentCount(detailClass);
+            const enrolled = enrolledStudents(detailClass);
+            const visibleStudents = showAllStudents ? enrolled : enrolled.slice(0, 20);
+            const clsTeachers = classTeachers(detailClass);
+            return (
+              <>
+                <SheetHeader>
+                  <SheetTitle className="text-gray-900 text-lg">{detailClass.name} — Section {detailClass.section}</SheetTitle>
+                  <SheetDescription>
+                    {detailClass.program ? `${detailClass.program} · ` : ''}Part {detailClass.part || '1'} — class details, enrolled students and assigned teachers.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="px-4 pb-2 space-y-5 flex-1 overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Enrolled</div>
+                      <div className="text-lg font-bold text-gray-900 tabular-nums">{count}</div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Teachers</div>
+                      <div className="text-lg font-bold text-gray-900 tabular-nums">{clsTeachers.length}</div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Enrolled Students ({enrolled.length})</h4>
+                    {enrolled.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center">
+                        <p className="text-xs text-gray-500">No students enrolled in this section yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1 max-h-60 overflow-y-auto concordia-scroll pr-1">
+                        {visibleStudents.map((s) => (
+                          <div key={s.id} className="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 hover:bg-gray-50">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-900 truncate">{s.name}</div>
+                              <div className="text-[11px] text-gray-500">Roll #{s.rollNo || '—'}{s.guardian ? ` • Father: ${s.guardian}` : ''}</div>
+                            </div>
+                          </div>
+                        ))}
+                        {enrolled.length > 20 && (
+                          <button onClick={() => setShowAllStudents((v) => !v)} className="mt-2 w-full text-center text-xs text-[#F26522] hover:underline font-medium py-1">
+                            {showAllStudents ? 'Show less' : `View all ${enrolled.length}`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Subjects &amp; Teachers</h4>
+                    {clsTeachers.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center">
+                        <p className="text-xs text-gray-500 mb-1">No teachers assigned to this class yet.</p>
+                        <p className="text-[11px] text-gray-400">Use the Assign Teacher control below to add one.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {clsTeachers.map((t) => {
+                          const subs = parseTeacherField(t.subjects);
+                          return (
+                            <div key={t.id} className="flex items-center justify-between gap-2 rounded-md border border-gray-100 px-3 py-2 hover:bg-gray-50">
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-gray-900 truncate">{t.name}</div>
+                                <div className="text-[11px] text-gray-500 mt-0.5">
+                                  {subs.length > 0 ? subs.join(', ') : 'No subjects assigned'}
+                                  {t.rollNo ? ` • ${t.rollNo}` : ''}
+                                </div>
+                              </div>
+                              <button onClick={() => removeTeacher(t)} disabled={removingTeacherId === t.id} className="shrink-0 h-7 px-2 text-[11px] font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50 border border-gray-200 rounded inline-flex items-center gap-1 disabled:opacity-60">
+                                {removingTeacherId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserMinus className="h-3 w-3" />} Remove
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50/50 p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <UserPlus className="h-3.5 w-3.5 text-[#F26522]" />
+                        <span className="text-xs font-semibold text-gray-700">Assign Teacher</span>
+                      </div>
+                      {(() => {
+                        const assignedIds = new Set(clsTeachers.map((t) => t.id));
+                        const available = teachers.filter((t) => !assignedIds.has(t.id));
+                        if (available.length === 0) return <p className="text-[11px] text-gray-500">All teachers in this branch are already assigned to this class.</p>;
+                        return (
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <Select value={assignTeacherId} onValueChange={setAssignTeacherId}>
+                              <SelectTrigger className={cn(inputCls, 'h-9 flex-1')}><SelectValue placeholder="Select a teacher…" /></SelectTrigger>
+                              <SelectContent>
+                                {available.map((t) => (<SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>))}
+                              </SelectContent>
+                            </Select>
+                            <button onClick={assignTeacher} disabled={!assignTeacherId || assignSaving} className={cn(btnPrimary, 'h-9 shrink-0')}>
+                              {assignSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Assign
+                            </button>
+                          </div>
+                        );
+                      })()}
+                      <p className="text-[11px] text-gray-400 mt-2">Assigned teachers will see this class in their portal.</p>
+                    </div>
+                  </div>
+                </div>
+                <SheetFooter>
+                  <button onClick={() => setDeleteTarget(detailClass)} className="h-9 px-4 text-sm font-medium text-rose-600 border border-rose-200 bg-white hover:bg-rose-50 rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors w-full">
+                    <AlertCircle className="h-4 w-4" /> Delete Class
+                  </button>
+                </SheetFooter>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
+
+      {/* Credentials confirmation Sheet (teacher) */}
+      <Sheet open={!!created} onOpenChange={(o) => !o && setCreated(null)}>
+        <SheetContent className="w-full sm:max-w-sm">
           <SheetHeader>
-            <SheetTitle className="text-gray-900">Add Teacher</SheetTitle>
-            <SheetDescription>Create a new teacher account with login credentials.</SheetDescription>
+            <SheetTitle className="text-gray-900">Teacher Login Created</SheetTitle>
+            <SheetDescription>Share these credentials securely.</SheetDescription>
           </SheetHeader>
-          <div className="space-y-4 px-4 pb-6">
-            <Field label="Full Name" required>
-              <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inputCls} placeholder="Ayesha Khan" />
-            </Field>
-            <Field label="Teacher ID / Roll No" required>
-              <Input value={form.rollNo} onChange={e => setForm({ ...form, rollNo: e.target.value })} className={inputCls} placeholder="T001" />
-            </Field>
-            <Field label="Email (optional)">
-              <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
-            </Field>
-            <Field label="Password (optional)">
-              <Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
-            </Field>
-            <Field label="Subjects (comma-separated)">
-              <Input value={form.subjects} onChange={e => setForm({ ...form, subjects: e.target.value })} className={inputCls} placeholder="Mathematics, Physics" />
-            </Field>
-            <Field label="Classes (comma-separated)">
-              <Input value={form.classes} onChange={e => setForm({ ...form, classes: e.target.value })} className={inputCls} placeholder="Grade 10-A, Grade 9-B" />
-            </Field>
-            <button onClick={submit} disabled={saving} className={cn(btnPrimary, 'w-full justify-center h-10')}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Create Teacher
+          <div className="px-4 pb-6 space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Name</div>
+                <div className="text-sm font-semibold text-gray-900">{created?.name}</div>
+              </div>
+              <div className="pt-2 border-t border-gray-200">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">Username</span>
+                  <CopyButton text={created?.user || ''} />
+                </div>
+                <div className="text-sm font-mono font-semibold text-gray-900">{created?.user}</div>
+              </div>
+              <div className="pt-2 border-t border-gray-200">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">Password</span>
+                  <CopyButton text={created?.pass || ''} />
+                </div>
+                <div className="text-sm font-mono font-semibold text-gray-900">{created?.pass}</div>
+              </div>
+            </div>
+            <button onClick={() => { setCreated(null); setTimeout(() => nameRef.current?.focus(), 200); }} className={cn(btnPrimary, 'w-full justify-center h-10')}>
+              <Plus className="h-4 w-4" /> Create Another
             </button>
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Credentials confirmation */}
-      <Sheet open={!!created} onOpenChange={(o) => !o && setCreated(null)}>
-        <SheetContent className="w-full sm:max-w-sm">
+      {/* Teacher Edit Sheet */}
+      <Sheet open={!!editingTeacher} onOpenChange={(o) => !o && setEditingTeacher(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white">
           <SheetHeader>
-            <SheetTitle className="text-gray-900">Teacher Created</SheetTitle>
-            <SheetDescription>Share these credentials with the teacher.</SheetDescription>
+            <SheetTitle className="text-base font-semibold text-gray-900">Edit Teacher</SheetTitle>
+            <SheetDescription className="text-sm text-gray-500">Update name, Teacher ID, email, and password. Subjects / classes are managed from the class detail sheet.</SheetDescription>
           </SheetHeader>
-          <div className="px-4 pb-6 space-y-4">
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Username (ID)</span>
-                <CopyButton text={created?.rollNo || ''} />
-              </div>
-              <div className="text-sm font-mono font-semibold text-gray-900">{created?.rollNo}</div>
-              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-                <span className="text-xs text-gray-500">Password</span>
-                <CopyButton text={created?.password || ''} />
-              </div>
-              <div className="text-sm font-mono font-semibold text-gray-900">{created?.password}</div>
+          <div className="px-4 pb-4 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Full Name" required>
+                <Input value={teacherEditForm.name} onChange={(e) => setTeacherEditForm({ ...teacherEditForm, name: e.target.value })} className={inputCls} />
+              </Field>
+              <Field label="Teacher ID / Roll No" required>
+                <Input value={teacherEditForm.rollNo} onChange={(e) => setTeacherEditForm({ ...teacherEditForm, rollNo: e.target.value })} className={inputCls} />
+              </Field>
+              <Field label="Email">
+                <Input value={teacherEditForm.email} onChange={(e) => setTeacherEditForm({ ...teacherEditForm, email: e.target.value })} className={inputCls} />
+              </Field>
+              <Field label="Title">
+                <Input value={teacherEditForm.title} onChange={(e) => setTeacherEditForm({ ...teacherEditForm, title: e.target.value })} className={inputCls} placeholder="Teacher" />
+              </Field>
             </div>
-            <button onClick={() => setCreated(null)} className={cn(btnSecondary, 'w-full justify-center h-10')}>Done</button>
+            <Field label="Password">
+              <div className="flex gap-2">
+                <Input type={revealTeacherPw ? 'text' : 'password'} value={teacherEditForm.password} onChange={(e) => setTeacherEditForm({ ...teacherEditForm, password: e.target.value })} className={inputCls} placeholder="leave blank to keep current" />
+                <button onClick={revealTeacherPassword} disabled={teacherPwLoading} className={cn(btnSecondary, 'shrink-0')}>
+                  {teacherPwLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                  {revealTeacherPw ? 'Hide' : 'Reveal'}
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1.5">Reveal pulls the current password from the server. Type a new one to overwrite it (the teacher will be prompted to change it on next sign-in).</p>
+            </Field>
+            <div className="flex gap-2 pt-2">
+              <button onClick={saveTeacher} disabled={savingTeacherEdit} className={cn(btnPrimary, 'flex-1 h-10')}>
+                {savingTeacherEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save Changes
+              </button>
+              <button onClick={() => setEditingTeacher(null)} className={cn(btnSecondary, 'h-10')}>Cancel</button>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Delete class confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!deleting) setDeleteTarget(o ? deleteTarget : null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <span className="h-8 w-8 rounded-lg bg-rose-100 grid place-items-center shrink-0">
+                <AlertCircle className="h-4 w-4 text-rose-600" />
+              </span>
+              Delete this class?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-gray-600">
+                {deleteTarget && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center justify-between">
+                    <span className="text-gray-500">Class</span>
+                    <span className="font-semibold text-gray-900">{deleteTarget.name} — Section {deleteTarget.section}</span>
+                  </div>
+                )}
+                <p>This will permanently remove the class and clean up everything tied to it (timetable entries, attendance, results, teacher assignments). Students are unlinked but kept. This action cannot be undone.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg" disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmDeleteClass(); }} disabled={deleting} className="bg-rose-600 hover:bg-rose-700 text-white rounded-lg">
+              {deleting ? (<><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Deleting…</>) : (<><AlertCircle className="h-4 w-4 mr-1.5" /> Yes, delete class</>)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-// ───────────────────────── Students ─────────────────────────
-function StudentsView({ user }: { user: any }) {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState('');
+// ───────────────────────── Timetable (department hierarchy drill-down) ─────────────────────────
+type TimetableDrill = { dept: string | null; part: string; cls: { id: string; name: string; section: string } | null; section: { id: string; name: string; section: string } | null };
 
-  useEffect(() => {
-    let cancelled = false;
-    api.platformUsers({ role: 'student' }).then(d => {
-      if (cancelled) return;
-      setData(Array.isArray(d) ? d : []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-    return () => { cancelled = true; };
-  }, []);
-
-  const filtered = data.filter(s => !q || (s.name + (s.rollNo || '') + (s.class || '')).toLowerCase().includes(q.toLowerCase()));
-
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Students" subtitle="View all enrolled students across classes." />
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <div className="relative mb-4 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search students…" className={cn(inputCls, 'pl-9')} />
-        </div>
-        {loading ? (
-          <SkeletonTable rows={5} />
-        ) : filtered.length === 0 ? (
-          <EmptyState icon={GraduationCap} title="No students found" />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-gray-200">
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Roll No</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Name</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Class</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Father / Guardian</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Contact</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map(s => (
-                <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
-                  <TableCell className="text-sm text-gray-700 font-mono">{s.rollNo || '—'}</TableCell>
-                  <TableCell className="text-sm font-medium text-gray-900">{s.name}</TableCell>
-                  <TableCell className="text-sm text-gray-600">{s.class ? `${s.class}${s.section ? ` — ${s.section}` : ''}` : '—'}</TableCell>
-                  <TableCell className="text-sm text-gray-600">{s.guardian || s.fatherName || '—'}</TableCell>
-                  <TableCell className="text-sm text-gray-600">{s.guardianPhone || '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ───────────────────────── Timetable ─────────────────────────
-function TimetableView({ user }: { user: any }) {
-  const [classes, setClasses] = useState<any[]>([]);
-  const [selClass, setSelClass] = useState('');
+function TimetableView({ user, classes, teachers }: { user: any; classes: any[]; teachers: any[] }) {
+  const [drill, setDrill] = useState<TimetableDrill>({ dept: null, part: '1', cls: null, section: null });
   const [entries, setEntries] = useState<any[]>([]);
-  const [teachers, setTeachers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -607,82 +1364,76 @@ function TimetableView({ user }: { user: any }) {
 
   const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const byDay = (day: string) => entries.filter(e => e.day === day).sort((a, b) => (a.period || 0) - (b.period || 0));
-  const selClassObj = classes.find(c => c.id === selClass) || null;
 
-  useEffect(() => {
-    Promise.all([
-      api.getClasses(user?.branchId).catch(() => []),
-      api.platformUsers({ role: 'teacher', branchId: user?.branchId }).catch(() => []),
-    ]).then(([c, t]) => {
-      setClasses(Array.isArray(c) ? c : []);
-      setTeachers(Array.isArray(t) ? t : []);
-      if (c && c[0]) setSelClass(c[0].id);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [user?.branchId]);
+  // The active class id is whichever section was drilled into (or the single
+  // section if there's only one).
+  const activeClassId = drill.section?.id || drill.cls?.id || '';
+  const activeClassObj = classes.find((c) => c.id === activeClassId) || null;
 
+  // ── Classes filtered by selected dept + part
+  const classesInDept = useMemo(() => {
+    if (!drill.dept) return [];
+    return classes.filter(
+      (c) => (c.program || '').trim() === drill.dept && String(c.part || '') === drill.part,
+    );
+  }, [classes, drill.dept, drill.part]);
+
+  // Sections of the selected class (same name, different section letters).
+  const sectionsOfClass = useMemo(() => {
+    if (!drill.cls) return [];
+    return classes.filter((c) => c.name === drill.cls!.name);
+  }, [classes, drill.cls]);
+  const hasMultipleSections = sectionsOfClass.length > 1;
+
+  // Load timetable whenever the active class changes.
   useEffect(() => {
-    if (!selClass) return;
+    if (!activeClassId) { setEntries([]); return; }
     let cancelled = false;
     setLoading(true);
-    api.getTimetable({ classId: selClass }).then(d => {
+    api.getTimetable({ classId: activeClassId }).then((d) => {
       if (cancelled) return;
       setEntries(Array.isArray(d) ? d : []);
       setLoading(false);
     }).catch(() => { if (!cancelled) { setEntries([]); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [selClass]);
+  }, [activeClassId]);
 
   const reloadEntries = useCallback(() => {
-    if (!selClass) { setEntries([]); return; }
-    api.getTimetable({ classId: selClass })
-      .then(d => setEntries(Array.isArray(d) ? d : []))
+    if (!activeClassId) { setEntries([]); return; }
+    api.getTimetable({ classId: activeClassId })
+      .then((d) => setEntries(Array.isArray(d) ? d : []))
       .catch(() => setEntries([]));
-  }, [selClass]);
+  }, [activeClassId]);
 
   const resetForm = () => {
-    setFDay('Monday');
-    setFPeriod('1');
-    setFSubject('');
-    setFTeacherId('');
-    setFStart('08:00');
-    setFEnd('08:45');
-    setFRoom('');
+    setFDay('Monday'); setFPeriod('1'); setFSubject(''); setFTeacherId(''); setFStart('08:00'); setFEnd('08:45'); setFRoom('');
   };
 
+  // ── Save entry with client-side clash detection (PRESERVED from old code).
+  // The backend enforces the same three rules but surfacing them here gives
+  // the academic office instant, specific feedback before the round-trip.
   const saveEntry = async () => {
-    if (!selClass) { toast({ title: 'Select a class first', variant: 'destructive' }); return; }
+    if (!activeClassId) { toast({ title: 'Select a class first', variant: 'destructive' }); return; }
     const period = parseInt(fPeriod, 10);
     if (!fDay || !Number.isFinite(period) || period < 1 || period > 12) {
       toast({ title: 'Day and a valid Period (1–12) are required', variant: 'destructive' });
       return;
     }
-    if (!fSubject.trim()) {
-      toast({ title: 'Subject is required', variant: 'destructive' });
-      return;
-    }
-    const teacher = teachers.find(t => t.id === fTeacherId) || null;
+    if (!fSubject.trim()) { toast({ title: 'Subject is required', variant: 'destructive' }); return; }
+    const teacher = teachers.find((t) => t.id === fTeacherId) || null;
 
-    // ─── Client-side clash check #1: CLASS slot already taken ───
-    // The currently-loaded `entries` are all for the selected class, so we
-    // can detect a class clash instantly without a server round-trip.
-    const classClash = entries.find(
-      (e) => e.day === fDay && Number(e.period) === period,
-    );
+    // Clash #1 — class slot taken
+    const classClash = entries.find((e) => e.day === fDay && Number(e.period) === period);
     if (classClash) {
       toast({
-        title: 'Class timetable clash',
-        description: `${selClassObj?.name || 'This class'} already has ${classClash.subject || 'a lecture'} on ${fDay} Period ${period}${classClash.teacherName ? ` (${classClash.teacherName})` : ''}. Delete that entry first to change it.`,
+        title: '⚠ Clash: class slot taken',
+        description: `This class already has a lecture at Period ${period} on ${fDay} (${classClash.subject || 'a lecture'}${classClash.teacherName ? ` · ${classClash.teacherName}` : ''}). Delete that entry first to change it.`,
         variant: 'destructive',
       });
       return;
     }
 
-    // ─── Client-side clash check #2: TEACHER already booked elsewhere ───
-    // The teacher's lectures in OTHER classes aren't in `entries`, so we
-    // fetch their full timetable on the fly. The server enforces this too,
-    // but surfacing it here gives the academic office immediate, specific
-    // feedback before they hit "Save".
+    // Clash #2 + #3 — teacher double-booked / time overlap
     if (teacher) {
       try {
         const teacherEntries = await api.getTimetable({ teacherId: teacher.id });
@@ -694,25 +1445,22 @@ function TimetableView({ user }: { user: any }) {
             ? `${teacherClash.className}${teacherClash.section ? '-' + teacherClash.section : ''}`
             : 'another class';
           toast({
-            title: 'Teacher timetable clash',
-            description: `${teacher.name} already has ${teacherClash.subject || 'a lecture'} on ${fDay} Period ${period} in ${clashCls}. Pick a different teacher, day, or period.`,
+            title: '⚠ Clash: teacher double-booked',
+            description: `${teacher.name} already has ${teacherClash.subject || 'a lecture'} at Period ${period} on ${fDay} in ${clashCls}. Pick a different teacher, day, or period.`,
             variant: 'destructive',
           });
           return;
         }
-        // Also check start/end time overlap on the same day.
         if (fStart && fEnd) {
           const timeClash = (Array.isArray(teacherEntries) ? teacherEntries : []).find((e: any) =>
-            e.day === fDay &&
-            e.startTime && e.endTime &&
-            e.startTime < fEnd && e.endTime > fStart,
+            e.day === fDay && e.startTime && e.endTime && e.startTime < fEnd && e.endTime > fStart,
           );
           if (timeClash) {
             const clashCls = timeClash.className
               ? `${timeClash.className}${timeClash.section ? '-' + timeClash.section : ''}`
               : 'another class';
             toast({
-              title: 'Teacher time overlap',
+              title: '⚠ Clash: teacher time overlap',
               description: `${teacher.name} already has a lecture on ${fDay} ${timeClash.startTime}–${timeClash.endTime} in ${clashCls} that overlaps ${fStart}–${fEnd}.`,
               variant: 'destructive',
             });
@@ -720,17 +1468,16 @@ function TimetableView({ user }: { user: any }) {
           }
         }
       } catch {
-        // If the teacher-clash pre-check fails (network etc.), fall through
-        // to the server which enforces the same rule.
+        // Network failure on the pre-check — fall through to the server.
       }
     }
 
     setSaving(true);
     try {
       await api.saveTimetableEntry({
-        classId: selClass,
-        className: selClassObj?.name || '',
-        section: selClassObj?.section || '',
+        classId: activeClassId,
+        className: activeClassObj?.name || '',
+        section: activeClassObj?.section || '',
         day: fDay,
         period,
         startTime: fStart,
@@ -745,7 +1492,8 @@ function TimetableView({ user }: { user: any }) {
       setShowForm(false);
       reloadEntries();
     } catch (e: any) {
-      toast({ title: 'Failed to save entry', description: e?.message || 'Please try again', variant: 'destructive' });
+      // Server-side clash message (already very specific — surface verbatim).
+      toast({ title: '⚠ Clash detected', description: e?.message || 'Failed to save entry', variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -761,487 +1509,392 @@ function TimetableView({ user }: { user: any }) {
       reloadEntries();
     } catch (e: any) {
       toast({ title: 'Failed to delete entry', description: e?.message || 'Please try again', variant: 'destructive' });
-    } finally {
-      setDeletingId(null);
-    }
+    } finally { setDeletingId(null); }
   };
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Timetable"
-        subtitle="Create and manage class timetables, assign teachers and rooms."
-        action={
-          <button
-            onClick={() => setShowForm(s => !s)}
-            disabled={!selClass}
-            className={btnPrimary}
-          >
-            <Plus className="h-4 w-4" /> {showForm ? 'Cancel' : 'Add Entry'}
-          </button>
-        }
-      />
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
-          <span className="text-xs font-semibold text-gray-700">Class:</span>
-          <Select value={selClass} onValueChange={setSelClass}>
-            <SelectTrigger className="w-[240px] h-9 rounded-lg border-gray-200"><SelectValue placeholder="Select class" /></SelectTrigger>
-            <SelectContent>
-              {classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.section ? ` — ${c.section}` : ''}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          {selClassObj && (
-            <span className="text-xs text-gray-400">
-              {selClassObj.name}{selClassObj.section ? ` — Section ${selClassObj.section}` : ''}
-            </span>
-          )}
-        </div>
+  const handleSelectDept = (dept: string) =>
+    setDrill({ dept, part: '1', cls: null, section: null });
+  const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
+    const secs = classes.filter((c) => c.name === cls.name);
+    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
+    else setDrill({ ...drill, cls, section: cls });
+  };
+  const handleSelectSection = (section: { id: string; name: string; section: string }) =>
+    setDrill({ ...drill, section });
+  const handleClearHierarchy = () =>
+    setDrill({ dept: null, part: '1', cls: null, section: null });
 
-        {!selClass ? (
-          <EmptyState icon={Calendar} title="Select a class" desc="Pick a class above to view or manage its timetable." />
+  // ── Render: hierarchy drill-down or timetable grid ──
+  let body: React.ReactNode;
+  if (!drill.dept) {
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Select a Department</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Browse the 6 Concordia departments to drill into their class timetables.</p>
+        </div>
+        <DeptCardGrid onSelect={handleSelectDept} />
+      </motion.div>
+    );
+  } else if (!drill.cls) {
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <HierarchyBreadcrumb dept={drill.dept} part={drill.part} onClear={handleClearHierarchy} />
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Pick Part 1 (1st year) or Part 2 (2nd year), then select a class.</p>
+          </div>
+          <PartToggle value={drill.part} onChange={(p) => setDrill((d) => ({ ...d, part: p, cls: null, section: null }))} />
+        </div>
+        {classesInDept.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
+            <BookOpen className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+            <p className="text-sm font-medium text-gray-900">No classes found for {drill.dept} · Part {drill.part}</p>
+            <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">Create classes with this department + part from the Classes &amp; Teachers page.</p>
+          </div>
         ) : (
-          <>
-            {showForm && (
-              <div className="rounded-xl border border-gray-200 bg-gray-50/40 p-4 mb-4">
-                <SectionHeader
-                  title="New Timetable Entry"
-                  desc="Saving the same Day + Period overwrites the existing entry for this class."
-                />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <Field label="Day" required>
-                    <Select value={fDay} onValueChange={setFDay}>
-                      <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Day" /></SelectTrigger>
-                      <SelectContent>
-                        {DAYS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Period" required>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={12}
-                      value={fPeriod}
-                      onChange={e => setFPeriod(e.target.value)}
-                      className={inputCls}
-                      placeholder="1"
-                    />
-                  </Field>
-                  <Field label="Subject" required>
-                    <Input value={fSubject} onChange={e => setFSubject(e.target.value)} className={inputCls} placeholder="Mathematics" />
-                  </Field>
-                  <Field label="Teacher">
-                    <Select value={fTeacherId} onValueChange={setFTeacherId}>
-                      <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Optional" /></SelectTrigger>
-                      <SelectContent>
-                        {teachers.map(t => <SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Start Time">
-                    <Input type="time" value={fStart} onChange={e => setFStart(e.target.value)} className={inputCls} />
-                  </Field>
-                  <Field label="End Time">
-                    <Input type="time" value={fEnd} onChange={e => setFEnd(e.target.value)} className={inputCls} />
-                  </Field>
-                  <Field label="Room">
-                    <Input value={fRoom} onChange={e => setFRoom(e.target.value)} className={inputCls} placeholder="Room 101" />
-                  </Field>
-                  <div className="flex items-end gap-2">
-                    <button onClick={saveEntry} disabled={saving} className={btnPrimary + ' h-10 flex-1'}>
-                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                      Save Entry
-                    </button>
-                    <button onClick={() => { setShowForm(false); resetForm(); }} className={btnSecondary + ' h-10'}>
-                      Cancel
-                    </button>
-                  </div>
+          <ClassCardGrid classes={classesInDept} onSelect={handleSelectClass} />
+        )}
+      </motion.div>
+    );
+  } else if (hasMultipleSections && !drill.section) {
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <HierarchyBreadcrumb dept={drill.dept} part={drill.part} cls={drill.cls.name} onClear={handleClearHierarchy} />
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">{drill.cls.name} — Select Section</h2>
+            <p className="text-xs text-gray-500 mt-0.5">This class has multiple sections. Pick one to manage its timetable.</p>
+          </div>
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50" onClick={() => setDrill((d) => ({ ...d, cls: null, section: null }))}>
+            <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to classes
+          </Button>
+        </div>
+        <SectionCardGrid sections={sectionsOfClass} onSelect={handleSelectSection} />
+      </motion.div>
+    );
+  } else {
+    // Timetable grid for the selected class + section
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <HierarchyBreadcrumb dept={drill.dept} part={drill.part} cls={drill.cls.name} section={drill.section?.section} onClear={handleClearHierarchy} />
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {activeClassObj?.name} — Section {activeClassObj?.section}
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {drill.dept} · Part {drill.part} · {entries.length} entr{entries.length === 1 ? 'y' : 'ies'}
+              </p>
+            </div>
+            <button onClick={() => setShowForm((s) => !s)} className={btnPrimary}>
+              <Plus className="h-4 w-4" /> {showForm ? 'Cancel' : 'Add Entry'}
+            </button>
+          </div>
+
+          {showForm && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50/40 p-4 mb-4">
+              <SectionHeader title="New Timetable Entry" desc="Pick a day + period. Clashes (class slot taken, teacher double-booked, or teacher time overlap) are caught before saving." />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                <Field label="Day" required>
+                  <Select value={fDay} onValueChange={setFDay}>
+                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Day" /></SelectTrigger>
+                    <SelectContent>
+                      {DAYS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Period" required>
+                  <Input type="number" min={1} max={12} value={fPeriod} onChange={(e) => setFPeriod(e.target.value)} className={inputCls} placeholder="1" />
+                </Field>
+                <Field label="Subject" required>
+                  <Input value={fSubject} onChange={(e) => setFSubject(e.target.value)} className={inputCls} placeholder="Mathematics" />
+                </Field>
+                <Field label="Teacher">
+                  <Select value={fTeacherId} onValueChange={setFTeacherId}>
+                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Optional" /></SelectTrigger>
+                    <SelectContent>
+                      {teachers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Start Time">
+                  <Input type="time" value={fStart} onChange={(e) => setFStart(e.target.value)} className={inputCls} />
+                </Field>
+                <Field label="End Time">
+                  <Input type="time" value={fEnd} onChange={(e) => setFEnd(e.target.value)} className={inputCls} />
+                </Field>
+                <Field label="Room">
+                  <Input value={fRoom} onChange={(e) => setFRoom(e.target.value)} className={inputCls} placeholder="Room 101" />
+                </Field>
+                <div className="flex items-end gap-2">
+                  <button onClick={saveEntry} disabled={saving} className={btnPrimary + ' h-10 flex-1'}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save Entry
+                  </button>
+                  <button onClick={() => { setShowForm(false); resetForm(); }} className={btnSecondary + ' h-10'}>Cancel</button>
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {loading ? (
-              <SkeletonTable rows={4} />
-            ) : entries.length === 0 ? (
-              <EmptyState
-                icon={Calendar}
-                title="No timetable entries"
-                desc="Add the first period for this class to build its weekly timetable."
-                action={
-                  !showForm ? (
-                    <button onClick={() => setShowForm(true)} className={btnPrimary}>
-                      <Plus className="h-4 w-4" /> Add Entry
-                    </button>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <div className="space-y-3">
-                {DAYS.map(day => {
-                  const dayEntries = byDay(day);
-                  if (dayEntries.length === 0) return null;
-                  return (
-                    <div key={day}>
-                      <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">{day}</div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                        {dayEntries.map((e, i) => (
-                          <div key={e.id || i} className="relative rounded-lg border border-gray-200 bg-white p-3 pr-9 hover:border-gray-300 transition-colors">
-                            <button
-                              onClick={() => removeEntry(e)}
-                              disabled={deletingId === e.id}
-                              aria-label="Delete entry"
-                              className="absolute top-2 right-2 h-6 w-6 inline-flex items-center justify-center text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded disabled:opacity-50"
-                            >
-                              {deletingId === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                            </button>
-                            <div className="text-xs text-gray-400">Period {e.period}</div>
-                            <div className="text-sm font-semibold text-gray-900 mt-0.5">{e.subject || '—'}</div>
-                            <div className="text-xs text-gray-500 mt-1">{e.startTime} — {e.endTime}</div>
-                            {e.teacherName && <div className="text-xs text-gray-400 mt-0.5">{e.teacherName}</div>}
-                            {e.roomName && <div className="text-xs text-gray-400">{e.roomName}</div>}
-                          </div>
-                        ))}
-                      </div>
+          {loading ? (
+            <SkeletonTable rows={4} />
+          ) : entries.length === 0 ? (
+            <EmptyState
+              icon={Calendar}
+              title="No timetable entries"
+              desc="Add the first period for this class to build its weekly timetable."
+              action={!showForm ? (
+                <button onClick={() => setShowForm(true)} className={btnPrimary}><Plus className="h-4 w-4" /> Add Entry</button>
+              ) : undefined}
+            />
+          ) : (
+            <div className="space-y-3">
+              {DAYS.map((day) => {
+                const dayEntries = byDay(day);
+                if (dayEntries.length === 0) return null;
+                return (
+                  <div key={day}>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">{day}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      {dayEntries.map((e, i) => (
+                        <div key={e.id || i} className="relative rounded-lg border border-gray-200 bg-white p-3 pr-9 hover:border-gray-300 transition-colors">
+                          <button onClick={() => removeEntry(e)} disabled={deletingId === e.id} aria-label="Delete entry" className="absolute top-2 right-2 h-6 w-6 inline-flex items-center justify-center text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded disabled:opacity-50">
+                            {deletingId === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                          </button>
+                          <div className="text-xs text-gray-400">Period {e.period}</div>
+                          <div className="text-sm font-semibold text-gray-900 mt-0.5">{e.subject || '—'}</div>
+                          <div className="text-xs text-gray-500 mt-1">{e.startTime} — {e.endTime}</div>
+                          {e.teacherName && <div className="text-xs text-gray-400 mt-0.5">{e.teacherName}</div>}
+                          {e.roomName && <div className="text-xs text-gray-400">{e.roomName}</div>}
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ───────────────────────── Date Sheets ─────────────────────────
-function DateSheetView({ user }: { user: any }) {
-  const setActiveModule = useApp(s => s.setActiveModule);
-  const currentModule = useApp(s => s.activeModule);
-  const pendingExamName = useApp(s => s.pendingExamName);
-  const clearPendingExamName = useApp(s => s.setPendingExamName);
-
-  // Namespace-aware navigation: when an admin is browsing the Academic
-  // sub-portal, the active module is namespaced (e.g. "academic:academic-datesheet").
-  // If we naively setActiveModule('academic-tests') the role-portal guard sees
-  // that id isn't in the admin's module list and bounces back to the first
-  // module (dashboard) — so the "Go to Exams" button appears to do nothing.
-  // This helper preserves the current namespace so navigation actually lands.
-  const goTo = (target: string) => {
-    const ns = currentModule && currentModule.includes(':') ? currentModule.split(':')[0] : null;
-    setActiveModule(ns ? `${ns}:${target}` : target);
-  };
-
-  const [items, setItems] = useState<any[]>([]);
-  const [exams, setExams] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [examsLoading, setExamsLoading] = useState(true);
-  // Read the pending exam name ONCE at mount (switching activeModule remounts
-  // this view, so the initializer picks up a freshly-stashed value each time
-  // the user clicks "Build Date Sheet" on the Exams page). This avoids
-  // calling local setState inside an effect (react-hooks/set-state-in-effect).
-  const [showForm, setShowForm] = useState(() => !!pendingExamName);
-  const [examName, setExamName] = useState(() => pendingExamName || '');
-  const [className, setClassName] = useState('');
-  const [rows, setRows] = useState([{ subject: '', date: '', time: '' }]);
-
-  const loadExams = useCallback(() => {
-    api.getExams({})
-      .then(d => setExams(Array.isArray(d) ? d : []))
-      .catch(() => setExams([]))
-      .finally(() => setExamsLoading(false));
-  }, []);
-
-  const load = useCallback(() => {
-    // Date sheets stored as announcements with a special prefix or a dedicated table.
-    // For now, fetch from announcements filtered by sender.
-    api.getAnnouncements().then(d => {
-      const ds = (Array.isArray(d) ? d : []).filter((a: any) => a.title?.startsWith('Date Sheet:'));
-      setItems(ds);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
-  useEffect(() => { load(); loadExams(); }, [load, loadExams]);
-
-  // Clear the stashed pending exam name so a later manual navigation to this
-  // page doesn't re-open the form. The store setter is a zustand action
-  // (not a React setState), so this doesn't trip set-state-in-effect.
-  useEffect(() => {
-    if (pendingExamName) clearPendingExamName(null);
-  }, [pendingExamName, clearPendingExamName]);
-
-  const hasExams = exams.length > 0;
-
-  const submit = async () => {
-    if (!examName || !className) { toast({ title: 'Exam name and class are required', variant: 'destructive' }); return; }
-    const lines = rows.filter(r => r.subject && r.date).map(r => `${r.subject} — ${fmtDate(r.date)} at ${r.time || 'TBD'}`);
-    if (lines.length === 0) { toast({ title: 'Add at least one subject with a date', variant: 'destructive' }); return; }
-    try {
-      await api.createAnnouncement({
-        title: `Date Sheet: ${examName} — ${className}`,
-        message: lines.join('\n'),
-        targetRole: 'student', targetScope: 'all',
-        instituteId: user?.instituteId, branchId: user?.branchId,
-        senderId: user?.id, senderRole: user?.role,
-      });
-      toast({ title: 'Date sheet published', description: `Visible to students.` });
-      setShowForm(false); setExamName(''); setClassName(''); setRows([{ subject: '', date: '', time: '' }]);
-      load();
-    } catch {
-      toast({ title: 'Failed to publish date sheet', variant: 'destructive' });
-    }
-  };
-
-  const tryNewDateSheet = () => {
-    if (!hasExams) {
-      toast({
-        title: 'Create an exam first',
-        description: 'You need to create at least one exam before you can build a date sheet. Head to the Exams page to add one.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    setShowForm(s => !s);
-  };
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Date Sheets"
-        subtitle="Create and publish exam date sheets for students. Pick from the exams you've already created."
-        action={
-          <button onClick={tryNewDateSheet} className={btnPrimary} disabled={!hasExams}>
-            <Plus className="h-4 w-4" /> New Date Sheet
-          </button>
-        }
-      />
-
-      {/* Gating banner: no exams yet */}
-      {!examsLoading && !hasExams && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="h-11 w-11 rounded-lg bg-amber-100 grid place-items-center shrink-0">
-            <AlertCircle className="h-5 w-5 text-amber-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-amber-900">Create an exam first</div>
-            <p className="text-xs text-amber-700 mt-0.5">
-              You can't build a date sheet until at least one exam exists. Head over to the Exams page, create your monthly test, midterm, or final, then come back here — the exam name will be pre-filled for you.
-            </p>
-          </div>
-          <button onClick={() => goTo('academic-tests')} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium h-9 px-4 shrink-0">
-            <FileText className="h-4 w-4" /> Create Exam
-          </button>
-        </div>
-      )}
-
-      {showForm && hasExams && (
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <SectionHeader title="New Date Sheet" desc="Create a date sheet for one of your existing exams." />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Field label="Exam Name" required>
-              <Select value={examName} onValueChange={setExamName}>
-                <SelectTrigger className={inputCls}><SelectValue placeholder="Select an exam…" /></SelectTrigger>
-                <SelectContent>
-                  {exams.map((ex) => <SelectItem key={ex.id} value={ex.name}>{ex.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Class" required>
-              <Input value={className} onChange={e => setClassName(e.target.value)} className={inputCls} placeholder="Grade 10" />
-            </Field>
-          </div>
-          <div className="space-y-2">
-            {rows.map((r, i) => (
-              <div key={i} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
-                <Field label={i === 0 ? 'Subject' : undefined}>
-                  <Input value={r.subject} onChange={e => { const n = [...rows]; n[i].subject = e.target.value; setRows(n); }} className={inputCls} placeholder="Mathematics" />
-                </Field>
-                <Field label={i === 0 ? 'Date' : undefined}>
-                  <Input type="date" value={r.date} onChange={e => { const n = [...rows]; n[i].date = e.target.value; setRows(n); }} className={inputCls} />
-                </Field>
-                <Field label={i === 0 ? 'Time' : undefined}>
-                  <Input type="time" value={r.time} onChange={e => { const n = [...rows]; n[i].time = e.target.value; setRows(n); }} className={inputCls} />
-                </Field>
-                <button onClick={() => i > 0 && setRows(rows.filter((_, j) => j !== i))} className="text-gray-400 hover:text-rose-600 h-10 px-2"><AlertCircle className="h-4 w-4" /></button>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button onClick={() => setRows([...rows, { subject: '', date: '', time: '' }])} className={btnSecondary}><Plus className="h-4 w-4" /> Add Row</button>
-            <button onClick={submit} className={btnPrimary}><CheckCircle2 className="h-4 w-4" /> Publish Date Sheet</button>
-          </div>
-        </div>
-      )}
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <SectionHeader title="Published Date Sheets" />
-        {loading ? (
-          <SkeletonTable rows={3} />
-        ) : items.length === 0 ? (
-          <EmptyState icon={CalendarDays} title="No date sheets yet" desc={hasExams ? "Click 'New Date Sheet' to create one." : 'Create an exam first, then build a date sheet for it.'} />
-        ) : (
-          <div className="space-y-2">
-            {items.map((a, i) => (
-              <div key={a.id || i} className="rounded-lg border border-gray-100 p-4 hover:bg-gray-50">
-                <div className="text-sm font-semibold text-gray-900">{a.title}</div>
-                <pre className="text-xs text-gray-500 mt-1 whitespace-pre-wrap font-sans">{a.message}</pre>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <PageHeader title="Timetable" subtitle="Drill into a department → part → class → section to build its weekly timetable." />
+      {body}
     </div>
   );
 }
 
-// ───────────────────────── Exams (was "Monthly Tests") ─────────────────────────
-// The Academic Office schedules every kind of assessment here — Monthly Tests,
-// Midterm, Final, Quizzes, Assignments, Oral Tests, Class Tests, etc.
-//
-// Behaviour:
-//   • Each exam is persisted in the `exams` table (branch-scoped).
-//   • Names must be unique per branch (case-insensitive) — the backend
-//     rejects duplicates with HTTP 409 and we surface that message.
-//   • Newly added exams appear instantly as cards on this same page.
-//   • Clicking an exam card stashes its name in the store and navigates to
-//     the Date Sheets page, where the Exam Name field is pre-filled and the
-//     date-sheet form auto-opens.
-//   • The Date Sheets page is gated: if no exams exist yet, the academic
-//     office is told to create one here first.
-function ExamsView({ user }: { user: any }) {
-  const setActiveModule = useApp(s => s.setActiveModule);
-  const currentModule = useApp(s => s.activeModule);
-  const setPendingExamName = useApp(s => s.setPendingExamName);
-  // Namespace-aware navigation (see DateSheetView for the full rationale —
-  // admin sub-portal module ids are prefixed with "academic:").
-  const goTo = (target: string) => {
-    const ns = currentModule && currentModule.includes(':') ? currentModule.split(':')[0] : null;
-    setActiveModule(ns ? `${ns}:${target}` : target);
-  };
+// ───────────────────────── Exams & Date Sheets (merged page) ─────────────────────────
+const EXAM_TYPES = ['Monthly Test', 'Midterm', 'Final', 'Quiz', 'Assignment', 'Oral Test', 'Class Test', 'Other'];
+
+function ExamsAndDateSheetsView({ user }: { user: any }) {
+  const [part, setPart] = useState<'1' | '2'>('1');
   const [exams, setExams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingExam, setSavingExam] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState('Monthly Test');
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmDeleteExam, setConfirmDeleteExam] = useState<string | null>(null);
 
-  const EXAM_TYPES = [
-    'Monthly Test', 'Midterm', 'Final', 'Quiz', 'Assignment', 'Oral Test', 'Class Test', 'Other',
-  ];
+  // Date sheet builder state
+  const [builderExam, setBuilderExam] = useState<any | null>(null);
+  const [builderEntries, setBuilderEntries] = useState<{ subject: string; examDate: string; examTime: string; roomName: string }[]>([]);
+  const [builderLoading, setBuilderLoading] = useState(false);
+  const [builderSaving, setBuilderSaving] = useState(false);
+
+  // Existing date sheets (keyed by examId) — shown as tables under each exam card.
+  const [existingSheets, setExistingSheets] = useState<Record<string, any>>({});
+  const [deletingSheetId, setDeletingSheetId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getExams({})
-      .then(d => setExams(Array.isArray(d) ? d : []))
+    api.getExams({ branchId: user?.branchId })
+      .then((d) => setExams(Array.isArray(d) ? d : []))
       .catch(() => setExams([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.branchId]);
   useEffect(() => { load(); }, [load]);
+
+  // ── When the part tab changes, load all date sheets for that part so each
+  // exam card can show its saved sheet (or "Build" button) without an extra
+  // round-trip per card.
+  useEffect(() => {
+    let cancelled = false;
+    api.getDateSheets({ part, branchId: user?.branchId })
+      .then((d) => {
+        if (cancelled) return;
+        const map: Record<string, any> = {};
+        for (const s of (Array.isArray(d) ? d : [])) {
+          map[s.examId] = s;
+        }
+        setExistingSheets(map);
+      })
+      .catch(() => { if (!cancelled) setExistingSheets({}); });
+    return () => { cancelled = true; };
+  }, [part, user?.branchId]);
 
   const createExam = async () => {
     const clean = name.trim();
-    if (!clean) {
-      toast({ title: 'Enter an exam name', variant: 'destructive' });
+    if (!clean) { toast({ title: 'Enter an exam name', variant: 'destructive' }); return; }
+    if (exams.some((e) => String(e.name).toLowerCase() === clean.toLowerCase())) {
+      toast({ title: 'Duplicate exam name', description: `An exam named "${clean}" already exists.`, variant: 'destructive' });
       return;
     }
-    // Client-side duplicate guard (defence in depth — backend also enforces).
-    if (exams.some(e => String(e.name).toLowerCase() === clean.toLowerCase())) {
-      toast({
-        title: 'Duplicate exam name',
-        description: `An exam named "${clean}" already exists. Please choose a different name.`,
-        variant: 'destructive',
-      });
-      return;
-    }
-    setSaving(true);
+    setSavingExam(true);
     try {
       await api.createExam({ name: clean, type });
-      toast({ title: 'Exam created', description: `"${clean}" is now available for teachers and date sheets.` });
+      toast({ title: 'Exam created', description: `"${clean}" is now available for date sheets.` });
       setName('');
       load();
     } catch (e: any) {
-      const msg = e?.message || `An exam named "${clean}" already exists.`;
-      toast({ title: 'Could not create exam', description: msg, variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
+      toast({ title: 'Could not create exam', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setSavingExam(false); }
   };
 
   const removeExam = async (id: string) => {
     try {
       await api.deleteExam(id);
       toast({ title: 'Exam deleted' });
-      setConfirmDelete(null);
+      setConfirmDeleteExam(null);
       load();
     } catch {
       toast({ title: 'Failed to delete exam', variant: 'destructive' });
     }
   };
 
-  const openDateSheetFor = (examName: string) => {
-    setPendingExamName(examName);
-    goTo('academic-datesheet');
+  // ── Open the date sheet builder for an exam. Loads any existing entries so
+  // the academic office can edit the saved sheet in place.
+  const openBuilder = async (exam: any) => {
+    setBuilderExam(exam);
+    setBuilderLoading(true);
+    try {
+      const r = await api.getDateSheets({ examId: exam.id, part, branchId: user?.branchId });
+      const sheet = Array.isArray(r) && r.length > 0 ? r[0] : null;
+      if (sheet && Array.isArray(sheet.entries) && sheet.entries.length > 0) {
+        setBuilderEntries(sheet.entries.map((e: any) => ({
+          subject: e.subject || '',
+          examDate: e.examDate ? String(e.examDate).slice(0, 10) : '',
+          examTime: e.examTime || '',
+          roomName: e.roomName || '',
+        })));
+      } else {
+        setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '' }]);
+      }
+    } catch {
+      setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '' }]);
+    } finally { setBuilderLoading(false); }
+  };
+
+  const closeBuilder = () => {
+    setBuilderExam(null);
+    setBuilderEntries([]);
+  };
+
+  const saveDateSheet = async () => {
+    if (!builderExam) return;
+    const valid = builderEntries.filter((e) => e.subject && e.examDate);
+    if (valid.length === 0) {
+      toast({ title: 'Add at least one subject with a date', variant: 'destructive' });
+      return;
+    }
+    setBuilderSaving(true);
+    try {
+      await api.saveDateSheet({
+        examId: builderExam.id,
+        examName: builderExam.name,
+        part,
+        branchId: user?.branchId,
+        entries: valid.map((e) => ({
+          subject: e.subject.trim(),
+          examDate: e.examDate,
+          examTime: e.examTime || '',
+          roomName: e.roomName || '',
+        })),
+      });
+      toast({ title: 'Date sheet saved', description: `${builderExam.name} — Part ${part}` });
+      // Refresh the existing-sheets map so the table renders under the card.
+      const r = await api.getDateSheets({ examId: builderExam.id, part, branchId: user?.branchId });
+      const sheet = Array.isArray(r) && r.length > 0 ? r[0] : null;
+      setExistingSheets((prev) => ({ ...prev, [builderExam.id]: sheet }));
+      closeBuilder();
+    } catch (e: any) {
+      toast({ title: 'Failed to save date sheet', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setBuilderSaving(false); }
+  };
+
+  const deleteDateSheet = async (sheetId: string, examName: string) => {
+    if (!confirm(`Delete the saved date sheet for ${examName} — Part ${part}?`)) return;
+    setDeletingSheetId(sheetId);
+    try {
+      await api.deleteDateSheet(sheetId);
+      toast({ title: 'Date sheet deleted' });
+      // Drop it from the map (clear by examId).
+      setExistingSheets((prev) => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(next)) {
+          if (v?.id === sheetId) delete next[k];
+        }
+        return next;
+      });
+    } catch (e: any) {
+      toast({ title: 'Failed to delete date sheet', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setDeletingSheetId(null); }
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Exams"
-        subtitle="Create every assessment — monthly tests, midterms, finals, quizzes, and more. Click an exam to build its date sheet."
+        title="Exams & Date Sheets"
+        subtitle="Create exams and build date sheets per part. Each part has its own date sheet per exam."
       />
 
-      {/* Create form */}
+      {/* Part tabs */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-xs font-semibold text-gray-700">Part:</span>
+        <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+      </div>
+
+      {/* Create Exam form */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <SectionHeader title="Create New Exam" desc="Teachers will see this in their marks-entry dropdown. Date sheets can be built from it next." />
+        <SectionHeader title="Create New Exam" desc="Teachers will see this in their marks-entry dropdown. Date sheets are built per-part below." />
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-end">
           <Field label="Exam Name" required>
-            <Input
-              value={name}
-              onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') createExam(); }}
-              className={inputCls}
-              placeholder="e.g. Monthly Test 1, Midterm 2026, Final Exam"
-              maxLength={80}
-            />
+            <Input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') createExam(); }} className={inputCls} placeholder="e.g. Monthly Test 1, Midterm 2026" maxLength={80} />
           </Field>
           <Field label="Type">
             <Select value={type} onValueChange={setType}>
               <SelectTrigger className={inputCls + ' w-44'}><SelectValue /></SelectTrigger>
               <SelectContent>
-                {EXAM_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                {EXAM_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
-          <button onClick={createExam} disabled={saving || !name.trim()} className={btnPrimary}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Create Exam
+          <button onClick={createExam} disabled={savingExam || !name.trim()} className={btnPrimary}>
+            {savingExam ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create Exam
           </button>
         </div>
       </div>
 
       {/* Exam cards */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <SectionHeader
-          title="Exams"
-          desc={exams.length > 0 ? 'Click an exam card to build its date sheet.' : 'No exams yet — create one above to get started.'}
-        />
+        <SectionHeader title={`Exams — Part ${part}`} desc={exams.length > 0 ? 'Build or edit the Part %s date sheet for each exam.'.replace('%s', part) : 'No exams yet — create one above.'} />
         {loading ? (
           <SkeletonTable rows={3} />
         ) : exams.length === 0 ? (
-          <EmptyState
-            icon={FileText}
-            title="No exams yet"
-            desc="Create your first exam above. Teachers can then enter marks, and you can build a date sheet for it."
-          />
+          <EmptyState icon={FileText} title="No exams yet" desc="Create your first exam above. Date sheets can then be built for it." />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {exams.map((ex) => {
-              const isConfirming = confirmDelete === ex.id;
+              const isConfirming = confirmDeleteExam === ex.id;
+              const sheet = existingSheets[ex.id];
               return (
-                <div
-                  key={ex.id}
-                  className="group relative rounded-xl border border-gray-200 bg-white p-5 transition-all hover:border-[#F26522]/40 hover:shadow-sm flex flex-col"
-                >
-                  {/* Accent stripe */}
+                <div key={ex.id} className="group relative rounded-xl border border-gray-200 bg-white p-5 transition-all hover:border-[#F26522]/40 hover:shadow-sm flex flex-col">
                   <div className="absolute left-0 top-4 bottom-4 w-1 rounded-r bg-[#F26522]/60 opacity-0 group-hover:opacity-100 transition-opacity" />
                   <div className="flex items-start justify-between gap-2">
                     <div className="h-10 w-10 rounded-lg bg-[#F26522]/10 grid place-items-center shrink-0">
@@ -1253,37 +1906,65 @@ function ExamsView({ user }: { user: any }) {
                   </div>
                   <h3 className="mt-3 text-base font-semibold text-gray-900 break-words">{ex.name}</h3>
                   <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    Created {ex.createdAt ? new Date(ex.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                    <Clock className="h-3 w-3" /> Created {ex.createdAt ? fmtDate(ex.createdAt) : '—'}
                   </p>
 
                   <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-2">
-                    <button
-                      onClick={() => openDateSheetFor(ex.name)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#F26522] hover:bg-[#D4541E] text-white text-xs font-medium h-8 px-3 transition-colors"
-                    >
-                      <CalendarPlus className="h-3.5 w-3.5" />
-                      Build Date Sheet
+                    <button onClick={() => openBuilder(ex)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#F26522] hover:bg-[#D4541E] text-white text-xs font-medium h-8 px-3 transition-colors">
+                      <CalendarPlus className="h-3.5 w-3.5" /> {sheet ? 'Edit Date Sheet' : 'Build Date Sheet'}
                     </button>
-                    <button
-                      onClick={() => setConfirmDelete(ex.id)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-gray-500 text-xs font-medium h-8 px-3 transition-colors"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                    <button onClick={() => setConfirmDeleteExam(ex.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-gray-500 text-xs font-medium h-8 px-3 transition-colors">
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   </div>
 
-                  {/* Delete confirmation */}
+                  {/* Saved date sheet table */}
+                  {sheet && Array.isArray(sheet.entries) && sheet.entries.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-gray-100 overflow-hidden">
+                      <div className="bg-gray-50 px-3 py-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Date Sheet · Part {part}</span>
+                        <button
+                          onClick={() => deleteDateSheet(sheet.id, ex.name)}
+                          disabled={deletingSheetId === sheet.id}
+                          className="text-[11px] text-gray-400 hover:text-rose-600 disabled:opacity-50"
+                        >
+                          {deletingSheetId === sheet.id ? 'Deleting…' : 'Delete Date Sheet'}
+                        </button>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto concordia-scroll">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="border-gray-100">
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 h-8">Subject</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 h-8">Date</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 h-8">Time</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 h-8">Room</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {sheet.entries.map((e: any, i: number) => (
+                              <TableRow key={i} className="border-gray-50">
+                                <TableCell className="text-xs text-gray-900 py-1.5">{e.subject || '—'}</TableCell>
+                                <TableCell className="text-xs text-gray-600 py-1.5">{fmtDate(e.examDate)}</TableCell>
+                                <TableCell className="text-xs text-gray-600 py-1.5">{e.examTime || '—'}</TableCell>
+                                <TableCell className="text-xs text-gray-600 py-1.5">{e.roomName || '—'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  )}
+
                   {isConfirming && (
                     <div className="absolute inset-0 rounded-xl bg-white/95 backdrop-blur-sm border border-rose-200 flex flex-col items-center justify-center text-center p-5 gap-3">
                       <AlertCircle className="h-8 w-8 text-rose-500" />
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Delete this exam?</div>
-                        <div className="text-xs text-gray-500 mt-1">Date sheets and submitted marks referencing it will remain, but the exam card will be removed.</div>
+                        <div className="text-xs text-gray-500 mt-1">Date sheets and submitted marks referencing it will remain.</div>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => setConfirmDelete(null)} className="btnSecondary h-8 text-xs">Cancel</button>
+                        <button onClick={() => setConfirmDeleteExam(null)} className={cn(btnSecondary, 'h-8 text-xs')}>Cancel</button>
                         <button onClick={() => removeExam(ex.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium h-8 px-3">
                           <Trash2 className="h-3.5 w-3.5" /> Delete
                         </button>
@@ -1296,98 +1977,164 @@ function ExamsView({ user }: { user: any }) {
           </div>
         )}
       </div>
+
+      {/* Date Sheet Builder Dialog */}
+      <Sheet open={!!builderExam} onOpenChange={(o) => !o && closeBuilder()}>
+        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-gray-900 text-lg">
+              Date Sheet Builder — {builderExam?.name}
+            </SheetTitle>
+            <SheetDescription>
+              Part {part} · Add one row per subject. Saving replaces any existing date sheet for this exam + part.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6 space-y-4">
+            {builderLoading ? (
+              <SkeletonTable rows={3} />
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {/* Header row */}
+                  <div className="hidden md:grid grid-cols-[1fr_140px_120px_1fr_36px] gap-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-1">
+                    <span>Subject</span>
+                    <span>Date</span>
+                    <span>Time</span>
+                    <span>Room (optional)</span>
+                    <span></span>
+                  </div>
+                  {builderEntries.map((r, i) => (
+                    <div key={i} className="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_1fr_36px] gap-2 items-end">
+                      <Field label={i === 0 ? 'Subject' : undefined}>
+                        <Input value={r.subject} onChange={(e) => { const n = [...builderEntries]; n[i].subject = e.target.value; setBuilderEntries(n); }} className={inputCls} placeholder="Mathematics" />
+                      </Field>
+                      <Field label={i === 0 ? 'Date' : undefined}>
+                        <Input type="date" value={r.examDate} onChange={(e) => { const n = [...builderEntries]; n[i].examDate = e.target.value; setBuilderEntries(n); }} className={inputCls} />
+                      </Field>
+                      <Field label={i === 0 ? 'Time' : undefined}>
+                        <Input type="time" value={r.examTime} onChange={(e) => { const n = [...builderEntries]; n[i].examTime = e.target.value; setBuilderEntries(n); }} className={inputCls} />
+                      </Field>
+                      <Field label={i === 0 ? 'Room' : undefined}>
+                        <Input value={r.roomName} onChange={(e) => { const n = [...builderEntries]; n[i].roomName = e.target.value; setBuilderEntries(n); }} className={inputCls} placeholder="Room 101" />
+                      </Field>
+                      <button
+                        onClick={() => i > 0 && setBuilderEntries(builderEntries.filter((_, j) => j !== i))}
+                        disabled={i === 0 && builderEntries.length === 1}
+                        className="h-10 px-2 text-gray-400 hover:text-rose-600 disabled:opacity-30"
+                        aria-label="Remove row"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => setBuilderEntries([...builderEntries, { subject: '', examDate: '', examTime: '', roomName: '' }])} className={btnSecondary}>
+                    <Plus className="h-4 w-4" /> Add Row
+                  </button>
+                  <button onClick={saveDateSheet} disabled={builderSaving} className={btnPrimary}>
+                    {builderSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save Date Sheet
+                  </button>
+                  <button onClick={closeBuilder} className={cn(btnGhost, 'ml-auto')}>Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
 
+// ───────────────────────── Result Cards (department hierarchy drill-down) ─────────────────────────
+type ReportDrill = { dept: string | null; part: string; cls: { id: string; name: string; section: string } | null; section: { id: string; name: string; section: string } | null };
 
-// ───────────────────────── Result Cards ─────────────────────────
-// Three-level flow requested by the Academic Office:
-//   1. CLASS grid  — every class in the branch (FSc Med, ICS, Grade 10, …).
-//   2. TEST grid   — distinct tests (Monthly Test 1, Monthly Test 2, …) that
-//                    have at least one teacher-submitted mark for that class.
-//   3. STUDENT table — every student in the class as a ROW, with one column
-//                      per subject (teacher-submitted marks), plus a roll #,
-//                      father name, father contact, total obtained, %, grade,
-//                      and a per-row "Download Result Card" PDF button.
-//
-// Teachers enter + lock subject-wise marks in their portal (api.postResults).
-// Each `results` row = one teacher's submission for one (exam, class, course).
-// We aggregate those rows here to build the class-wide table per test.
-
-function gradeFromPct(pct: number | null | undefined): string {
-  if (pct == null || isNaN(pct)) return '—';
-  if (pct >= 90) return 'A+';
-  if (pct >= 80) return 'A';
-  if (pct >= 70) return 'B';
-  if (pct >= 60) return 'C';
-  if (pct >= 50) return 'D';
-  if (pct >= 40) return 'E';
-  return 'F';
-}
-
-function ReportCardsView({ user }: { user: any }) {
-  const [classes, setClasses] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
+function ReportCardsView({ user, classes, students, teachers, exams }: { user: any; classes: any[]; students: any[]; teachers: any[]; exams: any[] }) {
+  const [drill, setDrill] = useState<ReportDrill>({ dept: null, part: '1', cls: null, section: null });
   const [courses, setCourses] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [selectedExam, setSelectedExam] = useState<string>('');
+  const [pdfBusy, setPdfBusy] = useState<Record<string, 'download' | 'print' | undefined>>({});
 
-  // Drill-down state: null = class grid; string = open test grid for classId;
-  // { classId, exam } = open student table for that class+test.
-  const [openClassId, setOpenClassId] = useState<string | null>(null);
-  const [openExam, setOpenExam] = useState<string | null>(null);
+  // The active class id.
+  const activeClassId = drill.section?.id || drill.cls?.id || '';
+  const activeClassObj = classes.find((c) => c.id === activeClassId) || null;
 
-  // Per-row PDF generation tracking (studentId → generating).
-  const [pdfBusy, setPdfBusy] = useState<Record<string, boolean>>({});
+  // ── Classes filtered by selected dept + part
+  const classesInDept = useMemo(() => {
+    if (!drill.dept) return [];
+    return classes.filter(
+      (c) => (c.program || '').trim() === drill.dept && String(c.part || '') === drill.part,
+    );
+  }, [classes, drill.dept, drill.part]);
 
-  const load = useCallback(() => {
+  const sectionsOfClass = useMemo(() => {
+    if (!drill.cls) return [];
+    return classes.filter((c) => c.name === drill.cls!.name);
+  }, [classes, drill.cls]);
+  const hasMultipleSections = sectionsOfClass.length > 1;
+
+  // ── Load courses + results for the active class (once the user drills in).
+  useEffect(() => {
+    if (!activeClassId) { setCourses([]); setResults([]); return; }
+    let cancelled = false;
     setLoading(true);
-    const brId = user?.branchId;
     Promise.all([
-      api.getClasses(brId).catch(() => []),
-      api.platformUsers({ role: 'student', branchId: brId }).catch(() => []),
-      api.getCourses({ branchId: brId }).catch(() => []),
-      api.getResults({ branchId: brId }).catch(() => []),
-    ]).then(([c, s, co, r]) => {
-      setClasses(Array.isArray(c) ? c : []);
-      setStudents(Array.isArray(s) ? s : []);
+      api.getCourses({ classId: activeClassId }).catch(() => []),
+      api.getResults({ branchId: user?.branchId }).catch(() => []),
+    ]).then(([co, r]) => {
+      if (cancelled) return;
       setCourses(Array.isArray(co) ? co : []);
       setResults(Array.isArray(r) ? r : []);
-    }).finally(() => setLoading(false));
-  }, [user?.branchId]);
+      setLoading(false);
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeClassId, user?.branchId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Students enrolled in the active class.
+  const clsStudents = useMemo(() => {
+    if (!activeClassObj) return [];
+    return students.filter((s) => s.class === activeClassObj.name && s.section === activeClassObj.section);
+  }, [students, activeClassObj]);
 
-  // Students enrolled in a class (matched by name + section, same as ClassesView).
-  const studentsInClass = (cls: any) =>
-    students.filter((s) => s.class === cls.name && s.section === cls.section);
-
-  // Distinct exams that have at least one result row touching this class's
-  // students. Falls back to the result row's classId when set.
-  const examsForClass = (cls: any) => {
-    const clsStudents = studentsInClass(cls);
+  // Distinct exams that have at least one result row touching this class.
+  const examsForClass = useMemo(() => {
+    if (!activeClassObj) return [] as string[];
     const studentIds = new Set(clsStudents.map((s) => s.id));
-    const exams = new Set<string>();
+    const examSet = new Set<string>();
     results.forEach((r) => {
-      if (r.classId && r.classId === cls.id) { exams.add(r.exam); return; }
-      // No classId on the row → check if any record references our students.
+      if (r.classId && r.classId === activeClassObj.id) { examSet.add(r.exam); return; }
       try {
         const recs = typeof r.records === 'string' ? JSON.parse(r.records) : (r.records || []);
         if (Array.isArray(recs) && recs.some((rec: any) => studentIds.has(rec.studentId))) {
-          exams.add(r.exam);
+          examSet.add(r.exam);
         }
       } catch { /* skip */ }
     });
-    return Array.from(exams).sort();
-  };
+    // Combine with the global exams list so the dropdown is never empty even
+    // before teachers submit marks. Prefer result-derived names first.
+    const fromResults = Array.from(examSet).sort();
+    const fromExamsList = exams.map((e) => e.name).filter((n) => !examSet.has(n));
+    return [...fromResults, ...fromExamsList];
+  }, [results, clsStudents, activeClassObj, exams]);
 
-  // Build the subject-column matrix for a class + exam.
-  // Returns { subjects: [{courseId, name, total}], matrix: { studentId → { courseId → obtained } } }
-  const buildMatrix = (cls: any, exam: string) => {
-    const clsStudents = studentsInClass(cls);
+  // Default the selected exam to the most-recent (first in the list, which is
+  // already result-derived and sorted). Falls back to the first global exam.
+  useEffect(() => {
+    if (examsForClass.length === 0) {
+      if (selectedExam) setSelectedExam('');
+      return;
+    }
+    if (!examsForClass.includes(selectedExam)) {
+      setSelectedExam(examsForClass[0]);
+    }
+  }, [examsForClass, selectedExam]);
+
+  // ── Build the subject-column matrix for a class + exam (PRESERVED logic).
+  const buildMatrix = (exam: string) => {
+    if (!activeClassObj) return { subjects: [], matrix: {}, clsStudents: [] };
     const studentIds = new Set(clsStudents.map((s) => s.id));
-    // Course order = the order courses appear in results (stable).
     const subjOrder: string[] = [];
     const subjMap: Record<string, { courseId: string; name: string; total: number }> = {};
     const matrix: Record<string, Record<string, number | null>> = {};
@@ -1395,9 +2142,8 @@ function ReportCardsView({ user }: { user: any }) {
 
     results.forEach((r) => {
       if (r.exam !== exam) return;
-      // Only include rows that touch this class.
       let touches = false;
-      if (r.classId && r.classId === cls.id) touches = true;
+      if (r.classId && r.classId === activeClassObj.id) touches = true;
       if (!touches) {
         try {
           const recs = typeof r.records === 'string' ? JSON.parse(r.records) : (r.records || []);
@@ -1413,7 +2159,6 @@ function ReportCardsView({ user }: { user: any }) {
         subjMap[courseId] = { courseId, name: courseName, total };
         subjOrder.push(courseId);
       } else {
-        // Keep the max total seen (defensive).
         subjMap[courseId].total = Math.max(subjMap[courseId].total, total);
       }
       try {
@@ -1422,8 +2167,6 @@ function ReportCardsView({ user }: { user: any }) {
           if (studentIds.has(rec.studentId)) {
             const prev = matrix[rec.studentId][courseId];
             const val = rec.marks != null ? Number(rec.marks) : null;
-            // If multiple teachers submitted for the same subject, keep the
-            // latest non-null value (last write wins).
             if (prev == null || val != null) matrix[rec.studentId][courseId] = val;
           }
         });
@@ -1450,24 +2193,26 @@ function ReportCardsView({ user }: { user: any }) {
     return { obtained, total, entered, pct, grade: gradeFromPct(pct) };
   };
 
-  // ─── Per-row PDF download ───
-  const downloadPdf = async (cls: any, exam: string, student: any) => {
-    setPdfBusy((m) => ({ ...m, [student.id]: true }));
+  // ── Per-row PDF download + print. Both call buildReportCard; download uses
+  // savePdf, print uses printPdf (opens in a new tab + triggers the print
+  // dialog).
+  const generatePdf = async (student: any, mode: 'download' | 'print') => {
+    if (!activeClassObj || !selectedExam) return;
+    setPdfBusy((m) => ({ ...m, [student.id]: mode }));
     try {
-      const { buildReportCard, savePdf, gradeFromPct } = await import('@/lib/pdf-utils');
-      const { subjects, matrix } = buildMatrix(cls, exam);
+      const { subjects, matrix } = buildMatrix(selectedExam);
       const row = matrix[student.id] || {};
       const { obtained, total, pct, grade } = computeTotals(subjects, row);
       const doc = await buildReportCard({
         instituteName: user?.instituteName || 'Concordia College',
         branchName: user?.branchName || 'Main Campus',
         docTitle: 'Result Card',
-        docSubtitle: exam,
+        docSubtitle: selectedExam,
         studentName: student.name,
         rollNo: student.rollNo || '—',
-        className: cls.name,
-        section: cls.section,
-        term: exam,
+        className: activeClassObj.name,
+        section: activeClassObj.section,
+        term: selectedExam,
         fatherName: student.fatherName || student.guardian || '—',
         fatherContact: student.guardianPhone || student.fatherContact || '—',
         totalMarks: total,
@@ -1482,51 +2227,117 @@ function ReportCardsView({ user }: { user: any }) {
         remarks: pct == null ? 'Awaiting marks' : (pct >= 40 ? 'Promoted' : 'Needs improvement'),
       });
       const safeRoll = (student.rollNo || student.id || 'student').replace(/[^a-z0-9-]/gi, '-');
-      savePdf(doc, `ResultCard-${safeRoll}-${exam.replace(/\s+/g, '_')}.pdf`);
-      toast({ title: 'Result card downloaded', description: `${student.name} · ${exam}` });
+      const fileName = `ResultCard-${safeRoll}-${selectedExam.replace(/\s+/g, '_')}.pdf`;
+      if (mode === 'download') {
+        savePdf(doc, fileName);
+        toast({ title: 'Result card downloaded', description: `${student.name} · ${selectedExam}` });
+      } else {
+        printPdf(doc);
+        toast({ title: 'Opening print preview…', description: `${student.name} · ${selectedExam}` });
+      }
     } catch (e: any) {
       toast({ title: 'Could not generate PDF', description: e?.message || 'Please try again.', variant: 'destructive' });
     } finally {
-      setPdfBusy((m) => ({ ...m, [student.id]: false }));
+      setPdfBusy((m) => ({ ...m, [student.id]: undefined }));
     }
   };
 
-  const openClass = openClassId ? classes.find((c) => c.id === openClassId) : null;
-  const headerAccent = 'h-0.5 w-8 bg-[#F26522] mb-3';
+  const handleSelectDept = (dept: string) =>
+    setDrill({ dept, part: '1', cls: null, section: null });
+  const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
+    const secs = classes.filter((c) => c.name === cls.name);
+    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
+    else setDrill({ ...drill, cls, section: cls });
+  };
+  const handleSelectSection = (section: { id: string; name: string; section: string }) =>
+    setDrill({ ...drill, section });
+  const handleClearHierarchy = () =>
+    setDrill({ dept: null, part: '1', cls: null, section: null });
 
-  // ─── Loading / empty shell ───
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="Result Cards" subtitle="Class-wise test results, aggregated from every teacher's locked marks." />
-        <div className="rounded-xl border border-gray-200 bg-white p-5"><SkeletonTable rows={4} /></div>
-      </div>
+  // ── Render
+  let body: React.ReactNode;
+  if (!drill.dept) {
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Select a Department</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Browse the 6 Concordia departments to drill into their class result cards.</p>
+        </div>
+        <DeptCardGrid onSelect={handleSelectDept} />
+      </motion.div>
     );
-  }
+  } else if (!drill.cls) {
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <HierarchyBreadcrumb dept={drill.dept} part={drill.part} onClear={handleClearHierarchy} />
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Pick Part 1 (1st year) or Part 2 (2nd year), then select a class.</p>
+          </div>
+          <PartToggle value={drill.part} onChange={(p) => setDrill((d) => ({ ...d, part: p, cls: null, section: null }))} />
+        </div>
+        {classesInDept.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
+            <Award className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+            <p className="text-sm font-medium text-gray-900">No classes found for {drill.dept} · Part {drill.part}</p>
+            <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">Create classes with this department + part from the Classes &amp; Teachers page.</p>
+          </div>
+        ) : (
+          <ClassCardGrid classes={classesInDept} onSelect={handleSelectClass} />
+        )}
+      </motion.div>
+    );
+  } else if (hasMultipleSections && !drill.section) {
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <HierarchyBreadcrumb dept={drill.dept} part={drill.part} cls={drill.cls.name} onClear={handleClearHierarchy} />
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">{drill.cls.name} — Select Section</h2>
+            <p className="text-xs text-gray-500 mt-0.5">This class has multiple sections. Pick one to view its student results.</p>
+          </div>
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50" onClick={() => setDrill((d) => ({ ...d, cls: null, section: null }))}>
+            <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to classes
+          </Button>
+        </div>
+        <SectionCardGrid sections={sectionsOfClass} onSelect={handleSelectSection} />
+      </motion.div>
+    );
+  } else {
+    // Student results table for the selected class + section + exam
+    const { subjects, matrix } = selectedExam ? buildMatrix(selectedExam) : { subjects: [], matrix: {} };
+    body = (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+        <HierarchyBreadcrumb dept={drill.dept} part={drill.part} cls={drill.cls.name} section={drill.section?.section} onClear={handleClearHierarchy} />
 
-  // ─── LEVEL 3: student table for (class, exam) ───
-  if (openClass && openExam) {
-    const { subjects, matrix, clsStudents } = buildMatrix(openClass, openExam);
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title={`${openClass.name} — ${openExam}`}
-          subtitle={`Section ${openClass.section} · ${clsStudents.length} student${clsStudents.length === 1 ? '' : 's'} · ${subjects.length} subject${subjects.length === 1 ? '' : 's'}`}
-          action={
-            <button onClick={() => setOpenExam(null)} className={btnGhost}>
-              <ChevronRight className="h-4 w-4 rotate-180" /> Back to tests
-            </button>
-          }
-        />
-        <div className="rounded-xl border border-gray-200 bg-white p-0 overflow-hidden">
-          {clsStudents.length === 0 ? (
-            <div className="p-6">
-              <EmptyState icon={Award} title="No students in this class" desc="Enroll students first to generate result cards." />
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">{activeClassObj?.name} — Section {activeClassObj?.section}</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {clsStudents.length} student{clsStudents.length === 1 ? '' : 's'} · {subjects.length} subject{subjects.length === 1 ? '' : 's'}
+                {selectedExam ? ` · ${selectedExam}` : ''}
+              </p>
             </div>
+            <Field label="Exam">
+              <Select value={selectedExam} onValueChange={setSelectedExam}>
+                <SelectTrigger className={cn(inputCls, 'w-64')}><SelectValue placeholder="Select exam…" /></SelectTrigger>
+                <SelectContent>
+                  {examsForClass.map((ex) => <SelectItem key={ex} value={ex}>{ex}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+
+          {loading ? (
+            <SkeletonTable rows={4} />
+          ) : clsStudents.length === 0 ? (
+            <EmptyState icon={GraduationCap} title="No students in this class" desc="Enroll students first to generate result cards." />
+          ) : !selectedExam ? (
+            <EmptyState icon={Award} title="No exam selected" desc="Pick an exam from the dropdown above to view results." />
           ) : subjects.length === 0 ? (
-            <div className="p-6">
-              <EmptyState icon={Award} title="No marks submitted yet" desc="Once teachers lock their subject marks for this test, the class-wise result table will appear here." />
-            </div>
+            <EmptyState icon={Award} title="No marks submitted yet" desc="Once teachers lock their subject marks for this exam, the class-wise result table will appear here." />
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -1545,14 +2356,14 @@ function ReportCardsView({ user }: { user: any }) {
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 text-center whitespace-nowrap">Total</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 text-center whitespace-nowrap">%</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 text-center whitespace-nowrap">Grade</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 text-right whitespace-nowrap">Result Card</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 text-right whitespace-nowrap">Download Report</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {clsStudents.map((s) => {
                     const row = matrix[s.id] || {};
                     const { obtained, total, pct, grade } = computeTotals(subjects, row);
-                    const busy = !!pdfBusy[s.id];
+                    const busy = pdfBusy[s.id];
                     return (
                       <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
                         <TableCell className="text-xs text-gray-700 font-mono whitespace-nowrap">{s.rollNo || '—'}</TableCell>
@@ -1572,22 +2383,32 @@ function ReportCardsView({ user }: { user: any }) {
                           {pct == null ? <span className="text-gray-300">—</span> : <span className={pct < 40 ? 'text-red-600' : pct >= 80 ? 'text-emerald-600' : 'text-gray-900'}>{pct}%</span>}
                         </TableCell>
                         <TableCell className="text-center whitespace-nowrap">
-                          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${
+                          <span className={cn('inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium',
                             grade === 'F' ? 'bg-red-50 text-red-700 border-red-100'
                             : grade === '—' ? 'bg-gray-50 text-gray-500 border-gray-200'
                             : grade.startsWith('A') ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                            : 'bg-amber-50 text-amber-700 border-amber-100'
-                          }`}>{grade}</span>
+                            : 'bg-amber-50 text-amber-700 border-amber-100',
+                          )}>{grade}</span>
                         </TableCell>
                         <TableCell className="text-right whitespace-nowrap">
-                          <button
-                            onClick={() => downloadPdf(openClass, openExam!, s)}
-                            disabled={busy}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          >
-                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                            {busy ? 'Generating…' : 'Download'}
-                          </button>
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              onClick={() => generatePdf(s, 'download')}
+                              disabled={!!busy}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {busy === 'download' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                              PDF
+                            </button>
+                            <button
+                              onClick={() => generatePdf(s, 'print')}
+                              disabled={!!busy}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {busy === 'print' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                              Print
+                            </button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -1596,817 +2417,89 @@ function ReportCardsView({ user }: { user: any }) {
               </Table>
             </div>
           )}
+          <p className="text-xs text-gray-400 mt-3">
+            Marks shown per subject are entered and locked by each subject&apos;s teacher from their portal. A dash (—) means marks haven&apos;t been submitted yet for that student.
+          </p>
         </div>
-        <p className="text-xs text-gray-400">
-          Marks shown per subject are entered and locked by each subject's teacher from their portal. A dash (—) means marks haven't been submitted yet for that student.
-        </p>
-      </div>
+      </motion.div>
     );
   }
 
-  // ─── LEVEL 2: test grid for a class ───
-  if (openClass) {
-    const exams = examsForClass(openClass);
-    const clsStudents = studentsInClass(openClass);
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title={`${openClass.name} — Section ${openClass.section}`}
-          subtitle={`${clsStudents.length} student${clsStudents.length === 1 ? '' : 's'} · ${exams.length} test${exams.length === 1 ? '' : 's'} with submitted marks`}
-          action={
-            <button onClick={() => setOpenClassId(null)} className={btnGhost}>
-              <ChevronRight className="h-4 w-4 rotate-180" /> Back to classes
-            </button>
-          }
-        />
-        {exams.length === 0 ? (
-          <div className="rounded-xl border border-gray-200 bg-white p-6">
-            <EmptyState icon={FileText} title="No tests submitted yet" desc="When teachers lock their subject marks for a test, the test card will appear here for you to open and review class-wise." />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {exams.map((exam) => {
-              const { subjects, matrix } = buildMatrix(openClass, exam);
-              const entered = clsStudents.filter((s) => Object.keys(matrix[s.id] || {}).length > 0).length;
-              const avgPct = (() => {
-                const pcts = clsStudents.map((s) => computeTotals(subjects, matrix[s.id] || {}).pct).filter((p): p is number => p != null);
-                return pcts.length > 0 ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
-              })();
-              return (
-                <button
-                  key={exam}
-                  onClick={() => setOpenExam(exam)}
-                  className="group text-left rounded-xl border border-gray-200 bg-white p-5 hover:border-[#F26522]/40 hover:shadow-sm transition-all"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#F26522]/10 text-[#F26522]">
-                        <FileText className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">{exam}</div>
-                        <div className="text-xs text-gray-500">{subjects.length} subject{subjects.length === 1 ? '' : 's'} · {entered}/{clsStudents.length} students</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-[#F26522] transition-colors" />
-                  </div>
-                  <div className="flex items-center justify-between border-t border-gray-100 pt-3">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Class Average</span>
-                    <span className={`text-lg font-bold tabular-nums ${avgPct == null ? 'text-gray-300' : avgPct < 40 ? 'text-red-600' : avgPct >= 80 ? 'text-emerald-600' : 'text-gray-900'}`}>
-                      {avgPct == null ? '—' : `${avgPct}%`}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ─── LEVEL 1: class grid (default) ───
   return (
     <div className="space-y-6">
       <PageHeader
         title="Result Cards"
-        subtitle="Open a class to view test-wise results. Each teacher locks their subject's marks; the academic office reviews the class-wise table and downloads result cards."
+        subtitle="Drill into a department → part → class → section to view aggregated marks and download / print result cards."
       />
-      {classes.length === 0 ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-6">
-          <EmptyState icon={Award} title="No classes yet" desc="Create classes first — results are organised class-wise." />
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {classes.map((cls) => {
-            const clsStudents = studentsInClass(cls);
-            const exams = examsForClass(cls);
-            return (
-              <button
-                key={cls.id}
-                onClick={() => setOpenClassId(cls.id)}
-                className="group text-left rounded-xl border border-gray-200 bg-white p-5 hover:border-[#F26522]/40 hover:shadow-sm transition-all"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#F26522]/10 text-[#F26522] shrink-0">
-                      <BookOpen className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-gray-900 truncate">{cls.name}</div>
-                      <div className="text-xs text-gray-500">Section {cls.section}</div>
-                    </div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-[#F26522] transition-colors shrink-0" />
-                </div>
-                <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-3">
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Students</div>
-                    <div className="text-lg font-bold text-gray-900 tabular-nums">{clsStudents.length}</div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Tests</div>
-                    <div className="text-lg font-bold text-gray-900 tabular-nums">{exams.length}</div>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {body}
     </div>
   );
 }
 
-
-// ───────────────────────── Classes View ─────────────────────────
-type ClassRow = { id: string; name: string; section: string; branchId?: string } & Record<string, any>;
-type BulkProgress = { current: number; total: number } | null;
-
-// Parse a teacher's `classes` JSON field (string OR array) into a string[].
-function parseTeacherField(raw: any): string[] {
-  try {
-    if (!raw) return [];
-    const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [];
-  } catch { return []; }
-}
-
-function ClassesView({ user }: { user: any }) {
-  const [classes, setClasses] = useState<ClassRow[]>([]);
+// ───────────────────────── Main router ─────────────────────────
+export function AcademicPortal({ activeModule, user }: Props) {
+  // ── Shared data — loaded in parallel so the hierarchy-driven views
+  // (Timetable, Result Cards) have classes + students + teachers ready.
+  const [classes, setClasses] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [teachers, setTeachers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [exams, setExams] = useState<any[]>([]);
+  const [sharedLoading, setSharedLoading] = useState(true);
 
-  const [showForm, setShowForm] = useState(false);
-  const [mode, setMode] = useState<'single' | 'bulk'>('single');
-  const [name, setName] = useState('');
-  const [section, setSection] = useState('A');
-  const [capacity, setCapacity] = useState('');
-  const [bulkSections, setBulkSections] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState<BulkProgress>(null);
-
-  // Frontend-only capacity map (keyed by class id). Backend schema doesn't
-  // store capacity yet — values live in component state and reset on reload.
-  const [capacityMap, setCapacityMap] = useState<Record<string, number>>({});
-
-  // Debounced search (200ms) — filters by class name OR section.
-  const [searchInput, setSearchInput] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
   useEffect(() => {
-    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 200);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  // Detail sheet state
-  const [detailClass, setDetailClass] = useState<ClassRow | null>(null);
-  const [showAllStudents, setShowAllStudents] = useState(false);
-
-  // Class deletion confirmation dialog state. We use a proper in-app
-  // AlertDialog ("Are you sure?") instead of the browser's native confirm().
-  // deleteTarget holds the class row the user is confirming deletion of.
-  const [deleteTarget, setDeleteTarget] = useState<ClassRow | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  // Teacher-assignment state for the class detail sheet
-  const [assignTeacherId, setAssignTeacherId] = useState('');
-  const [assignSaving, setAssignSaving] = useState(false);
-  const [removingTeacherId, setRemovingTeacherId] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
+    let cancelled = false;
     Promise.all([
       api.getClasses(user?.branchId).catch(() => []),
       api.platformUsers({ role: 'student', branchId: user?.branchId }).catch(() => []),
       api.platformUsers({ role: 'teacher', branchId: user?.branchId }).catch(() => []),
-    ]).then(([c, s, t]) => {
+      api.getExams({ branchId: user?.branchId }).catch(() => []),
+    ]).then(([c, s, t, e]) => {
+      if (cancelled) return;
       setClasses(Array.isArray(c) ? c : []);
       setStudents(Array.isArray(s) ? s : []);
       setTeachers(Array.isArray(t) ? t : []);
-    }).finally(() => setLoading(false));
+      setExams(Array.isArray(e) ? e : []);
+      setSharedLoading(false);
+    });
+    return () => { cancelled = true; };
   }, [user?.branchId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Backward-compat: academic-tests and academic-datesheet both route to the
+  // merged "Exams & Date Sheets" page.
+  const effectiveModule =
+    activeModule === 'academic-tests' || activeModule === 'academic-datesheet'
+      ? 'academic-exams'
+      : activeModule;
 
-  const studentCount = (cls: ClassRow) =>
-    students.filter((s) => s.class === cls.name && s.section === cls.section).length;
-
-  const enrolledStudents = (cls: ClassRow) =>
-    students.filter((s) => s.class === cls.name && s.section === cls.section);
-
-  // Teachers whose `classes` array includes this class's name (or the
-  // combined "Name-Section" / "Name Section" forms used by the Assign view).
-  const classTeachers = (cls: ClassRow) => teachers.filter((t) => {
-    const arr = parseTeacherField(t.classes);
-    if (arr.length === 0) return false;
-    const combinedDash = `${cls.name}-${cls.section}`;
-    const combinedSpace = `${cls.name} ${cls.section}`;
-    return arr.some((c) => c === cls.name || c === combinedDash || c === combinedSpace);
-  });
-
-  // Assign the currently-selected teacher (in the detail Sheet dropdown) to
-  // detailClass by appending the combined "Name-Section" form to their
-  // `classes` JSON array. Then reload + toast + reset.
-  const assignTeacher = async () => {
-    if (!detailClass) return;
-    if (!assignTeacherId) { toast({ title: 'Pick a teacher to assign', variant: 'destructive' }); return; }
-    const teacher = teachers.find((t) => t.id === assignTeacherId);
-    if (!teacher) return;
-    const current = parseTeacherField(teacher.classes);
-    const combinedDash = `${detailClass.name}-${detailClass.section}`;
-    const combinedSpace = `${detailClass.name} ${detailClass.section}`;
-    // De-dup against any existing form (name only, dashed, or spaced).
-    if (current.some((c) => c === detailClass.name || c === combinedDash || c === combinedSpace)) {
-      toast({ title: 'Teacher is already assigned to this class', variant: 'destructive' });
-      return;
-    }
-    const next = [...current, combinedDash];
-    setAssignSaving(true);
-    try {
-      await api.editUser(teacher.id, { classes: next });
-      toast({
-        title: 'Teacher assigned',
-        description: `${teacher.name} now teaches ${detailClass.name} — Section ${detailClass.section}`,
-      });
-      setAssignTeacherId('');
-      load();
-    } catch (e: any) {
-      toast({ title: 'Failed to assign teacher', description: e?.message || 'Please try again', variant: 'destructive' });
-    } finally {
-      setAssignSaving(false);
-    }
-  };
-
-  // Unassign a teacher from detailClass by removing every matching form of
-  // the class identifier from their `classes` array.
-  const removeTeacher = async (teacher: any) => {
-    if (!detailClass || !teacher?.id) return;
-    if (!confirm(`Remove ${teacher.name} from ${detailClass.name} — Section ${detailClass.section}?`)) return;
-    const current = parseTeacherField(teacher.classes);
-    const combinedDash = `${detailClass.name}-${detailClass.section}`;
-    const combinedSpace = `${detailClass.name} ${detailClass.section}`;
-    const next = current.filter((c) => c !== detailClass.name && c !== combinedDash && c !== combinedSpace);
-    setRemovingTeacherId(teacher.id);
-    try {
-      await api.editUser(teacher.id, { classes: next });
-      toast({
-        title: 'Teacher removed',
-        description: `${teacher.name} unassigned from ${detailClass.name} — Section ${detailClass.section}`,
-      });
-      load();
-    } catch (e: any) {
-      toast({ title: 'Failed to remove teacher', description: e?.message || 'Please try again', variant: 'destructive' });
-    } finally {
-      setRemovingTeacherId(null);
-    }
-  };
-
-  // Single-section submit (with optional capacity).
-  const submit = async () => {
-    if (!name.trim()) { toast({ title: 'Class name is required', variant: 'destructive' }); return; }
-    setSaving(true);
-    try {
-      const created = await api.createClass(name.trim(), section.trim() || 'A', user?.branchId);
-      const capNum = parseInt(capacity, 10);
-      if (created?.id && !Number.isNaN(capNum) && capNum > 0) {
-        setCapacityMap((prev) => ({ ...prev, [created.id as string]: capNum }));
-      }
-      toast({ title: 'Class created', description: `${name.trim()} — Section ${section.trim() || 'A'}` });
-      setName(''); setSection('A'); setCapacity(''); setShowForm(false);
-      load();
-    } catch (e: any) {
-      toast({ title: 'Failed to create class', description: e?.message || 'Please try again', variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Bulk-section submit — calls api.createClass for each section in sequence,
-  // continues past failures, reports failures at the end via toast.
-  const bulkList = Array.from(new Set(
-    bulkSections.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean),
-  ));
-  const submitBulk = async () => {
-    if (!name.trim()) { toast({ title: 'Class name is required', variant: 'destructive' }); return; }
-    if (bulkList.length === 0) { toast({ title: 'Enter at least one section', variant: 'destructive' }); return; }
-    setSaving(true);
-    setBulkProgress({ current: 0, total: bulkList.length });
-    const failures: string[] = [];
-    const successes: string[] = [];
-    for (let i = 0; i < bulkList.length; i++) {
-      const sec = bulkList[i];
-      setBulkProgress({ current: i + 1, total: bulkList.length });
-      try {
-        await api.createClass(name.trim(), sec, user?.branchId);
-        successes.push(sec);
-      } catch (e: any) {
-        failures.push(`${sec} (${e?.message || 'failed'})`);
-      }
-    }
-    setBulkProgress(null);
-    setSaving(false);
-    if (successes.length > 0) {
-      toast({
-        title: `${successes.length} section(s) created`,
-        description: `${name.trim()} — ${successes.join(', ')}`,
-      });
-    }
-    if (failures.length > 0) {
-      toast({
-        title: `${failures.length} section(s) failed`,
-        description: failures.join('; '),
-        variant: 'destructive',
-      });
-    }
-    if (successes.length > 0) {
-      setName(''); setBulkSections(''); setShowForm(false);
-      load();
-    }
-  };
-
-  // Open the "Are you sure?" confirmation dialog for a class.
-  const requestDelete = (cls: ClassRow) => {
-    setDeleteTarget(cls);
-  };
-
-  // Actually delete the class after the user confirms. The backend now
-  // ALWAYS allows deletion and cascades cleanup of timetable, attendance,
-  // results, teacher assignments, and unlinks students — so this never
-  // throws a "cannot delete" error. Any other failure is surfaced as a toast.
-  const confirmDeleteClass = async () => {
-    const cls = deleteTarget;
-    if (!cls) return;
-    setDeleting(true);
-    try {
-      await api.deleteClassSection(cls.id);
-      toast({ title: 'Class deleted', description: `${cls.name} — Section ${cls.section} has been removed.` });
-      setCapacityMap((prev) => { const next = { ...prev }; delete next[cls.id]; return next; });
-      if (detailClass?.id === cls.id) setDetailClass(null);
-      setDeleteTarget(null);
-      load();
-    } catch (e: any) {
-      toast({ title: 'Could not delete class', description: e?.message || 'Please try again.', variant: 'destructive' });
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const filteredClasses = classes.filter((c) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (c.name || '').toLowerCase().includes(q) || (c.section || '').toLowerCase().includes(q);
-  });
-
-  const totalSections = classes.length;
-  const uniqueNames = new Set(classes.map((c) => c.name)).size;
-  const capNum = capacity !== '' ? parseInt(capacity, 10) : NaN;
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Classes"
-        subtitle="Create and manage class sections for this campus."
-        action={
-          <button onClick={() => setShowForm((s) => !s)} className={btnPrimary}>
-            <Plus className="h-4 w-4" /> {showForm ? 'Cancel' : 'Add Class'}
-          </button>
-        }
-      />
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard icon={BookOpen} label="Total Sections" value={totalSections} sub={`${uniqueNames} unique class name(s)`} />
-        <StatCard icon={GraduationCap} label="Total Students" value={students.length} sub="Across all classes" />
-        <StatCard icon={Users} label="Avg per Section" value={totalSections > 0 ? Math.round(students.length / totalSections) : 0} sub="Students per section" />
+  let content: React.ReactNode;
+  if (effectiveModule === 'academic-overview') {
+    content = <AcademicOverview user={user} />;
+  } else if (effectiveModule === 'academic-announcements') {
+    content = <AnnouncementsView user={user} />;
+  } else if (effectiveModule === 'academic-classes') {
+    content = <ClassesAndTeachersView user={user} />;
+  } else if (effectiveModule === 'timetable') {
+    content = sharedLoading ? (
+      <div className="space-y-6">
+        <PageHeader title="Timetable" subtitle="Drill into a department → part → class → section to build its weekly timetable." />
+        <div className="rounded-xl border border-gray-200 bg-white p-5"><SkeletonTable rows={4} /></div>
       </div>
-
-      {showForm && (
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <SectionHeader title="New Class" desc="Create a class section. Students will be assigned during enrollment." />
-          <Tabs value={mode} onValueChange={(v) => setMode(v as 'single' | 'bulk')}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="single">Single Section</TabsTrigger>
-              <TabsTrigger value="bulk">Bulk Sections</TabsTrigger>
-            </TabsList>
-
-            {/* SINGLE MODE */}
-            <TabsContent value="single">
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px_auto] gap-3 items-end">
-                <Field label="Class Name" required>
-                  <Input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Grade 10, Class 9, Prep" />
-                </Field>
-                <Field label="Section">
-                  <Input value={section} onChange={(e) => setSection(e.target.value)} className={inputCls} placeholder="A" maxLength={3} />
-                </Field>
-                <Field label="Capacity (optional)">
-                  <Input type="number" min={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} className={inputCls} placeholder="Unlimited" />
-                </Field>
-                <button onClick={submit} disabled={saving} className={btnPrimary + ' h-10'}>
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  Create Class
-                </button>
-              </div>
-              {!Number.isNaN(capNum) && capNum > 0 ? (
-                <p className="text-[11px] text-gray-500 mt-2 flex items-center gap-1">
-                  <Check className="h-3 w-3 text-emerald-600" /> Capacity saved locally (frontend only — not persisted to backend yet).
-                </p>
-              ) : (
-                <p className="text-[11px] text-gray-500 mt-2">Sections are auto-uppercased. Duplicate name+section combinations are rejected.</p>
-              )}
-            </TabsContent>
-
-            {/* BULK MODE */}
-            <TabsContent value="bulk">
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-                <Field label="Class Name" required>
-                  <Input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Grade 10" />
-                </Field>
-                <Field label="Sections (comma-separated)" required>
-                  <Input value={bulkSections} onChange={(e) => setBulkSections(e.target.value)} className={inputCls} placeholder="A, B, C, D" />
-                </Field>
-                <button onClick={submitBulk} disabled={saving || !!bulkProgress} className={btnPrimary + ' h-10'}>
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  Create{bulkList.length > 0 ? ` ${bulkList.length}` : ''} Sections
-                </button>
-              </div>
-              {bulkProgress && (
-                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <div className="flex items-center gap-2 text-xs text-gray-700">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[#F26522]" />
-                    <span>Creating {bulkProgress.current} of {bulkProgress.total}…</span>
-                  </div>
-                  <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
-                    <div
-                      className="h-full bg-[#F26522] transition-all"
-                      style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              <p className="text-[11px] text-gray-500 mt-2">
-                Each section is created in sequence. Duplicates (same name+section) are skipped and reported at the end.
-              </p>
-            </TabsContent>
-          </Tabs>
-        </div>
-      )}
-
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <SectionHeader title="All Classes" desc={`${totalSections} section(s) in this campus`} />
-        {/* Debounced search bar */}
-        <div className="relative mb-4 w-full sm:max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by class name or section…"
-            className={cn(inputCls, 'pl-9 h-9')}
-          />
-        </div>
-        {loading ? (
-          <SkeletonTable rows={4} />
-        ) : classes.length === 0 ? (
-          <EmptyState
-            icon={BookOpen}
-            title="No classes yet"
-            desc="Create your first class section using the 'Add Class' button above. The Admission Office needs at least one class to enroll students."
-            action={
-              <button onClick={() => setShowForm(true)} className={btnPrimary}>
-                <Plus className="h-4 w-4" /> Create First Class
-              </button>
-            }
-          />
-        ) : filteredClasses.length === 0 ? (
-          <EmptyState
-            icon={Search}
-            title="No matches"
-            desc={`No classes match "${searchQuery}". Try a different name or section.`}
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Class Name</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Section</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">Students</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredClasses.map((c) => {
-                  const count = studentCount(c);
-                  const cap = capacityMap[c.id];
-                  const pct = cap && cap > 0 ? Math.min(100, Math.round((count / cap) * 100)) : 0;
-                  const full = !!cap && count >= cap;
-                  return (
-                    <TableRow key={c.id} className="border-gray-100 hover:bg-gray-50">
-                      <TableCell className="text-sm font-medium text-gray-900">{c.name}</TableCell>
-                      <TableCell className="text-sm text-gray-700">{c.section}</TableCell>
-                      <TableCell className="text-sm text-gray-700 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                          <div className="inline-flex items-center gap-1.5">
-                            {count > 0 ? (
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-label="Has students" />
-                            ) : (
-                              <span className="inline-flex items-center rounded-md border border-gray-200 bg-gray-100 text-gray-500 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">Empty</span>
-                            )}
-                            <span className="tabular-nums">
-                              {count}{cap ? ` / ${cap}` : ''}
-                            </span>
-                          </div>
-                          {cap && cap > 0 && (
-                            <div className="h-1 w-20 rounded-full bg-gray-200 overflow-hidden">
-                              <div
-                                className={cn('h-full transition-all', full ? 'bg-rose-500' : 'bg-[#F26522]')}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => { setDetailClass(c); setShowAllStudents(false); setAssignTeacherId(''); }}
-                            className="h-8 px-2 text-xs text-gray-600 hover:text-[#F26522] hover:bg-orange-50 rounded inline-flex items-center gap-1"
-                          >
-                            <Eye className="h-3.5 w-3.5" /> View
-                          </button>
-                          <button
-                            onClick={() => requestDelete(c)}
-                            className="h-8 px-2 text-xs text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded inline-flex items-center gap-1"
-                          >
-                            <AlertCircle className="h-3.5 w-3.5" /> Delete
-                          </button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+    ) : (
+      <TimetableView user={user} classes={classes} teachers={teachers} />
+    );
+  } else if (effectiveModule === 'academic-exams') {
+    content = <ExamsAndDateSheetsView user={user} />;
+  } else if (effectiveModule === 'report-cards') {
+    content = sharedLoading ? (
+      <div className="space-y-6">
+        <PageHeader title="Result Cards" subtitle="Drill into a department → part → class → section to view aggregated marks and download / print result cards." />
+        <div className="rounded-xl border border-gray-200 bg-white p-5"><SkeletonTable rows={4} /></div>
       </div>
-
-      {/* Class detail sheet */}
-      <Sheet open={!!detailClass} onOpenChange={(o) => !o && setDetailClass(null)}>
-        <SheetContent className="w-full sm:max-w-lg">
-          {detailClass && (() => {
-            const count = studentCount(detailClass);
-            const cap = capacityMap[detailClass.id];
-            const available = cap ? Math.max(0, cap - count) : null;
-            const enrolled = enrolledStudents(detailClass);
-            const visibleStudents = showAllStudents ? enrolled : enrolled.slice(0, 20);
-            const clsTeachers = classTeachers(detailClass);
-            const occupancyPct = cap && cap > 0 ? Math.min(100, Math.round((count / cap) * 100)) : 0;
-            return (
-              <>
-                <SheetHeader>
-                  <SheetTitle className="text-gray-900 text-lg">{detailClass.name} — Section {detailClass.section}</SheetTitle>
-                  <SheetDescription>Class details, enrolled students and assigned teachers.</SheetDescription>
-                </SheetHeader>
-
-                <div className="px-4 pb-2 space-y-5 flex-1 overflow-y-auto">
-                  {/* Stats */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Enrolled</div>
-                      <div className="text-lg font-bold text-gray-900 tabular-nums">{count}</div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Capacity</div>
-                      <div className="text-lg font-bold text-gray-900 tabular-nums">{cap ?? '—'}</div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Available</div>
-                      <div className="text-lg font-bold text-gray-900 tabular-nums">{available ?? '—'}</div>
-                    </div>
-                  </div>
-
-                  {/* Occupancy bar */}
-                  {cap && cap > 0 && (
-                    <div>
-                      <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
-                        <span>Occupancy</span>
-                        <span className="tabular-nums">{count}/{cap} ({occupancyPct}%)</span>
-                      </div>
-                      <div className="h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
-                        <div
-                          className={cn('h-full transition-all', count >= cap ? 'bg-rose-500' : 'bg-[#F26522]')}
-                          style={{ width: `${occupancyPct}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Enrolled students */}
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                      Enrolled Students ({enrolled.length})
-                    </h4>
-                    {enrolled.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center">
-                        <p className="text-xs text-gray-500">No students enrolled in this section yet.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {visibleStudents.map((s) => (
-                          <div key={s.id} className="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 hover:bg-gray-50">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate">{s.name}</div>
-                              <div className="text-[11px] text-gray-500">
-                                Roll #{s.rollNo || '—'}{s.guardian ? ` • Father: ${s.guardian}` : ''}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        {enrolled.length > 20 && (
-                          <button
-                            onClick={() => setShowAllStudents((v) => !v)}
-                            className="mt-2 w-full text-center text-xs text-[#F26522] hover:underline font-medium py-1"
-                          >
-                            {showAllStudents ? 'Show less' : `View all ${enrolled.length}`}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Subjects & Teachers */}
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                      Subjects &amp; Teachers
-                    </h4>
-                    {clsTeachers.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center">
-                        <p className="text-xs text-gray-500 mb-1">No teachers assigned to this class yet.</p>
-                        <p className="text-[11px] text-gray-400">Use the Assign Teacher control below to add one.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {clsTeachers.map((t) => {
-                          const subs = parseTeacherField(t.subjects);
-                          return (
-                            <div key={t.id} className="flex items-center justify-between gap-2 rounded-md border border-gray-100 px-3 py-2 hover:bg-gray-50">
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium text-gray-900 truncate">{t.name}</div>
-                                <div className="text-[11px] text-gray-500 mt-0.5">
-                                  {subs.length > 0 ? subs.join(', ') : 'No subjects assigned'}
-                                  {t.rollNo ? ` • ${t.rollNo}` : ''}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => removeTeacher(t)}
-                                disabled={removingTeacherId === t.id}
-                                className="shrink-0 h-7 px-2 text-[11px] font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50 border border-gray-200 rounded inline-flex items-center gap-1 disabled:opacity-60"
-                              >
-                                {removingTeacherId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserMinus className="h-3 w-3" />}
-                                Remove
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Assign new teacher */}
-                    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50/50 p-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <UserPlus className="h-3.5 w-3.5 text-[#F26522]" />
-                        <span className="text-xs font-semibold text-gray-700">Assign Teacher</span>
-                      </div>
-                      {(() => {
-                        const assignedIds = new Set(clsTeachers.map((t) => t.id));
-                        const available = teachers.filter((t) => !assignedIds.has(t.id));
-                        if (available.length === 0) {
-                          return <p className="text-[11px] text-gray-500">All teachers in this branch are already assigned to this class.</p>;
-                        }
-                        return (
-                          <div className="flex flex-col sm:flex-row gap-2">
-                            <Select value={assignTeacherId} onValueChange={setAssignTeacherId}>
-                              <SelectTrigger className={cn(inputCls, 'h-9 flex-1')}>
-                                <SelectValue placeholder="Select a teacher…" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {available.map((t) => (
-                                  <SelectItem key={t.id} value={t.id}>
-                                    {t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <button
-                              onClick={assignTeacher}
-                              disabled={!assignTeacherId || assignSaving}
-                              className={btnPrimary + ' h-9 shrink-0'}
-                            >
-                              {assignSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                              Assign
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      <p className="text-[11px] text-gray-400 mt-2">Assigned teachers will see this class in their portal.</p>
-                    </div>
-                  </div>
-                </div>
-
-                <SheetFooter>
-                  <button
-                    onClick={() => requestDelete(detailClass)}
-                    className="h-9 px-4 text-sm font-medium text-rose-600 border border-rose-200 bg-white hover:bg-rose-50 rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors w-full"
-                  >
-                    <AlertCircle className="h-4 w-4" /> Delete Class
-                  </button>
-                </SheetFooter>
-              </>
-            );
-          })()}
-        </SheetContent>
-      </Sheet>
-
-      {/* ── Delete class confirmation ──
-          Proper in-app "Are you sure?" dialog (replaces the old native
-          browser confirm()). The backend now ALWAYS allows deletion and
-          cascades cleanup, so the warning text explains what gets removed. */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!deleting) setDeleteTarget(o ? deleteTarget : null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <span className="h-8 w-8 rounded-lg bg-rose-100 grid place-items-center shrink-0">
-                <AlertCircle className="h-4 w-4 text-rose-600" />
-              </span>
-              Delete this class?
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-3 text-sm text-gray-600">
-                {deleteTarget && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center justify-between">
-                    <span className="text-gray-500">Class</span>
-                    <span className="font-semibold text-gray-900">{deleteTarget.name} — Section {deleteTarget.section}</span>
-                  </div>
-                )}
-                <p>
-                  This will permanently remove the class and clean up everything tied to it:
-                </p>
-                <ul className="space-y-1 text-xs text-gray-500 pl-1">
-                  <li className="flex items-start gap-1.5"><span className="text-rose-500 mt-0.5">•</span> Timetable entries for this class</li>
-                  <li className="flex items-start gap-1.5"><span className="text-rose-500 mt-0.5">•</span> Attendance records for this class</li>
-                  <li className="flex items-start gap-1.5"><span className="text-rose-500 mt-0.5">•</span> Test results &amp; teacher subject assignments</li>
-                  <li className="flex items-start gap-1.5"><span className="text-amber-500 mt-0.5">•</span> Students in this class are <span className="font-medium">unlinked</span> (their accounts stay — only their class placement is cleared)</li>
-                </ul>
-                <p className="flex gap-1.5 text-xs text-rose-600 font-medium pt-1">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>This action cannot be undone.</span>
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg"
-              disabled={deleting}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDeleteClass(); }}
-              disabled={deleting}
-              className="bg-rose-600 hover:bg-rose-700 text-white rounded-lg"
-            >
-              {deleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                  Deleting…
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="h-4 w-4 mr-1.5" />
-                  Yes, delete class
-                </>
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
-export function AcademicPortal({ activeModule, user }: Props) {
-  switch (activeModule) {
-    case 'academic-overview': return <AcademicOverview user={user} />;
-    case 'academic-announcements': return <AnnouncementsView user={user} />;
-    case 'academic-classes': return <ClassesView user={user} />;
-    case 'academic-teachers': return <TeachersView user={user} />;
-    case 'academic-students': return <StudentsView user={user} />;
-    case 'timetable': return <TimetableView user={user} />;
-    case 'academic-datesheet': return <DateSheetView user={user} />;
-    case 'academic-tests': return <ExamsView user={user} />;
-    case 'report-cards': return <ReportCardsView user={user} />;
-    default: return (
+    ) : (
+      <ReportCardsView user={user} classes={classes} students={students} teachers={teachers} exams={exams} />
+    );
+  } else {
+    content = (
       <div className="space-y-6">
         <PageHeader title="Coming Soon" subtitle="This module is under development." />
         <div className="rounded-xl border border-gray-200 bg-white p-5">
@@ -2415,4 +2508,20 @@ export function AcademicPortal({ activeModule, user }: Props) {
       </div>
     );
   }
+
+  return (
+    <div className="animate-in fade-in-0 duration-200">
+      {/* Local scrollbar styling — injected once for all child views. */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .concordia-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+        .concordia-scroll::-webkit-scrollbar-track { background: transparent; }
+        .concordia-scroll::-webkit-scrollbar-thumb {
+          background: rgba(0,0,0,0.15);
+          border-radius: 9999px;
+        }
+        .concordia-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+      `}} />
+      {content}
+    </div>
+  );
 }
