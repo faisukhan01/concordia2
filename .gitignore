@@ -86,3 +86,5 @@ gh-token.txt
 
 # GitHub Actions workflow (push with a token that has workflow scope)
 .github/workflows/
+build_log.txt
+*.apk

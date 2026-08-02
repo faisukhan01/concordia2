@@ -42,35 +42,35 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v1.5.0';
+const APK_VERSION = 'v2.0.0';
 const APK_UPDATED = 'August 3, 2025';
 const APK_SIZE = '~26 MB';
 
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'Complete UI Overhaul',
-    desc: 'The entire app has been redesigned from scratch to match the web portal\'s mobile preview pixel-perfectly. Every screen, every color, every detail.',
+    title: 'v2.0.0 — Login Fixed & UI Refined',
+    desc: 'Critical login bug fixed! No more raw technical errors. User-friendly error messages now match the web portal. Sign in works perfectly.',
   },
   {
     icon: Palette,
     title: 'Frosted Glass Sign-in',
-    desc: 'The sign-in page now features a stunning campus photo background with frosted glass card — exactly like the web portal. Premium feel from the first tap.',
+    desc: 'The sign-in page features a stunning campus photo background with frosted glass card — exactly like the web portal. Premium feel from the first tap.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Proper App Icon',
+    desc: 'The Concordia C4 monogram icon now displays correctly on all Android devices with adaptive icon support for modern launchers.',
   },
   {
     icon: Layers,
     title: 'Sidebar Navigation',
-    desc: 'New slide-in sidebar with brand header, grouped navigation, and smooth animations — matching the web portal\'s sidebar pattern exactly.',
+    desc: 'Slide-in sidebar with brand header, grouped navigation, and smooth animations — matching the web portal\'s sidebar pattern exactly.',
   },
   {
     icon: BarChart3,
     title: 'Dashboard Analytics',
-    desc: 'Every portal now has a dashboard with KPI stat cards, gradient heroes, bar charts, donut charts, and quick actions — all matching the web.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Web-Matched Design System',
-    desc: 'Colors, radii, shadows, typography — every design token has been calibrated to match the web portal\'s mobile preview 99.99%.',
+    desc: 'Every portal has a dashboard with KPI stat cards, gradient heroes, bar charts, donut charts, and quick actions — all matching the web.',
   },
   {
     icon: Zap,
