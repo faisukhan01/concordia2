@@ -15,7 +15,7 @@ import 'additional_modules.dart';
 // ── Per-portal tab enums (shared across nav + portal files) ──
 enum AdminTab { dashboard, students, fees, academic, announcements }
 enum AdmissionsTab { dashboard, newEnrollment, records }
-enum AccountantTab { dashboard, students, fees, misc, logins }
+enum AccountantTab { dashboard, fees, misc, logins }
 enum AcademicTab { dashboard, classes, timetable, exams, results }
 enum TeacherTab { dashboard, classes, attendance, results, announcements }
 enum StudentTab { dashboard, fees, results, attendance, timetable }
@@ -164,9 +164,6 @@ class NavItems {
       shortLabel: 'Admissions',
       icon: Icons.person_add_outlined,
       activeIcon: Icons.person_add,
-      // Admin opens Admissions at its first WORKING module (New Enrollment),
-      // never at the Admissions dashboard — that belongs to the Admissions
-      // role only. Mirrors the web admin sidebar.
       builder: (_) => const AdmissionsPortal(
           initialTab: AdmissionsTab.newEnrollment),
     ),
@@ -176,10 +173,10 @@ class NavItems {
       shortLabel: 'Accountant',
       icon: Icons.account_balance_wallet_outlined,
       activeIcon: Icons.account_balance_wallet,
-      // Admin opens Accountant at its first WORKING module (Students),
+      // Admin opens Accountant at its first WORKING module (Fees),
       // never at the Accountant dashboard.
       builder: (_) => const AccountantPortal(
-          initialTab: AccountantTab.students),
+          initialTab: AccountantTab.fees),
     ),
     NavItem(
       id: 'academic',
@@ -187,8 +184,6 @@ class NavItems {
       shortLabel: 'Academic',
       icon: Icons.class_outlined,
       activeIcon: Icons.class_,
-      // Admin opens Academic at its first WORKING module (Classes),
-      // never at the Academic dashboard.
       builder: (_) => const AcademicPortal(
           initialTab: AcademicTab.classes),
     ),
@@ -238,7 +233,7 @@ class NavItems {
     ),
   ];
 
-  // ── Accountant ──
+  // ── Accountant ── (students tab removed per user request)
   static final _accountant = [
     NavItem(
       id: 'dashboard',
@@ -247,14 +242,6 @@ class NavItems {
       icon: Icons.dashboard_outlined,
       activeIcon: Icons.dashboard,
       builder: (_) => const AccountantPortal(),
-    ),
-    NavItem(
-      id: 'students',
-      label: 'Student Records',
-      shortLabel: 'Records',
-      icon: Icons.people_outline,
-      activeIcon: Icons.people,
-      builder: (_) => const AccountantPortal(initialTab: AccountantTab.students),
     ),
     NavItem(
       id: 'fees',
@@ -274,7 +261,7 @@ class NavItems {
     ),
     NavItem(
       id: 'logins',
-      label: 'Create Logins',
+      label: 'Student Logins',
       shortLabel: 'Logins',
       icon: Icons.vpn_key_outlined,
       activeIcon: Icons.vpn_key,
@@ -290,7 +277,7 @@ class NavItems {
     ),
   ];
 
-  // ── Academic Office ──
+  // ── Academic Office ── (Date Sheets & Exams merged into one tab)
   static final _academic = [
     NavItem(
       id: 'dashboard',
@@ -310,7 +297,7 @@ class NavItems {
     ),
     NavItem(
       id: 'classes',
-      label: 'Classes',
+      label: 'Classes & Teachers',
       shortLabel: 'Classes',
       icon: Icons.class_outlined,
       activeIcon: Icons.class_,
@@ -325,16 +312,8 @@ class NavItems {
       builder: (_) => const AcademicPortal(initialTab: AcademicTab.timetable),
     ),
     NavItem(
-      id: 'datesheets',
-      label: 'Date Sheets',
-      shortLabel: 'Dates',
-      icon: Icons.event_note_outlined,
-      activeIcon: Icons.event_note,
-      builder: (_) => const DateSheetsScreen(),
-    ),
-    NavItem(
       id: 'exams',
-      label: 'Exams',
+      label: 'Exams & Date Sheets',
       shortLabel: 'Exams',
       icon: Icons.assignment_outlined,
       activeIcon: Icons.assignment,

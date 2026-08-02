@@ -4,17 +4,13 @@
 //   • App icon (orange squircle) + app name + short subtitle
 //   • Single white elevated form card with comfortable padding
 //   • Focus-aware inputs with orange focus border + soft warm fill
-//   • Full-width Concordia orange gradient sign-in button with arrow + glow
+//   • Full-width Concordia orange sign-in button (no gradient)
 //   • Selector-based loading + error (no full-page rebuild → no refresh bug)
 //   • Subtle demo-login chip row (secondary, soft-orange pill chips)
 //   • Entrance animation (TweenAnimationBuilder) fade + slide up
 //
 // Auth is delegated to AuthProvider.login(). On success the go_router
 // redirect in app.dart moves the user into their role portal.
-//
-// Performance: we use Selector (not watch) so only the button + error
-// banner rebuild when busy/error change — the rest of the page stays
-// stable, preventing the "refresh then sign in" flicker.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -43,9 +39,6 @@ class _LoginPageState extends State<LoginPage> {
 
   void _submit() {
     if (_formKey.currentState?.validate() != true) return;
-    // Do NOT unfocus — closing the keyboard causes a layout resize that
-    // looks like a "page refresh". Let the keyboard close naturally when
-    // navigation happens on success.
     context.read<AuthProvider>().login(
           _identifier.text.trim(),
           _password.text,
@@ -67,7 +60,6 @@ class _LoginPageState extends State<LoginPage> {
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
-          // Pad bottom so the content scrolls above the keyboard
           padding: EdgeInsets.only(bottom: bottomPad + 24),
           child: TweenAnimationBuilder<double>(
             tween: Tween(begin: 0.0, end: 1.0),
@@ -93,14 +85,20 @@ class _LoginPageState extends State<LoginPage> {
                     // ── App icon (orange squircle with soft shadow) ──
                     Center(
                       child: Container(
-                        width: 96,
-                        height: 96,
+                        width: 88,
+                        height: 88,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(24),
-                          boxShadow: AppShadows.floating,
+                          borderRadius: BorderRadius.circular(22),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.15),
+                              blurRadius: 24,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
                         ),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.circular(22),
                           child: Image.asset(
                             'assets/images/app-icon.png',
                             fit: BoxFit.cover,
@@ -108,7 +106,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     // ── App name ──
                     const Text(
                       'Concordia College',
@@ -141,10 +139,10 @@ class _LoginPageState extends State<LoginPage> {
                           setState(() => _obscure = !_obscure),
                       onSubmit: _submit,
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 28),
                     // ── Demo logins (subtle) ──
                     _DemoSection(onQuickFill: _quickFill),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     // ── Footer ──
                     const Center(
                       child: Text(
@@ -190,7 +188,18 @@ class _FormCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppRadii.xl),
-        boxShadow: AppShadows.floating,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.06),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -232,27 +241,7 @@ class _FormCard extends StatelessWidget {
                 (v == null || v.isEmpty) ? 'Enter your password' : null,
             onSubmitted: (_) => onSubmit(),
           ),
-          const SizedBox(height: 12),
-          // ── Forgot password ──
-          Align(
-            alignment: Alignment.centerRight,
-            child: GestureDetector(
-              onTap: () {},
-              behavior: HitTestBehavior.opaque,
-              child: const Padding(
-                padding: EdgeInsets.only(top: 2, bottom: 2),
-                child: Text(
-                  'Forgot password?',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           // ── Error banner (only rebuilds when error changes) ──
           Selector<AuthProvider, String?>(
             selector: (_, a) => a.error,
@@ -305,9 +294,15 @@ class _FormCard extends StatelessWidget {
                 width: double.infinity,
                 height: 54,
                 decoration: BoxDecoration(
-                  gradient: appGradient(AppColors.primaryGradient),
+                  color: AppColors.primary,
                   borderRadius: BorderRadius.circular(AppRadii.md),
-                  boxShadow: AppShadows.button,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.25),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
                 child: Material(
                   color: Colors.transparent,
@@ -453,10 +448,6 @@ class _TextField extends StatelessWidget {
 }
 
 // ── Demo logins section ──────────────────────────────────────────
-// Subtle: small muted label + a centered Wrap of compact soft-orange
-// pill chips. Wrap keeps the row on one line when it fits and wraps
-// cleanly on narrow screens (more robust than a horizontal scroll view
-// for 4 short labels).
 class _DemoSection extends StatelessWidget {
   final void Function(String id, String pw) onQuickFill;
   const _DemoSection({required this.onQuickFill});
@@ -471,11 +462,11 @@ class _DemoSection extends StatelessWidget {
     ];
     return Column(
       children: [
-        const Text(
-          'Demo logins',
+        Text(
+          'Quick Demo Access',
           style: TextStyle(
             fontSize: 11,
-            color: AppColors.textMuted,
+            color: AppColors.textMuted.withValues(alpha: 0.8),
             fontWeight: FontWeight.w500,
             letterSpacing: 0.4,
           ),
@@ -514,16 +505,19 @@ class _DemoChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.pill),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: AppColors.primarySoft,
             borderRadius: BorderRadius.circular(AppRadii.pill),
+            border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.15),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 13, color: AppColors.primary),
-              const SizedBox(width: 5),
+              Icon(icon, size: 14, color: AppColors.primary),
+              const SizedBox(width: 6),
               Text(
                 label,
                 style: const TextStyle(

@@ -3,9 +3,9 @@
 //
 // Tabs:
 //   • Dashboard   — gradient hero, stat grid, summary card, chart, quick actions
-//   • Classes     — list, create, delete, detail sheet
+//   • Classes & Teachers — list, create, delete, detail sheet + teacher management
 //   • Timetable   — day selector, entries, add-entry form
-//   • Exams       — list, create, detail sheet
+//   • Exams & Date Sheets — list, create, detail sheet
 //   • Results     — recent cards + generate report card flow
 
 import 'package:flutter/material.dart';
@@ -58,7 +58,7 @@ class _AcademicPortalState extends State<AcademicPortal> {
     // admin sidebar's sub-portal dropdowns contain only working modules.
     final role = context.read<AuthProvider>().user!.role;
     final showTabs = role == 'admin' || role == 'super-admin';
-    final allLabels = <String>['Dashboard', 'Classes', 'Timetable', 'Exams', 'Results'];
+    final allLabels = <String>['Dashboard', 'Classes & Teachers', 'Timetable', 'Exams & Date Sheets', 'Results'];
     final allIcons = <IconData>[
       Icons.dashboard_outlined,
       Icons.class_outlined,
@@ -344,8 +344,10 @@ class _AcClasses extends StatefulWidget {
 
 class _AcClassesState extends State<_AcClasses> {
   List<SchoolClass> _classes = const [];
+  List<User> _teachers = const [];
   bool _loading = true;
   String? _error;
+  String _viewMode = 'classes'; // 'classes' or 'teachers'
 
   @override
   void initState() {
@@ -360,7 +362,13 @@ class _AcClassesState extends State<_AcClasses> {
     });
     try {
       final auth = context.read<AuthProvider>();
-      _classes = await ApiClient().listClasses(branchId: auth.user!.branchId);
+      final api = ApiClient();
+      final results = await parallelFetch<dynamic>([
+        () => api.listClasses(branchId: auth.user!.branchId),
+        () => api.listUsers(role: 'teacher', branchId: auth.user!.branchId),
+      ]);
+      _classes = (results[0] as List<SchoolClass>?) ?? const [];
+      _teachers = (results[1] as List<User>?) ?? [];
     } on ApiException catch (e) {
       _error = e.message;
     } catch (_) {
@@ -594,93 +602,547 @@ class _AcClassesState extends State<_AcClasses> {
     );
   }
 
+  Future<void> _addTeacher() async {
+    final nameCtrl = TextEditingController();
+    final rollNoCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController();
+    final titleCtrl = TextEditingController();
+    final subjectCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool busy = false;
+
+    await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: const Text('Add Teacher'),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.lg)),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Full Name *', hintText: 'e.g. Ayesha Khan'),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: rollNoCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Teacher ID / Roll No *', hintText: 'e.g. T001'),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: emailCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Email (optional)', hintText: 'Auto-generated if blank'),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: passwordCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Password (optional)', helperText: 'Auto-generated if blank'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: titleCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Title (optional)', hintText: 'e.g. Lecturer, HOD'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: subjectCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Subject (optional)', hintText: 'e.g. Mathematics'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: busy ? null : () async {
+                if (formKey.currentState?.validate() != true) return;
+                setSt(() => busy = true);
+                try {
+                  final auth = context.read<AuthProvider>();
+                  final rollNoTrim = rollNoCtrl.text.trim();
+                  final plannedEmail = emailCtrl.text.trim().isEmpty
+                      ? '${rollNoTrim.toLowerCase()}@concordia.edu.pk'
+                      : emailCtrl.text.trim();
+                  final password = passwordCtrl.text.trim().isEmpty
+                      ? 'teacher${1000 + DateTime.now().millisecond % 9000}'
+                      : passwordCtrl.text.trim();
+                  await ApiClient().createUser({
+                    'name': nameCtrl.text.trim(),
+                    'email': plannedEmail,
+                    'rollNo': rollNoTrim,
+                    'password': password,
+                    'role': 'teacher',
+                    'status': 'Active',
+                    'title': titleCtrl.text.trim().isEmpty ? 'Teacher' : titleCtrl.text.trim(),
+                    'instituteId': auth.user!.instituteId,
+                    'branchId': auth.user!.branchId,
+                    'mustChangePassword': 1,
+                  });
+                  ApiClient().invalidate('platform/users');
+                  if (ctx.mounted) {
+                    Navigator.pop(ctx, true);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Teacher login created — ${nameCtrl.text.trim()}'),
+                        backgroundColor: AppColors.success,
+                      ),
+                    );
+                  }
+                  _load();
+                } on ApiException catch (e) {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+                    );
+                  }
+                } finally {
+                  if (ctx.mounted) setSt(() => busy = false);
+                }
+              },
+              child: busy
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Add Teacher'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _create,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('New Class'),
-      ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: _loading
             ? const LoadingList(count: 6, height: 72)
             : _error != null
                 ? ErrorState(message: _error!, onRetry: _load)
-                : _classes.isEmpty
-                    ? ListView(
-                        children: [
-                          const SizedBox(height: 120),
-                          EmptyState(
-                            icon: Icons.class_outlined,
-                            title: 'No classes yet',
-                            subtitle:
-                                'Create your first class to start enrolling students',
-                            actionLabel: 'Create Class',
-                            onAction: _create,
-                          ),
-                        ],
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
-                        itemCount: _classes.length + 1,
-                        itemBuilder: (_, i) {
-                          if (i == 0) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      '${_classes.length} classes',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.textSecondary,
+                : Column(
+                    children: [
+                      // View mode toggle: Classes / Teachers
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () => setState(() => _viewMode = 'classes'),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(milliseconds: 180),
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          decoration: BoxDecoration(
+                                            gradient: _viewMode == 'classes'
+                                                ? appGradient(AppColors.primaryGradient)
+                                                : null,
+                                            borderRadius: BorderRadius.circular(AppRadii.pill),
+                                            boxShadow: _viewMode == 'classes' ? AppShadows.button : null,
+                                          ),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.class_outlined, size: 16,
+                                                  color: _viewMode == 'classes' ? Colors.white : AppColors.textSecondary),
+                                              const SizedBox(width: 6),
+                                              Text('Classes',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: _viewMode == 'classes' ? Colors.white : AppColors.textSecondary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  StatusChip(
-                                    text:
-                                        '${_classes.fold<int>(0, (a, c) => a + (c.studentCount ?? 0))} students',
-                                    type: StatusType.info,
-                                    compact: true,
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                          final c = _classes[i - 1];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: ListRow(
-                              title: 'Class ${c.name} — ${c.section}',
-                              subtitle:
-                                  '${c.studentCount ?? 0} students · ${c.teacherName?.isNotEmpty == true ? c.teacherName : 'No teacher yet'}',
-                              eyebrow: c.section,
-                              icon: Icons.class_rounded,
-                              accentColor: AppColors.primary,
-                              onTap: () => _showDetail(c),
-                              trailing: GestureDetector(
-                                onTap: () => _delete(c),
-                                child: Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.dangerSoft,
-                                    borderRadius:
-                                        BorderRadius.circular(AppRadii.sm),
-                                  ),
-                                  child: const Icon(Icons.delete_outline,
-                                      color: AppColors.danger, size: 18),
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () => setState(() => _viewMode = 'teachers'),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(milliseconds: 180),
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          decoration: BoxDecoration(
+                                            gradient: _viewMode == 'teachers'
+                                                ? appGradient(AppColors.primaryGradient)
+                                                : null,
+                                            borderRadius: BorderRadius.circular(AppRadii.pill),
+                                            boxShadow: _viewMode == 'teachers' ? AppShadows.button : null,
+                                          ),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.person_outline, size: 16,
+                                                  color: _viewMode == 'teachers' ? Colors.white : AppColors.textSecondary),
+                                              const SizedBox(width: 6),
+                                              Text('Teachers',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: _viewMode == 'teachers' ? Colors.white : AppColors.textSecondary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                          );
-                        },
+                          ],
+                        ),
                       ),
+                      // Action buttons
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _ActionChip(
+                                label: 'Add Class',
+                                icon: Icons.add_rounded,
+                                gradient: AppColors.primaryGradient,
+                                onTap: _create,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _ActionChip(
+                                label: 'Add Teacher',
+                                icon: Icons.person_add_outlined,
+                                gradient: AppColors.infoGradient,
+                                onTap: _addTeacher,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Content
+                      Expanded(
+                        child: _viewMode == 'classes'
+                            ? _buildClassesList()
+                            : _buildTeachersList(),
+                      ),
+                    ],
+                  ),
+      ),
+    );
+  }
+
+  Widget _buildClassesList() {
+    if (_classes.isEmpty) {
+      return ListView(
+        children: [
+          const SizedBox(height: 80),
+          EmptyState(
+            icon: Icons.class_outlined,
+            title: 'No classes yet',
+            subtitle: 'Create your first class to start enrolling students',
+            actionLabel: 'Create Class',
+            onAction: _create,
+          ),
+        ],
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      itemCount: _classes.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${_classes.length} classes',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                StatusChip(
+                  text: '${_classes.fold<int>(0, (a, c) => a + (c.studentCount ?? 0))} students',
+                  type: StatusType.info,
+                  compact: true,
+                ),
+              ],
+            ),
+          );
+        }
+        final c = _classes[i - 1];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: ListRow(
+            title: 'Class ${c.name} — ${c.section}',
+            subtitle: '${c.studentCount ?? 0} students · ${c.teacherName?.isNotEmpty == true ? c.teacherName : 'No teacher yet'}',
+            eyebrow: c.section,
+            icon: Icons.class_rounded,
+            accentColor: AppColors.primary,
+            onTap: () => _showDetail(c),
+            trailing: GestureDetector(
+              onTap: () => _delete(c),
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.dangerSoft,
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                ),
+                child: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTeachersList() {
+    if (_teachers.isEmpty) {
+      return ListView(
+        children: [
+          const SizedBox(height: 80),
+          EmptyState(
+            icon: Icons.person_add_outlined,
+            title: 'No teachers yet',
+            subtitle: 'Add a teacher to assign them to classes',
+            actionLabel: 'Add Teacher',
+            onAction: _addTeacher,
+          ),
+        ],
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      itemCount: _teachers.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${_teachers.length} teachers',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                StatusChip(
+                  text: 'Active',
+                  type: StatusType.success,
+                  compact: true,
+                ),
+              ],
+            ),
+          );
+        }
+        final t = _teachers[i - 1];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: ListRow(
+            title: t.name,
+            subtitle: '${t.title ?? 'Teacher'} · ${t.email ?? t.displayId}',
+            eyebrow: t.rollNo ?? '',
+            leading: AppAvatar(
+              initials: t.name,
+              color: AppColors.info,
+              size: 40,
+              useGradient: true,
+            ),
+            accentColor: AppColors.info,
+            onTap: () => _showTeacherDetail(t),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showTeacherDetail(User t) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                AppAvatar(
+                  initials: t.name,
+                  color: AppColors.info,
+                  size: 56,
+                  useGradient: true,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(t.name,
+                          style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${t.title ?? 'Teacher'} · ${t.rollNo ?? ''}',
+                        style: const TextStyle(
+                            fontSize: 13, color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                StatusChip(
+                  text: t.blocked == 1 ? 'Blocked' : 'Active',
+                  type: t.blocked == 1 ? StatusType.danger : StatusType.success,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            PremiumCard(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                children: [
+                  _AcDetailRow('Email', t.email ?? '—'),
+                  _AcDetailRow('Teacher ID', t.rollNo ?? '—'),
+                  _AcDetailRow('Title', t.title ?? 'Teacher'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Action chip for Add Class / Add Teacher
+class _ActionChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final List<Color> gradient;
+  final VoidCallback onTap;
+  const _ActionChip({
+    required this.label,
+    required this.icon,
+    required this.gradient,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          gradient: appGradient(gradient),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          boxShadow: AppShadows.button,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Detail row for teacher detail sheet
+class _AcDetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _AcDetailRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(label, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+            ),
+          ),
+        ],
       ),
     );
   }
