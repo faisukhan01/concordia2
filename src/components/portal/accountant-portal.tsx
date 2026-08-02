@@ -93,6 +93,7 @@ import {
   Hash,
   Info,
   CheckCircle2,
+  Clock,
   Printer,
   ArrowLeft,
   Pencil,
@@ -164,7 +165,7 @@ function StatCard({
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm">
+    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm group">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
@@ -173,7 +174,9 @@ function StatCard({
           <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
           {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
         </div>
-        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
+        </div>
       </div>
     </div>
   );
@@ -593,7 +596,7 @@ function OverviewView({
       invoices
         .filter((i) => (i.status || '').toLowerCase() === 'paid')
         .sort((a, b) => (b.paidAt || b.updatedAt || '').localeCompare(a.paidAt || a.updatedAt || ''))
-        .slice(0, 8),
+        .slice(0, 5),
     [invoices],
   );
 
@@ -701,8 +704,8 @@ function OverviewView({
                   Split a student&apos;s locked fee into a payment plan
                 </div>
               </div>
-              <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-amber-200 transition-colors">
-                <Plus className="h-4 w-4 text-amber-700" />
+              <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+                <Plus className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
               </div>
             </div>
           </button>
@@ -723,8 +726,8 @@ function OverviewView({
                   Review paid / outstanding balances per student
                 </div>
               </div>
-              <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-amber-200 transition-colors">
-                <Receipt className="h-4 w-4 text-amber-700" />
+              <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+                <Receipt className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
               </div>
             </div>
           </button>
@@ -805,6 +808,66 @@ function OverviewView({
             />
           )}
         </ChartCard>
+      </motion.div>
+
+      {/* Fee Status Summary */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, delay: 0.12 }}
+        className="rounded-xl border border-gray-200 bg-white p-5"
+      >
+        <SectionHeader
+          title="Fee Status Summary"
+          desc="Breakdown of all invoices by payment status"
+        />
+        {loading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-10" />
+            ))}
+          </div>
+        ) : feeStatusData.every((d) => d.value === 0) ? (
+          <EmptyState
+            icon={PieChart}
+            title="No invoices yet"
+            desc="Generate monthly challans from the Fee & Installments page."
+          />
+        ) : (
+          <div className="space-y-4">
+            {(() => {
+              const total = feeStatusData.reduce((s, d) => s + d.value, 0);
+              const statusConfig: Record<string, { bg: string; bar: string; text: string; icon: any }> = {
+                Paid: { bg: 'bg-emerald-50', bar: 'bg-emerald-500', text: 'text-emerald-700', icon: CheckCircle2 },
+                Pending: { bg: 'bg-amber-50', bar: 'bg-amber-500', text: 'text-amber-700', icon: Clock },
+                Overdue: { bg: 'bg-red-50', bar: 'bg-red-500', text: 'text-red-700', icon: AlertCircle },
+              };
+              return feeStatusData.map((d) => {
+                const cfg = statusConfig[d.label] || statusConfig.Pending;
+                const pct = total > 0 ? Math.round((d.value / total) * 100) : 0;
+                return (
+                  <div key={d.label} className="flex items-center gap-4">
+                    <div className={`h-9 w-9 rounded-lg ${cfg.bg} grid place-items-center shrink-0`}>
+                      <cfg.icon className={`h-4 w-4 ${cfg.text}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium text-gray-900">{d.label}</span>
+                        <span className="text-sm font-semibold text-gray-900">{d.value} <span className="text-xs text-gray-500 font-normal">({pct}%)</span></span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${cfg.bar} transition-all duration-500`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
       </motion.div>
 
       {/* Recent payments table */}

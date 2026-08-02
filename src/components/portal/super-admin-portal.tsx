@@ -185,7 +185,7 @@ function StatCard({
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all',
+        'w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all group',
         onClick ? 'hover:border-[#F26522] hover:shadow-sm cursor-pointer' : 'cursor-default',
       )}
     >
@@ -197,7 +197,9 @@ function StatCard({
           <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
           {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
         </div>
-        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
+        </div>
       </div>
     </button>
   );
@@ -726,19 +728,88 @@ function SuperAdminDashboard({
             <button
               key={a.target}
               onClick={() => setActiveModule(a.target)}
-              className="group text-left border border-gray-200 rounded-xl bg-white hover:border-[#F26522] hover:shadow-sm transition p-4 flex items-center gap-3"
+              className="group text-left border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5 transition-all flex items-start gap-3"
             >
-              <div className="h-10 w-10 shrink-0 rounded-lg bg-gray-50 grid place-items-center group-hover:bg-[#F26522]/5">
-                <a.icon className="h-5 w-5 text-gray-500 group-hover:text-[#F26522]" />
+              <div className="h-9 w-9 shrink-0 rounded-lg bg-amber-100 grid place-items-center group-hover:bg-[#F26522] transition-colors">
+                <a.icon className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-gray-900">{a.title}</div>
-                <div className="text-xs text-gray-500 mt-0.5">{a.subtitle}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">Quick Action</div>
+                <div className="text-base font-bold text-gray-900 mt-1.5">{a.title}</div>
+                <div className="text-xs text-amber-700/80 mt-1">{a.subtitle}</div>
               </div>
-              <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-[#F26522] shrink-0" />
             </button>
           ))}
         </div>
+      </div>
+
+      {/* ── Recent Activity ── */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <SectionHeader
+          title="Recent Activity"
+          desc="Latest user signups and announcements across the college"
+          action={
+            <span className="text-[11px] text-gray-400">{users.length + announcements.length} total</span>
+          }
+        />
+        {loading ? (
+          <div className="space-y-2.5">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-12" />
+            ))}
+          </div>
+        ) : (() => {
+          const activities = [
+            ...recentUsers.map((u) => ({
+              id: `user-${u.id}`,
+              type: 'signup' as const,
+              icon: u.role === 'student' ? GraduationCap : u.role === 'teacher' ? Users : UserCog,
+              title: u.name,
+              desc: `New ${ROLE_LABELS[u.role] || u.role} account created`,
+              time: u.createdAt,
+            })),
+            ...announcements.map((a) => ({
+              id: `ann-${a.id}`,
+              type: 'announcement' as const,
+              icon: Megaphone,
+              title: a.title,
+              desc: a.message,
+              time: a.createdAt,
+            })),
+          ]
+            .sort((a, b) => (b.time || '').localeCompare(a.time || ''))
+            .slice(0, 8);
+
+          return activities.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No activity yet"
+              desc="User signups and announcements will appear here."
+            />
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {activities.map((a) => (
+                <li key={a.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+                  <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${a.type === 'signup' ? 'bg-emerald-50' : 'bg-[#FFF4ED]'}`}>
+                    <a.icon className={`h-4 w-4 ${a.type === 'signup' ? 'text-emerald-600' : 'text-[#F26522]'}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-900 truncate">{a.title}</span>
+                      <span className={`text-[10px] font-medium uppercase tracking-wider rounded px-1.5 py-0.5 ${a.type === 'signup' ? 'bg-emerald-50 text-emerald-700' : 'bg-[#FFF4ED] text-[#F26522]'}`}>
+                        {a.type === 'signup' ? 'Signup' : 'Announcement'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">{a.desc}</p>
+                    {a.time && (
+                      <span className="text-[11px] text-gray-400 mt-0.5 block">{relativeTime(a.time)}</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
       </div>
     </div>
   );

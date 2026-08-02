@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
+import { useApp } from '@/lib/store';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -153,6 +154,10 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Wire the global module-switcher so the Overview quick-action cards can
+  // deep-link into the New Enrollment and Student Records pages.
+  const setActiveModule = useApp((s) => s.setActiveModule);
+
   // Initial + branch-change load. Loads both students AND classes in parallel
   // — classes are needed by the new hierarchy Student Records view.
   // All setState calls happen inside async promise callbacks (not in the
@@ -234,6 +239,7 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
         user={user}
         students={students}
         loading={loading}
+        onNavigate={(id) => setActiveModule(id)}
       />
     );
 
@@ -291,7 +297,7 @@ function KpiCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm">
+    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm group">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
@@ -300,7 +306,9 @@ function KpiCard({
           <p className="text-2xl font-bold text-gray-900 mt-2 truncate">{value}</p>
           {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
         </div>
-        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
+        </div>
       </div>
     </div>
   );
@@ -441,10 +449,12 @@ function OverviewView({
   user,
   students,
   loading,
+  onNavigate,
 }: {
   user: any;
   students: any[];
   loading: boolean;
+  onNavigate: (moduleId: string) => void;
 }) {
   const now = useMemo(() => new Date(), []);
 
@@ -452,7 +462,7 @@ function OverviewView({
     () =>
       [...students]
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-        .slice(0, 10),
+        .slice(0, 5),
     [students],
   );
 
@@ -542,6 +552,59 @@ function OverviewView({
         </motion.div>
       )}
 
+      {/* Quick Actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, delay: 0.05 }}
+        className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+      >
+        <button
+          type="button"
+          onClick={() => onNavigate('admissions-new')}
+          className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                Quick Action
+              </div>
+              <div className="text-base font-bold text-gray-900 mt-1.5">
+                New Enrollment
+              </div>
+              <div className="text-xs text-amber-700/80 mt-1">
+                Register a new student with the 3-step enrollment wizard
+              </div>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+              <UserPlus className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('admissions-students')}
+          className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                Quick Action
+              </div>
+              <div className="text-base font-bold text-gray-900 mt-1.5">
+                Student Records
+              </div>
+              <div className="text-xs text-amber-700/80 mt-1">
+                Browse, search, and manage enrolled student records
+              </div>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+              <Users className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
+            </div>
+          </div>
+        </button>
+      </motion.div>
+
       {/* Analytics charts */}
       {loading ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -584,7 +647,7 @@ function OverviewView({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-sm font-semibold text-gray-900">Recent Admissions</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Last 10 enrolled students</p>
+            <p className="text-xs text-gray-500 mt-0.5">Last 5 enrolled students</p>
           </div>
         </div>
         {loading ? (
