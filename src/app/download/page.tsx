@@ -27,6 +27,13 @@ import {
   Zap,
   Layers,
   Palette,
+  QrCode,
+  CheckCircle2,
+  ChevronRight,
+  Globe,
+  Mail,
+  Phone,
+  MapPin,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -42,7 +49,7 @@ const APK_SIZE = '~26 MB';
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'v1.4.0 — Teacher Management',
+    title: 'Teacher Management',
     desc: 'Academic Office can now add teachers directly from the mobile app. Create teacher accounts, assign subjects, and manage faculty — all from your phone.',
   },
   {
@@ -147,8 +154,6 @@ export default function DownloadPage() {
   useEffect(() => {
     const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
     const android = ua.includes('android');
-    // Defer setState to a microtask to avoid synchronous state updates inside the effect
-    // (which trigger cascading renders).
     Promise.resolve().then(() => {
       setIsAndroid(android);
       setMounted(true);
@@ -173,22 +178,37 @@ export default function DownloadPage() {
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-[#FFF6EE] via-[#FDF6EF] to-[#FCFBF9]">
-        {/* Radial glows */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute -top-32 left-1/4 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.18),_transparent_60%)] blur-2xl" />
-          <div className="absolute top-24 right-0 h-[400px] w-[400px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.10),_transparent_65%)] blur-2xl" />
-        </div>
-
-        {/* Subtle dotted grid for texture */}
+      {/* ═══════════════════════════════════════════════════════════════
+          HERO SECTION
+          — Animated gradient background, large app icon, strong typography
+      ═══════════════════════════════════════════════════════════════ */}
+      <section className="relative overflow-hidden">
+        {/* Animated gradient background */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#FFF6EE] via-[#FDF6EF] to-[#FCFBF9]" />
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.35]"
+          className="pointer-events-none absolute inset-0 opacity-40"
           style={{
             backgroundImage:
-              'radial-gradient(circle, rgba(242,101,34,0.10) 1px, transparent 1px)',
-            backgroundSize: '22px 22px',
+              'radial-gradient(circle, rgba(242,101,34,0.08) 1px, transparent 1px)',
+            backgroundSize: '24px 24px',
           }}
+        />
+        {/* Animated radial glow */}
+        <motion.div
+          animate={reduce ? {} : {
+            scale: [1, 1.15, 1],
+            opacity: [0.18, 0.28, 0.18],
+          }}
+          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+          className="pointer-events-none absolute -top-32 left-1/4 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.22),_transparent_60%)] blur-2xl"
+        />
+        <motion.div
+          animate={reduce ? {} : {
+            scale: [1, 1.1, 1],
+            opacity: [0.1, 0.18, 0.1],
+          }}
+          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
+          className="pointer-events-none absolute top-24 right-0 h-[400px] w-[400px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.12),_transparent_65%)] blur-2xl"
         />
 
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 md:py-24 lg:grid-cols-[1.1fr_0.9fr]">
@@ -199,7 +219,7 @@ export default function DownloadPage() {
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           >
             {/* Eyebrow */}
-            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200/70 bg-white/70 px-3.5 py-1.5 backdrop-blur-sm">
+            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200/70 bg-white/70 px-4 py-1.5 backdrop-blur-sm">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#F26522] opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-[#F26522]" />
@@ -209,30 +229,41 @@ export default function DownloadPage() {
               </span>
             </div>
 
-            {/* Headline */}
-            <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-[#1A1A1A] sm:text-5xl md:text-6xl">
+            {/* Headline — large, bold, with orange accent */}
+            <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-[#1A1A1A] sm:text-5xl md:text-6xl lg:text-7xl">
               Concordia College
-              <span className="block bg-gradient-to-r from-[#F26522] via-[#F26522] to-[#FF8C42] bg-clip-text text-transparent">
+              <span className="block text-[#F26522]">
                 in your pocket
               </span>
             </h1>
 
             {/* Subtitle */}
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-gray-600">
+            <p className="mt-5 max-w-xl text-lg leading-relaxed text-gray-600 sm:text-xl">
               Manage your school, branches, staff, and students from anywhere. The complete
               Concordia College management platform — every web feature, now native on Android.
             </p>
 
-            {/* CTA + meta */}
+            {/* CTA with pulsing ring */}
             <div className="mt-8 flex flex-col items-start gap-3">
-              <a
-                href={APK_DOWNLOAD_URL}
-                className="group inline-flex items-center gap-2.5 rounded-2xl bg-[#F26522] px-7 py-4 text-base font-semibold text-white shadow-[0_10px_30px_-8px_rgba(242,101,34,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_14px_36px_-8px_rgba(242,101,34,0.65)]"
-              >
-                <Download className="h-5 w-5" />
-                <span>{buttonLabel}</span>
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-              </a>
+              <div className="relative">
+                {/* Pulsing ring animation */}
+                <motion.div
+                  animate={reduce ? {} : {
+                    scale: [1, 1.12, 1],
+                    opacity: [0.5, 0, 0.5],
+                  }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  className="absolute -inset-2 rounded-2xl bg-[#F26522]/20"
+                />
+                <a
+                  href={APK_DOWNLOAD_URL}
+                  className="group relative inline-flex items-center gap-2.5 rounded-2xl bg-[#F26522] px-8 py-4 text-base font-semibold text-white shadow-[0_10px_30px_-8px_rgba(242,101,34,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_14px_36px_-8px_rgba(242,101,34,0.65)]"
+                >
+                  <Download className="h-5 w-5" />
+                  <span>{buttonLabel}</span>
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </a>
+              </div>
               <p className="text-sm text-gray-500">
                 {mounted && isAndroid
                   ? `${APK_SIZE} · Installs over current version · Free`
@@ -256,14 +287,14 @@ export default function DownloadPage() {
             </div>
 
             {/* App icon showcase + QR card */}
-            <div className="mt-8 flex flex-wrap items-stretch gap-3">
-              {/* App icon showcase card — clean white + orange, replaces the old navy banner */}
-              <div className="relative flex min-w-[280px] flex-1 items-center gap-4 overflow-hidden rounded-2xl border border-orange-200/60 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(242,101,34,0.25)] sm:p-5">
+            <div className="mt-8 flex flex-wrap items-stretch gap-4">
+              {/* App icon showcase card */}
+              <div className="relative flex min-w-[280px] flex-1 items-center gap-5 overflow-hidden rounded-2xl border border-orange-200/60 bg-white p-5 shadow-[0_8px_24px_-12px_rgba(242,101,34,0.25)] sm:p-6">
                 {/* Soft orange glow behind icon */}
-                <div className="pointer-events-none absolute -left-8 top-1/2 h-40 w-40 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,_rgba(255,140,66,0.18),_transparent_65%)] blur-xl" />
+                <div className="pointer-events-none absolute -left-8 top-1/2 h-40 w-40 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.18),_transparent_65%)] blur-xl" />
 
-                {/* Orange squircle app icon */}
-                <div className="relative z-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[24%] bg-gradient-to-br from-[#FF9A4B] to-[#F26522] shadow-[0_10px_24px_-8px_rgba(242,101,34,0.6)] ring-1 ring-white/40">
+                {/* Orange squircle app icon — larger */}
+                <div className="relative z-10 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[24%] bg-[#F26522] shadow-[0_12px_28px_-8px_rgba(242,101,34,0.6)] ring-1 ring-white/40">
                   <Image
                     src="/app-icon-512.png"
                     alt="Concordia College app icon"
@@ -275,13 +306,13 @@ export default function DownloadPage() {
 
                 {/* Wordmark */}
                 <div className="relative z-10 min-w-0 flex-1">
-                  <p className="text-base font-bold tracking-tight text-[#1A1A1A] sm:text-lg">
+                  <p className="text-lg font-bold tracking-tight text-[#1A1A1A] sm:text-xl">
                     Concordia College
                   </p>
-                  <p className="mt-0.5 text-xs font-medium text-gray-500 sm:text-sm">
+                  <p className="mt-0.5 text-sm font-medium text-gray-500">
                     Management Portal · {APK_VERSION}
                   </p>
-                  <div className="mt-2">
+                  <div className="mt-2.5">
                     <span className="inline-flex items-center gap-1 rounded-full bg-[#FFE8D9] px-2.5 py-0.5 text-[10px] font-bold text-[#D4541E]">
                       <Sparkles className="h-2.5 w-2.5" /> New icon
                     </span>
@@ -289,19 +320,30 @@ export default function DownloadPage() {
                 </div>
               </div>
 
-              {/* QR code card */}
-              <div className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-orange-200/60 bg-white p-3 shadow-[0_8px_24px_-12px_rgba(242,101,34,0.25)]">
-                {/* QR code from api.qrserver.com — using a plain <img> to avoid configuring next/image remote patterns */}
-                <img
-                  src={QR_CODE_URL}
-                  alt="Scan to download the Concordia College Android app"
-                  width={92}
-                  height={92}
-                  className="rounded-lg"
-                />
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#F26522]">
-                  Scan to download
-                </p>
+              {/* QR code card — more prominent */}
+              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-orange-200/60 bg-white p-5 shadow-[0_8px_24px_-12px_rgba(242,101,34,0.25)]">
+                <div className="relative">
+                  {/* Scan line animation */}
+                  <motion.div
+                    animate={reduce ? {} : { top: ['0%', '100%', '0%'] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                    className="pointer-events-none absolute left-0 right-0 h-0.5 bg-[#F26522]/40"
+                    style={{ top: '0%' }}
+                  />
+                  <img
+                    src={QR_CODE_URL}
+                    alt="Scan to download the Concordia College Android app"
+                    width={120}
+                    height={120}
+                    className="rounded-lg"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <QrCode className="h-3.5 w-3.5 text-[#F26522]" />
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#F26522]">
+                    Scan to download
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -330,30 +372,36 @@ export default function DownloadPage() {
         </div>
       </section>
 
-      {/* What's new in this version */}
+      {/* ═══════════════════════════════════════════════════════════════
+          WHAT'S NEW IN v1.4.0
+          — Version badge, feature highlights with timeline
+      ═══════════════════════════════════════════════════════════════ */}
       <section className="border-y border-orange-100/60 bg-gradient-to-b from-[#FFF6EE] to-[#FCFBF9]">
-        <div className="mx-auto max-w-6xl px-6 py-20 md:py-24">
+        <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
           <Reveal className="mx-auto max-w-2xl text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200/70 bg-white/80 px-3.5 py-1.5 backdrop-blur-sm">
-              <Sparkles className="h-3.5 w-3.5 text-[#F26522]" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#F26522]">
-                Just shipped · {APK_VERSION}
+            {/* Version badge */}
+            <div className="mx-auto inline-flex items-center gap-2.5 rounded-full bg-[#F26522] px-5 py-2 shadow-[0_8px_20px_-6px_rgba(242,101,34,0.4)]">
+              <Sparkles className="h-4 w-4 text-white" />
+              <span className="text-sm font-bold uppercase tracking-wide text-white">
+                What&rsquo;s New · {APK_VERSION}
               </span>
             </div>
-            <h2 className="mt-4 text-3xl font-bold tracking-tight text-[#1A1A1A] sm:text-4xl">
-              What&rsquo;s new in this version
+            <h2 className="mt-6 text-3xl font-bold tracking-tight text-[#1A1A1A] sm:text-4xl">
+              The biggest update yet
             </h2>
             <p className="mt-3 text-lg text-gray-600">
-              Updated {APK_UPDATED} · {APK_SIZE} · This is the build you&rsquo;ll download today.
+              Released {APK_UPDATED} · {APK_SIZE} · Six new features and improvements in this build.
             </p>
           </Reveal>
 
-          <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {whatsNew.map((item, i) => (
               <Reveal key={item.title} delay={i * 0.06}>
-                <div className="group h-full rounded-2xl border border-orange-100/70 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_12px_28px_-12px_rgba(242,101,34,0.25)]">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE8DC] to-[#FFD3B8] ring-1 ring-orange-200/50 transition-transform duration-300 group-hover:scale-105">
-                    <item.icon className="h-5 w-5 text-[#F26522]" />
+                <div className="group relative h-full overflow-hidden rounded-2xl border border-orange-100/70 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_12px_28px_-12px_rgba(242,101,34,0.25)]">
+                  {/* Top accent line on hover */}
+                  <div className="absolute inset-x-0 top-0 h-0.5 bg-[#F26522] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FFF4ED] ring-1 ring-orange-200/50 transition-all duration-300 group-hover:scale-110 group-hover:bg-[#F26522]">
+                    <item.icon className="h-5 w-5 text-[#F26522] transition-colors duration-300 group-hover:text-white" />
                   </div>
                   <h3 className="mt-4 text-base font-bold text-[#1A1A1A]">{item.title}</h3>
                   <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{item.desc}</p>
@@ -365,7 +413,7 @@ export default function DownloadPage() {
           {/* Reassurance banner */}
           <Reveal delay={0.2}>
             <div className="mx-auto mt-12 flex max-w-3xl flex-col items-center gap-4 rounded-3xl border border-orange-200/70 bg-white p-6 text-center shadow-sm sm:flex-row sm:text-left">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#F26522] to-[#D4541E] text-white shadow-lg">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#F26522] text-white shadow-lg">
                 <ShieldCheck className="h-7 w-7" />
               </div>
               <div className="flex-1">
@@ -377,8 +425,7 @@ export default function DownloadPage() {
                   <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-xs text-[#F26522]">
                     github.com/faisukhan01/concordia2
                   </code>
-                  . Every install gets the same {APK_VERSION} ({APK_SIZE}) premium build — new
-                  orange icon, redesigned portals, and the faster cache.
+                  . Every install gets the same {APK_VERSION} ({APK_SIZE}) premium build.
                 </p>
               </div>
             </div>
@@ -386,7 +433,10 @@ export default function DownloadPage() {
         </div>
       </section>
 
-      {/* Features */}
+      {/* ═══════════════════════════════════════════════════════════════
+          FEATURES
+          — Better hover effects with top accent line, icon color change
+      ═══════════════════════════════════════════════════════════════ */}
       <section className="mx-auto max-w-6xl px-6 py-20 md:py-28">
         <Reveal className="mx-auto max-w-2xl text-center">
           <p className="text-sm font-semibold uppercase tracking-wider text-[#F26522]">
@@ -404,9 +454,11 @@ export default function DownloadPage() {
         <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((f, i) => (
             <Reveal key={f.title} delay={i * 0.08}>
-              <div className="group h-full rounded-2xl border border-orange-100/70 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_12px_28px_-12px_rgba(242,101,34,0.25)]">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FFE8DC] to-[#FFD3B8] ring-1 ring-orange-200/50 transition-transform duration-300 group-hover:scale-105">
-                  <f.icon className="h-6 w-6 text-[#F26522]" />
+              <div className="group relative h-full overflow-hidden rounded-2xl border border-orange-100/70 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_12px_28px_-12px_rgba(242,101,34,0.25)]">
+                {/* Top accent line on hover */}
+                <div className="absolute inset-x-0 top-0 h-0.5 bg-[#F26522] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF4ED] ring-1 ring-orange-200/50 transition-all duration-300 group-hover:scale-110 group-hover:bg-[#F26522]">
+                  <f.icon className="h-6 w-6 text-[#F26522] transition-colors duration-300 group-hover:text-white" />
                 </div>
                 <h3 className="mt-5 text-lg font-bold text-[#1A1A1A]">{f.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-gray-600">{f.desc}</p>
@@ -416,7 +468,10 @@ export default function DownloadPage() {
         </div>
       </section>
 
-      {/* Roles */}
+      {/* ═══════════════════════════════════════════════════════════════
+          ROLES
+          — Eight role-based portals with hover icon color change
+      ═══════════════════════════════════════════════════════════════ */}
       <section className="border-y border-orange-100/60 bg-gradient-to-b from-[#FFF6EE] to-[#FCFBF9]">
         <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
           <Reveal className="mx-auto max-w-2xl text-center">
@@ -435,8 +490,10 @@ export default function DownloadPage() {
           <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {roles.map((r, i) => (
               <Reveal key={r.name} delay={i * 0.05}>
-                <div className="group h-full rounded-2xl border border-orange-100/70 bg-white p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_10px_24px_-12px_rgba(242,101,34,0.3)]">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFF4ED] ring-1 ring-orange-200/40 transition-colors duration-300 group-hover:bg-[#F26522]">
+                <div className="group relative h-full overflow-hidden rounded-2xl border border-orange-100/70 bg-white p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_10px_24px_-12px_rgba(242,101,34,0.3)]">
+                  {/* Top accent line on hover */}
+                  <div className="absolute inset-x-0 top-0 h-0.5 bg-[#F26522] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFF4ED] ring-1 ring-orange-200/40 transition-all duration-300 group-hover:scale-110 group-hover:bg-[#F26522]">
                     <r.icon className="h-5 w-5 text-[#F26522] transition-colors duration-300 group-hover:text-white" />
                   </div>
                   <h3 className="mt-4 text-base font-bold text-[#1A1A1A]">{r.name}</h3>
@@ -448,7 +505,10 @@ export default function DownloadPage() {
         </div>
       </section>
 
-      {/* How to install */}
+      {/* ═══════════════════════════════════════════════════════════════
+          HOW TO INSTALL
+          — Dark section with step-by-step instructions
+      ═══════════════════════════════════════════════════════════════ */}
       <section className="mx-auto max-w-6xl px-6 py-20 md:py-28">
         <Reveal>
           <div className="relative overflow-hidden rounded-3xl bg-[#1A1A1A] p-8 sm:p-12 md:p-16">
@@ -460,12 +520,17 @@ export default function DownloadPage() {
 
             <div className="relative">
               <div className="mx-auto max-w-2xl text-center">
-                <p className="text-sm font-semibold uppercase tracking-wider text-[#FF8C42]">
+                <p className="text-sm font-semibold uppercase tracking-wider text-[#F26522]">
                   {mounted && isAndroid ? 'How to update' : 'How to install'}
                 </p>
                 <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">
                   {mounted && isAndroid ? 'Update in three taps' : 'Get started in three steps'}
                 </h2>
+                <p className="mt-3 text-base text-white/60">
+                  {mounted && isAndroid
+                    ? 'Your existing login and data are preserved after the update.'
+                    : 'No sign-up required — use your existing portal credentials.'}
+                </p>
               </div>
 
               <div className="relative mt-14 grid gap-8 md:grid-cols-3">
@@ -480,6 +545,7 @@ export default function DownloadPage() {
                       mounted && isAndroid
                         ? 'Tap the Update App button above to start the download.'
                         : 'Tap the download button or scan the QR code with your phone camera.',
+                    icon: Download,
                   },
                   {
                     n: 2,
@@ -488,6 +554,7 @@ export default function DownloadPage() {
                       mounted && isAndroid
                         ? 'Open the file from your notifications or Downloads folder and tap Install.'
                         : 'Android may prompt you to allow installs from unknown sources — allow it once.',
+                    icon: ShieldCheck,
                   },
                   {
                     n: 3,
@@ -496,6 +563,7 @@ export default function DownloadPage() {
                       mounted && isAndroid
                         ? 'Open Concordia College — your previous login is preserved.'
                         : 'Open the app and sign in with your existing portal credentials.',
+                    icon: CheckCircle2,
                   },
                 ].map((s) => (
                   <div key={s.n} className="relative text-center">
@@ -509,24 +577,126 @@ export default function DownloadPage() {
                   </div>
                 ))}
               </div>
+
+              {/* CTA in install section */}
+              <div className="mt-12 text-center">
+                <a
+                  href={APK_DOWNLOAD_URL}
+                  className="group inline-flex items-center gap-2.5 rounded-2xl bg-[#F26522] px-8 py-4 text-base font-semibold text-white shadow-[0_10px_30px_-8px_rgba(242,101,34,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_14px_36px_-8px_rgba(242,101,34,0.65)]"
+                >
+                  <Download className="h-5 w-5" />
+                  <span>{buttonLabel}</span>
+                  <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </a>
+              </div>
             </div>
           </div>
         </Reveal>
       </section>
 
-      {/* Footer */}
+      {/* ═══════════════════════════════════════════════════════════════
+          FOOTER
+          — Concordia branding with contact info
+      ═══════════════════════════════════════════════════════════════ */}
       <footer className="border-t border-orange-100 bg-white">
-        <div className="mx-auto max-w-6xl px-6 py-10">
-          <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
-            <BrandLogo size="sm" />
-            <div className="text-center sm:text-right">
-              <p className="text-sm text-gray-600">
-                &copy; 2025 Concordia College. All rights reserved.
+        <div className="mx-auto max-w-6xl px-6 py-12">
+          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Brand column */}
+            <div className="sm:col-span-2 lg:col-span-1">
+              <BrandLogo size="md" />
+              <p className="mt-4 max-w-xs text-sm leading-relaxed text-gray-600">
+                Complete college management platform. Admissions, academics, finance, and
+                communication — all in one place.
               </p>
-              <p className="mt-1 text-xs text-gray-400">
-                Android is a trademark of Google LLC.
-              </p>
+              <div className="mt-4 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF4ED] px-3 py-1 text-xs font-semibold text-[#F26522]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#F26522]" />
+                  {APK_VERSION} · Latest
+                </span>
+              </div>
             </div>
+
+            {/* Quick Links */}
+            <div>
+              <h4 className="text-sm font-bold uppercase tracking-wider text-[#1A1A1A]">
+                Quick Links
+              </h4>
+              <ul className="mt-4 space-y-2.5">
+                <li>
+                  <a href="/" className="text-sm text-gray-600 transition-colors hover:text-[#F26522]">
+                    Web Portal
+                  </a>
+                </li>
+                <li>
+                  <a href={APK_DOWNLOAD_URL} className="text-sm text-gray-600 transition-colors hover:text-[#F26522]">
+                    Download App
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="https://github.com/faisukhan01/concordia2"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-gray-600 transition-colors hover:text-[#F26522]"
+                  >
+                    GitHub Releases
+                  </a>
+                </li>
+              </ul>
+            </div>
+
+            {/* Contact */}
+            <div>
+              <h4 className="text-sm font-bold uppercase tracking-wider text-[#1A1A1A]">
+                Contact
+              </h4>
+              <ul className="mt-4 space-y-2.5">
+                <li className="flex items-center gap-2 text-sm text-gray-600">
+                  <Mail className="h-4 w-4 text-[#F26522]" />
+                  admin@concordia.edu.pk
+                </li>
+                <li className="flex items-center gap-2 text-sm text-gray-600">
+                  <Phone className="h-4 w-4 text-[#F26522]" />
+                  +92 300 1234567
+                </li>
+                <li className="flex items-center gap-2 text-sm text-gray-600">
+                  <MapPin className="h-4 w-4 text-[#F26522]" />
+                  Peshawar, Pakistan
+                </li>
+              </ul>
+            </div>
+
+            {/* App Info */}
+            <div>
+              <h4 className="text-sm font-bold uppercase tracking-wider text-[#1A1A1A]">
+                App Info
+              </h4>
+              <ul className="mt-4 space-y-2.5">
+                <li className="text-sm text-gray-600">
+                  Version: <span className="font-medium text-[#1A1A1A]">{APK_VERSION}</span>
+                </li>
+                <li className="text-sm text-gray-600">
+                  Size: <span className="font-medium text-[#1A1A1A]">{APK_SIZE}</span>
+                </li>
+                <li className="text-sm text-gray-600">
+                  Updated: <span className="font-medium text-[#1A1A1A]">{APK_UPDATED}</span>
+                </li>
+                <li className="text-sm text-gray-600">
+                  Platform: <span className="font-medium text-[#1A1A1A]">Android 5.0+</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-orange-100 pt-8 sm:flex-row">
+            <p className="text-sm text-gray-500">
+              &copy; {new Date().getFullYear()} Concordia College. All rights reserved.
+            </p>
+            <p className="text-xs text-gray-400">
+              Android is a trademark of Google LLC. Built with{' '}
+              <Globe className="inline h-3 w-3 text-[#F26522]" /> in Pakistan.
+            </p>
           </div>
         </div>
       </footer>
@@ -534,7 +704,9 @@ export default function DownloadPage() {
   );
 }
 
-/* ---------- Phone mockup ---------- */
+/* ═══════════════════════════════════════════════════════════════════
+    Phone mockup — unchanged functional logic, color cleanup
+════════════════════════════════════════════════════════════════════ */
 
 function PhoneMockup() {
   const reduce = useReducedMotion();
@@ -600,13 +772,13 @@ function PhoneMockup() {
               <p className="text-[10px] text-gray-500">Good morning,</p>
               <p className="text-sm font-bold text-[#1A1A1A]">Concordia Admin</p>
             </div>
-            <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#F26522] to-[#FF8C42]" />
+            <div className="h-9 w-9 rounded-full bg-[#F26522]" />
           </div>
 
           {/* Content */}
           <div className="space-y-3 px-4">
             {/* Revenue card */}
-            <div className="rounded-2xl bg-gradient-to-br from-[#F26522] to-[#D4541E] p-3.5 text-white shadow-lg">
+            <div className="rounded-2xl bg-[#F26522] p-3.5 text-white shadow-lg">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-medium uppercase tracking-wide opacity-80">
                   Revenue · November
@@ -657,8 +829,8 @@ function PhoneMockup() {
               <div className="space-y-2">
                 {[
                   { name: 'Fee paid — Areeb Khan', time: '2m', amt: '+Rs 4,500', dot: 'bg-[#F26522]' },
-                  { name: 'New admission — Class 7-B', time: '18m', amt: '', dot: 'bg-[#FF8C42]' },
-                  { name: 'Attendance marked — 9-A', time: '1h', amt: '', dot: 'bg-[#FFD3B8]' },
+                  { name: 'New admission — Class 7-B', time: '18m', amt: '', dot: 'bg-[#F26522]/60' },
+                  { name: 'Attendance marked — 9-A', time: '1h', amt: '', dot: 'bg-[#F26522]/30' },
                 ].map((a, i) => (
                   <div key={i} className="flex items-center gap-2.5">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${a.dot}`} />

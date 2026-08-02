@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useApp } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -123,14 +124,16 @@ function PageHeader({ title, subtitle, action }: { title: string; subtitle?: str
 
 function StatCard({ icon: Icon, label, value, sub }: { icon: any; label: string; value: string | number; sub?: string }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm">
+    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm group">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</div>
           <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
           {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
         </div>
-        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
+        </div>
       </div>
     </div>
   );
@@ -236,6 +239,7 @@ function AcademicOverview({ user }: { user: any }) {
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const setActiveModule = useApp((s) => s.setActiveModule);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,6 +313,81 @@ function AcademicOverview({ user }: { user: any }) {
           <StatCard icon={Megaphone} label="Announcements" value={announcements.length} sub="published" />
         </motion.div>
       )}
+
+      {/* Quick Actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, delay: 0.05 }}
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+      >
+        <button
+          type="button"
+          onClick={() => setActiveModule('academic-classes')}
+          className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                Quick Action
+              </div>
+              <div className="text-base font-bold text-gray-900 mt-1.5">
+                Create Class
+              </div>
+              <div className="text-xs text-amber-700/80 mt-1">
+                Add a new class or section to the academic structure
+              </div>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+              <BookOpen className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveModule('academic-classes')}
+          className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                Quick Action
+              </div>
+              <div className="text-base font-bold text-gray-900 mt-1.5">
+                Add Teacher
+              </div>
+              <div className="text-xs text-amber-700/80 mt-1">
+                Register a new faculty member and assign subjects
+              </div>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+              <UserPlus className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveModule('academic-exams')}
+          className="group rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-left transition-all hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                Quick Action
+              </div>
+              <div className="text-base font-bold text-gray-900 mt-1.5">
+                Create Exam
+              </div>
+              <div className="text-xs text-amber-700/80 mt-1">
+                Schedule a new exam and build its date sheet
+              </div>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-amber-100 grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+              <CalendarPlus className="h-4 w-4 text-amber-700 group-hover:text-white transition-colors" />
+            </div>
+          </div>
+        </button>
+      </motion.div>
 
       {/* Analytics charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
