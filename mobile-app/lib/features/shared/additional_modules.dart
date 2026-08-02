@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../widgets/shared_widgets.dart';
 import '../auth/auth_provider.dart';
 import '../auth/change_password_page.dart';
 
@@ -557,58 +558,71 @@ class _SuperBranchesScreenState extends State<SuperBranchesScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
+    final branches = int.tryParse('${_overview?['branches'] ?? 0}') ?? 0;
+    final classesNum = int.tryParse('${_overview?['classes'] ?? 0}') ?? 0;
+    final teachersNum = int.tryParse('${_overview?['teachers'] ?? 0}') ?? 0;
+    final studentsNum = int.tryParse('${_overview?['students'] ?? 0}') ?? 0;
+    // Build chart bars for top classes by student count
+    final chartBars = (_classes ?? <SchoolClass>[])
+        .where((c) => (c.studentCount ?? 0) > 0)
+        .toList()
+      ..sort((a, b) => (b.studentCount ?? 0).compareTo(a.studentCount ?? 0));
+    final bars = chartBars.take(6).map((c) => BarData(
+      label: c.name,
+      value: (c.studentCount ?? 0).toDouble(),
+      gradient: AppColors.primaryGradient,
+    )).toList();
+
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_overview != null) ...[
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('College Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    const SizedBox(height: 12),
-                    _statRow('Branches', _overview!['branches']?.toString() ?? '0'),
-                    _statRow('Classes', _overview!['classes']?.toString() ?? '0'),
-                    _statRow('Teachers', _overview!['teachers']?.toString() ?? '0'),
-                    _statRow('Students', _overview!['students']?.toString() ?? '0'),
-                  ],
-                ),
-              ),
+          // Gradient hero
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Branches & Classes',
+            subtitle: 'College-wide overview',
+            icon: Icons.business_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 18),
+          // 2x2 stat grid
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.12,
+            children: [
+              StatCard(label: 'Branches', value: '$branches', icon: Icons.business_rounded, gradient: AppColors.primaryGradient),
+              StatCard(label: 'Classes', value: '$classesNum', icon: Icons.class_rounded, color: AppColors.info),
+              StatCard(label: 'Teachers', value: '$teachersNum', icon: Icons.person_rounded, gradient: AppColors.successGradient),
+              StatCard(label: 'Students', value: '$studentsNum', icon: Icons.people_alt_rounded, gradient: AppColors.warningGradient),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Students per class chart
+          if (bars.isNotEmpty) ...[
+            const SectionHeader(title: 'Students per Class', subtitle: 'Top classes by enrollment'),
+            PremiumCard(
+              padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
+              child: MiniBarChart(bars: bars, height: 180),
             ),
-            const SizedBox(height: 16),
           ],
-          Text('All Classes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
+          const SectionHeader(title: 'All Classes'),
           if (_classes == null || _classes!.isEmpty)
             const _EmptyView('No classes found.')
           else
             for (final c in _classes!)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: CircleAvatar(backgroundColor: AppColors.secondary, child: Icon(Icons.class_, color: AppColors.primary, size: 18)),
-                  title: Text(c.name ?? 'Class', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  subtitle: Text('${c.section ?? ''} • ${c.studentCount ?? 0} students', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                ),
+              ListRow(
+                title: c.name ?? 'Class',
+                subtitle: '${c.section ?? ''} • ${c.studentCount ?? 0} students',
+                icon: Icons.class_rounded,
+                accentColor: AppColors.primary,
               ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
-          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
         ],
       ),
     );
@@ -640,7 +654,6 @@ class _SuperStaffScreenState extends State<SuperStaffScreen> {
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-      // Load admin-level staff
       _staff = await _api.listUsers();
       _staff = _staff!.where((u) => ['admin', 'admissions', 'accountant', 'academic', 'super-admin'].contains(u.role)).toList();
     } on ApiException catch (e) {
@@ -656,28 +669,56 @@ class _SuperStaffScreenState extends State<SuperStaffScreen> {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
     if (_staff == null || _staff!.isEmpty) return const _EmptyView('No staff found.');
+    // Count by role for chart
+    final roleCount = <String, int>{};
+    for (final u in _staff!) {
+      roleCount[u.role] = (roleCount[u.role] ?? 0) + 1;
+    }
+    final bars = roleCount.entries.map((e) => BarData(
+      label: e.key.length > 8 ? e.key.substring(0, 8) : e.key,
+      value: e.value.toDouble(),
+      gradient: AppColors.primaryGradient,
+    )).toList();
+
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _staff!.length,
-        itemBuilder: (_, i) {
-          final u = _staff![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.primary, child: Text(u.name.isNotEmpty ? u.name[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
-              title: Text(u.name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text(u.email ?? '', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: AppColors.secondary, borderRadius: BorderRadius.circular(6)),
-                child: Text(u.role, style: TextStyle(fontSize: 11, color: AppColors.secondaryText, fontWeight: FontWeight.w600)),
-              ),
+        children: [
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Office Staff',
+            subtitle: 'Administrative staff members',
+            icon: Icons.manage_accounts_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 18),
+          StatCard(
+            label: 'Total Staff',
+            value: '${_staff!.length}',
+            icon: Icons.people_alt_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 14),
+          if (bars.isNotEmpty) ...[
+            const SectionHeader(title: 'Staff by Role', subtitle: 'Distribution'),
+            PremiumCard(
+              padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
+              child: MiniBarChart(bars: bars, height: 160),
             ),
-          );
-        },
+          ],
+          const SectionHeader(title: 'All Staff'),
+          for (final u in _staff!)
+            ListRow(
+              title: u.name,
+              subtitle: u.email ?? '',
+              leading: AppAvatar(initials: u.name, color: AppColors.primary, size: 40, useGradient: true),
+              icon: Icons.person_rounded,
+              accentColor: AppColors.primary,
+              trailing: StatusChip(text: u.role, type: StatusType.info, compact: true),
+            ),
+        ],
       ),
     );
   }
@@ -722,23 +763,44 @@ class _SuperTeachersScreenState extends State<SuperTeachersScreen> {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
     if (_teachers == null || _teachers!.isEmpty) return const _EmptyView('No teachers found.');
+    final activeCount = _teachers!.where((t) => t.blocked == 0).length;
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _teachers!.length,
-        itemBuilder: (_, i) {
-          final t = _teachers![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.secondary, child: Text(t.name.isNotEmpty ? t.name[0].toUpperCase() : '?', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600))),
-              title: Text(t.name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text(t.title ?? t.email ?? 'Teacher', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        children: [
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Teachers',
+            subtitle: 'All faculty members',
+            icon: Icons.people_rounded,
+            gradient: AppColors.infoGradient,
+          ),
+          const SizedBox(height: 18),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.12,
+            children: [
+              StatCard(label: 'Total', value: '${_teachers!.length}', icon: Icons.people_alt_rounded, gradient: AppColors.primaryGradient),
+              StatCard(label: 'Active', value: '$activeCount', icon: Icons.check_circle_rounded, gradient: AppColors.successGradient),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const SectionHeader(title: 'All Teachers'),
+          for (final t in _teachers!)
+            ListRow(
+              title: t.name,
+              subtitle: t.title ?? t.email ?? 'Teacher',
+              leading: AppAvatar(initials: t.name, color: AppColors.info, size: 40, useGradient: true),
+              icon: Icons.person_rounded,
+              accentColor: AppColors.info,
             ),
-          );
-        },
+        ],
       ),
     );
   }
@@ -783,23 +845,67 @@ class _SuperStudentsScreenState extends State<SuperStudentsScreen> {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
     if (_students == null || _students!.isEmpty) return const _EmptyView('No students found.');
+    final activeCount = _students!.where((s) => s.blocked == 0).length;
+    // Build chart by class
+    final classCount = <String, int>{};
+    for (final s in _students!) {
+      final cls = s.className ?? 'Unknown';
+      classCount[cls] = (classCount[cls] ?? 0) + 1;
+    }
+    final bars = classCount.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final chartBars = bars.take(6).map((e) => BarData(
+      label: e.key.length > 6 ? e.key.substring(0, 6) : e.key,
+      value: e.value.toDouble(),
+      gradient: AppColors.primaryGradient,
+    )).toList();
+
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _students!.length > 100 ? 100 : _students!.length,
-        itemBuilder: (_, i) {
-          final s = _students![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.secondary, child: Text(s.name.isNotEmpty ? s.name[0].toUpperCase() : '?', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600))),
-              title: Text(s.name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text('${s.className ?? ''} ${s.section ?? ''} • ${s.rollNo ?? ''}', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        children: [
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Students',
+            subtitle: 'All enrolled students',
+            icon: Icons.school_rounded,
+            gradient: AppColors.warningGradient,
+          ),
+          const SizedBox(height: 18),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.12,
+            children: [
+              StatCard(label: 'Total', value: '${_students!.length}', icon: Icons.people_alt_rounded, gradient: AppColors.primaryGradient),
+              StatCard(label: 'Active', value: '$activeCount', icon: Icons.check_circle_rounded, gradient: AppColors.successGradient),
+              StatCard(label: 'Classes', value: '${classCount.length}', icon: Icons.class_rounded, color: AppColors.info),
+              StatCard(label: 'Avg/Class', value: classCount.isEmpty ? '0' : '${(_students!.length / classCount.length).round()}', icon: Icons.people_outline, gradient: AppColors.warningGradient),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (chartBars.isNotEmpty) ...[
+            const SectionHeader(title: 'Students per Class', subtitle: 'Distribution'),
+            PremiumCard(
+              padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
+              child: MiniBarChart(bars: chartBars, height: 180),
             ),
-          );
-        },
+          ],
+          const SectionHeader(title: 'All Students'),
+          for (final s in _students!.take(100))
+            ListRow(
+              title: s.name,
+              subtitle: '${s.className ?? ''} ${s.section ?? ''} • ${s.rollNo ?? ''}',
+              leading: AppAvatar(initials: s.name, color: AppColors.primary, size: 40, useGradient: true),
+              icon: Icons.school_rounded,
+              accentColor: AppColors.primary,
+            ),
+        ],
       ),
     );
   }
@@ -845,56 +951,85 @@ class _SuperFeesScreenState extends State<SuperFeesScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
+    final collected = double.tryParse('${_finance?['totalCollected'] ?? 0}') ?? 0;
+    final pending = double.tryParse('${_finance?['totalPending'] ?? 0}') ?? 0;
+    final invoiceCount = int.tryParse('${_finance?['invoiceCount'] ?? 0}') ?? 0;
+    final collectedPct = (collected + pending) > 0 ? (collected / (collected + pending)).clamp(0.0, 1.0) : 0.0;
+    final paidCount = _invoices?.where((i) => i.isPaid).length ?? 0;
+    final unpaidCount = _invoices?.where((i) => !i.isPaid).length ?? 0;
+
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_finance != null) ...[
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Fee Collection', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    const SizedBox(height: 12),
-                    _statRow('Total Collected', 'Rs ${_finance!['totalCollected']?.toString() ?? '0'}'),
-                    _statRow('Pending', 'Rs ${_finance!['totalPending']?.toString() ?? '0'}'),
-                    _statRow('Invoices', _finance!['invoiceCount']?.toString() ?? '0'),
-                  ],
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Fee Collection',
+            subtitle: 'College-wide financial overview',
+            icon: Icons.account_balance_wallet_rounded,
+            gradient: AppColors.successGradient,
+          ),
+          const SizedBox(height: 18),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.12,
+            children: [
+              StatCard(label: 'Collected', value: formatMoney(collected), icon: Icons.savings_outlined, gradient: AppColors.successGradient),
+              StatCard(label: 'Pending', value: formatMoney(pending), icon: Icons.pending_actions, gradient: AppColors.warningGradient),
+              StatCard(label: 'Invoices', value: '$invoiceCount', icon: Icons.receipt_long_rounded, color: AppColors.info),
+              StatCard(label: 'Paid', value: '$paidCount', icon: Icons.check_circle_rounded, gradient: AppColors.primaryGradient),
+            ],
+          ),
+          const SizedBox(height: 14),
+          GradientSummary.pair(
+            label1: 'Collected',
+            value1: formatMoney(collected),
+            label2: 'Pending',
+            value2: formatMoney(pending),
+            gradient: AppColors.warmGradient,
+          ),
+          // Donut chart for collection rate
+          const SectionHeader(title: 'Collection Rate'),
+          PremiumCard(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                DonutChart(
+                  percent: collectedPct,
+                  centerLabel: '${(collectedPct * 100).toStringAsFixed(0)}%',
+                  centerSub: 'Collected',
+                  gradient: AppColors.successGradient,
+                  size: 100,
                 ),
-              ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _MiniStatRow(color: AppColors.success, label: 'Paid', value: '$paidCount'),
+                      const SizedBox(height: 8),
+                      _MiniStatRow(color: AppColors.warning, label: 'Unpaid', value: '$unpaidCount'),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text('Recent Invoices', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-          ],
+          ),
+          const SectionHeader(title: 'Recent Invoices'),
           if (_invoices != null)
             for (final inv in _invoices!.take(20))
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: CircleAvatar(backgroundColor: inv.status == 'paid' ? AppColors.success : AppColors.warning,
-                      child: Icon(inv.status == 'paid' ? Icons.check : Icons.pending, color: Colors.white, size: 18)),
-                  title: Text(inv.studentName, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  subtitle: Text('Rs ${inv.amount} • ${inv.status}', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                ),
+              ListRow(
+                title: inv.studentName,
+                subtitle: 'Rs ${inv.amount} • ${inv.status}',
+                icon: inv.status == 'paid' ? Icons.check_circle : Icons.pending,
+                accentColor: inv.status == 'paid' ? AppColors.success : AppColors.warning,
               ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
-          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
         ],
       ),
     );
@@ -940,8 +1075,6 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
     if (_records == null || _records!.isEmpty) return const _EmptyView('No attendance records.');
-    // AttendanceRecord has a Map<String,String> records field (studentId -> status).
-    // Aggregate present/absent across all records.
     int totalEntries = 0;
     int presentEntries = 0;
     for (final r in _records!) {
@@ -951,54 +1084,73 @@ class _SuperAttendanceScreenState extends State<SuperAttendanceScreen> {
       }
     }
     final rate = totalEntries > 0 ? (presentEntries * 100 / totalEntries).round() : 0;
+    final ratePct = totalEntries > 0 ? (presentEntries / totalEntries).clamp(0.0, 1.0) : 0.0;
+    final absentEntries = totalEntries - presentEntries;
+
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Attendance Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                  const SizedBox(height: 12),
-                  _statRow('Sessions', _records!.length.toString()),
-                  _statRow('Total Entries', totalEntries.toString()),
-                  _statRow('Present', presentEntries.toString()),
-                  _statRow('Attendance Rate', '$rate%'),
-                ],
-              ),
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Attendance',
+            subtitle: 'College-wide attendance overview',
+            icon: Icons.check_circle_rounded,
+            gradient: AppColors.successGradient,
+          ),
+          const SizedBox(height: 18),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.12,
+            children: [
+              StatCard(label: 'Sessions', value: '${_records!.length}', icon: Icons.calendar_today_rounded, gradient: AppColors.primaryGradient),
+              StatCard(label: 'Total Entries', value: '$totalEntries', icon: Icons.people_alt_rounded, color: AppColors.info),
+              StatCard(label: 'Present', value: '$presentEntries', icon: Icons.check_circle_rounded, gradient: AppColors.successGradient),
+              StatCard(label: 'Rate', value: '$rate%', icon: Icons.trending_up_rounded, gradient: AppColors.warningGradient),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Donut chart for attendance rate
+          const SectionHeader(title: 'Attendance Rate'),
+          PremiumCard(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                DonutChart(
+                  percent: ratePct,
+                  centerLabel: '$rate%',
+                  centerSub: 'Present',
+                  gradient: AppColors.successGradient,
+                  size: 100,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _MiniStatRow(color: AppColors.success, label: 'Present', value: '$presentEntries'),
+                      const SizedBox(height: 8),
+                      _MiniStatRow(color: AppColors.danger, label: 'Absent', value: '$absentEntries'),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-          Text('Recent Sessions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
+          const SectionHeader(title: 'Recent Sessions'),
           for (final r in _records!.take(30))
-            Card(
-              margin: const EdgeInsets.only(bottom: 6),
-              child: ListTile(
-                leading: CircleAvatar(backgroundColor: AppColors.primary,
-                    child: const Icon(Icons.check_circle, color: Colors.white, size: 16)),
-                title: Text(r.date, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                subtitle: Text('${r.records.length} students', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-              ),
+            ListRow(
+              title: r.date,
+              subtitle: '${r.records.length} students',
+              icon: Icons.check_circle_rounded,
+              accentColor: AppColors.primary,
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
-          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
         ],
       ),
     );
@@ -1044,27 +1196,61 @@ class _SuperResultsScreenState extends State<SuperResultsScreen> {
     if (_loading) return const _LoadingView();
     if (_error != null) return _ErrorView(_error!, _load);
     if (_results == null || _results!.isEmpty) return const _EmptyView('No results found.');
+    // Build chart bars for results
+    final bars = _results!.take(6).map((r) {
+      final avg = r.records.isNotEmpty
+          ? (r.records.values.reduce((a, b) => a + b) / r.records.length)
+          : 0.0;
+      return BarData(
+        label: r.exam.length > 6 ? r.exam.substring(0, 6) : r.exam,
+        value: avg,
+        gradient: AppColors.primaryGradient,
+      );
+    }).toList();
+
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _results!.length > 50 ? 50 : _results!.length,
-        itemBuilder: (_, i) {
-          final r = _results![i];
-          // ExamResult has exam (name), totalMarks, and records (Map<studentId, marks>)
-          final avg = r.records.isNotEmpty
-              ? (r.records.values.reduce((a, b) => a + b) / r.records.length).toStringAsFixed(1)
-              : '0';
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.primary, child: Text(avg, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600))),
-              title: Text(r.exam, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text('${r.records.length} students • Max: ${r.totalMarks}', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        children: [
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Results',
+            subtitle: 'College-wide exam performance',
+            icon: Icons.emoji_events_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 18),
+          StatCard(
+            label: 'Total Exams',
+            value: '${_results!.length}',
+            icon: Icons.assignment_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 14),
+          if (bars.isNotEmpty) ...[
+            const SectionHeader(title: 'Average Score by Exam', subtitle: 'Top exams'),
+            PremiumCard(
+              padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
+              child: MiniBarChart(bars: bars, height: 180),
             ),
-          );
-        },
+          ],
+          const SectionHeader(title: 'All Exams'),
+          for (final r in _results!.take(50))
+            ListRow(
+              title: r.exam,
+              subtitle: '${r.records.length} students • Max: ${r.totalMarks}',
+              icon: Icons.assignment_rounded,
+              accentColor: AppColors.primary,
+              trailing: Text(
+                r.records.isNotEmpty
+                    ? (r.records.values.reduce((a, b) => a + b) / r.records.length).toStringAsFixed(1)
+                    : '0',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1112,21 +1298,59 @@ class _SuperAnnouncementsScreenState extends State<SuperAnnouncementsScreen> {
     return RefreshIndicator(
       onRefresh: _load,
       color: AppColors.primary,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _items!.length,
-        itemBuilder: (_, i) {
-          final a = _items![i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: CircleAvatar(backgroundColor: AppColors.primary, child: const Icon(Icons.campaign, color: Colors.white, size: 18)),
-              title: Text(a.title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              subtitle: Text(a.message, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        children: [
+          const GradientHero(
+            eyebrow: 'Super Admin',
+            title: 'Announcements',
+            subtitle: 'College-wide announcements',
+            icon: Icons.campaign_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 18),
+          StatCard(
+            label: 'Total',
+            value: '${_items!.length}',
+            icon: Icons.campaign_rounded,
+            gradient: AppColors.primaryGradient,
+          ),
+          const SizedBox(height: 14),
+          const SectionHeader(title: 'All Announcements'),
+          for (final a in _items!)
+            ListRow(
+              title: a.title,
+              subtitle: a.message,
+              icon: Icons.campaign_rounded,
+              accentColor: AppColors.primary,
             ),
-          );
-        },
+        ],
       ),
+    );
+  }
+}
+
+// ── Mini stat row for donut chart legends ──
+class _MiniStatRow extends StatelessWidget {
+  final Color color;
+  final String label;
+  final String value;
+  const _MiniStatRow({required this.color, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 10, height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        ),
+        Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+      ],
     );
   }
 }
