@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Yes, the hamburger menu is **open** and displaying the navigation dropdown. Here is what is visible in this mobile view:\n\n**Header/Top Bar:**\n*   **Left:** A circular avatar with a purple-to-blue gradient containing the letter \"F\", followed by the name **\"Faisal Khan\"** in white text.\n*   **Right:** A white **\"X\" (close)** icon, indicating the menu is currently active and can be dismissed.\n\n**Navigation Links (Dropdown Content):**\nThe menu displays a vertical list of four navigation links in a light gray font:\n1.  **About**\n2.  **Stack**\n3.  **Projects**\n4.  **Contact**\n\n**Social Icons:**\nBelow the navigation links, separated by a thin horizontal line, there are three social media icons:\n*   **GitHub** (cat silhouette)\n*   **LinkedIn** (\"in\" logo)\n*   **Email** (envelope icon)\n\n**Visible Page Content (Behind/Below Menu):**\nThe rest of the page content is visible underneath or below the menu area, including:\n*   The large heading: **\"Mobile App Developer\"**\n*   A descriptive paragraph about designing web and mobile products.\n*   Two call-to-action buttons: **\"Let's build something\"** (white) and **\"View my stack\"** (dark/outlined).\n*   Statistics showing **30+ Projects**, **4+ Years**, and **20+ Happy clients**.\n*   A circular \"N\" icon at the bottom left.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1785587137,
+  "id": "20260801202534fa869f44a7ce41b1",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260801202534fa869f44a7ce41b1",
+  "usage": {
+    "completion_tokens": 316,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1720,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 2036
+  }
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com/blombard",
+    "name": "Baptiste Lombard blombard",
+    "snippet": "Achievement : YOLO Achievement : Pull Shark x4 Achievement : Arctic Code Vault ... Send reminders to requested reviewers of a pull request. JavaScript 10 3. Read more",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/programming/comments/rrsnbt/study_developers_spend_almost_2_days_a_week_just",
+    "name": "Study: Developers spend almost 2 days a week just waiting",
+    "snippet": "... requested reviewers if they haven't. Ours pings at 9am, 2pm and 4pm I think. I think it's just the normal GitHub integration. Not sure it helps ... Read more",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://in.linkedin.com/in/shrika-kota",
+    "name": "Shrika Kota - McAfee",
+    "snippet": "McAfee Experience: McAfee · Education: Indian Institute of Technology, Dharwad · Location: 580001 · 500+ connections on LinkedIn. View Shrika Kota's profile on ...",
+    "host_name": "in.linkedin.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/orgs/community/discussions/179153",
+    "name": "YOLO achievement not granted after multiple valid merges",
+    "snippet": "Nov 8, 2025 — Your pull requests are created and merged by you without any review or approvals, and are marked as merged on GitHub , yet the badge has not ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/orgs/community/discussions/38626",
+    "name": "How to merge a pull request without reviewing the code",
+    "snippet": "Nov 8, 2022 — In the top right corner at Reviewers section, request someone to review your pull request; Merge the pull request without finishing the review . Read more",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

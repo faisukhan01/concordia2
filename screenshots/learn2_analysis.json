@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the 390px mobile view provided, here is the exact description of the **'Currently Learning'** card:\n\n*   **Icon:**\n    *   **Position:** Located at the top-left of the card's content area.\n    *   **Shape:** An open book or notebook with a small sparkle/star above it.\n    *   **Color:** A bright, neon cyan (or light blue).\n*   **Label Text:** The text **\"CURRENTLY LEARNING\"** is positioned below the icon. It is in all-caps, small font size, and colored cyan. To its left is a small cyan dot.\n*   **Main Title (\"Rust & WebAssembly\"):**\n    *   **Visibility:** **Yes, every letter is fully visible.** There is no text truncation or covering.\n    *   **Appearance:** Large, bold white text. It is clearly legible and sits on a single line.\n*   **Subtitle:** Below the title, there is a smaller, grey paragraph that reads: *\"Systems programming for the browser — shipping near-native performance to the web.\"*\n*   **Progress Bar:**\n    *   A horizontal bar located at the bottom of the card.\n    *   The filled portion (approx. 62%) has a gradient from cyan on the left to purple on the right. The remaining portion is a dark grey.\n    *   To the right of the bar, there is a small upward-trending graph icon followed by the text **\"62%\"** in cyan.\n\n**Layout Analysis:**\n*   **Overlap:** **No**, there is absolutely no overlap between the icon and any text elements. The spacing between the icon, label, title, subtitle, and progress bar is consistent and generous.\n*   **Cleanliness:** The layout is exceptionally clean. The alignment is precise (left-aligned), the typography hierarchy is clear, and the contrast against the dark background makes everything easy to read.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1785587044,
+  "id": "20260801202359a996bfa6b8d44185",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260801202359a996bfa6b8d44185",
+  "usage": {
+    "completion_tokens": 400,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1769,
+    "prompt_tokens_details": {
+      "cached_tokens": 5
+    },
+    "total_tokens": 2169
+  }
+}
