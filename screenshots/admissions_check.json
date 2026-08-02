@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the image provided, here are the answers to your questions:\n\n(1) **Yes**, the sidebar has a **'Dashboard'** item at the top. It is highlighted in orange, indicating it is the currently active page.\n\n(2) The other items in the sidebar, listed below the Dashboard, are:\n*   **New Enrollment**\n*   **Student Records**\n*   **Fee Records**\n*   **Settings**\n\n(3) **Yes**, the main content area is showing a dashboard/overview page. It contains:\n*   A welcome header (\"Welcome, Admission\").\n*   Four summary statistic cards at the top (Enrolled Students, This Month, Pending Base Fee, Base Fee Locked), all currently displaying \"0\".\n*   Two main content sections for \"Recent Admissions\" and \"Enrollment by Program\" (which are currently empty).\n*   A \"Quick Tip\" notification bar at the very top of the content area.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1785649986,
+  "id": "20260802135304a84667d5936f4ba8",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260802135304a84667d5936f4ba8",
+  "usage": {
+    "completion_tokens": 194,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1741,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 1935
+  }
+}

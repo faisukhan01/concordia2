@@ -30,6 +30,20 @@ class AccountantPortal extends StatefulWidget {
 class _AccountantPortalState extends State<AccountantPortal> {
   late AccountantTab _tab = widget.initialTab;
 
+  @override
+  void initState() {
+    super.initState();
+    // Admin-portal cleanup: admins must never land on a sub-portal dashboard.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final role = context.read<AuthProvider>().user?.role;
+      final isAdmin = role == 'admin' || role == 'super-admin';
+      if (isAdmin && _tab == AccountantTab.dashboard) {
+        _switchTo(AccountantTab.students);
+      }
+    });
+  }
+
   void _switchTo(AccountantTab t) => setState(() => _tab = t);
 
   @override
@@ -37,22 +51,41 @@ class _AccountantPortalState extends State<AccountantPortal> {
     // Admins need this tab bar to switch a sub-portal's tasks; the portal's
     // own role already has the same items in the bottom nav, so we hide it
     // there to avoid redundancy.
+    //
+    // IMPORTANT (admin-portal cleanup): when an ADMIN opens a sub-portal, the
+    // sub-portal's own Dashboard is intentionally HIDDEN from the tab bar.
+    // The admin already has his own Admin Dashboard — sub-portal dashboards
+    // are for the portal's own role only. This mirrors the web app, where the
+    // admin sidebar's sub-portal dropdowns contain only working modules.
     final role = context.read<AuthProvider>().user!.role;
     final showTabs = role == 'admin' || role == 'super-admin';
+    final allLabels = <String>['Dashboard', 'Students', 'Fees', 'Misc', 'Logins'];
+    final allIcons = <IconData>[
+      Icons.dashboard_outlined,
+      Icons.people_outline,
+      Icons.receipt_long_outlined,
+      Icons.add_circle_outline,
+      Icons.vpn_key_outlined,
+    ];
+    final allValues = AccountantTab.values.toList();
+    final idx = List<int>.generate(allLabels.length, (i) => i);
+    final visibleIdx = showTabs
+        ? idx.where((i) => allValues[i] != AccountantTab.dashboard).toList()
+        : idx;
+    final visibleTabs = [
+      for (final i in visibleIdx) SubTabItem(label: allLabels[i], icon: allIcons[i]),
+    ];
+    final currentVisible = visibleIdx.indexOf(
+      visibleIdx.firstWhere((i) => allValues[i] == _tab, orElse: () => visibleIdx.first),
+    );
     return Column(
       children: [
         if (showTabs)
           SubTabBar(
-          tabs: const [
-            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
-            SubTabItem(label: 'Students', icon: Icons.people_outline),
-            SubTabItem(label: 'Fees', icon: Icons.receipt_long_outlined),
-            SubTabItem(label: 'Misc', icon: Icons.add_circle_outline),
-            SubTabItem(label: 'Logins', icon: Icons.vpn_key_outlined),
-          ],
-          currentIndex: _tab.index,
-          onTap: (i) => _switchTo(AccountantTab.values[i]),
-        ),
+            tabs: visibleTabs,
+            currentIndex: currentVisible,
+            onTap: (i) => _switchTo(allValues[visibleIdx[i]]),
+          ),
         Expanded(child: _buildTab()),
       ],
     );

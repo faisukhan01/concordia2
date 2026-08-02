@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the image provided, here is the precise breakdown of the left sidebar and the main content area:\n\n### **Left Sidebar Contents**\n\n**1. Is there an 'Admin Dashboard' item?**\n**Yes.** It is the first item in the sidebar, highlighted in orange, indicating it is the currently active page.\n\n**2. Are there dropdown groups for 'Admission Office', 'Accountant', 'Academic Office'?**\n**Yes.** All three groups are present below the Admin Dashboard.\n\n**3. Do any of those dropdowns contain a 'Dashboard' or 'Overview' item?**\n**No.** The dropdowns appear to be collapsed (indicated by the right-facing chevrons `>`), and there is no text visible suggesting they contain a \"Dashboard\" or \"Overview\" link within them.\n\n**4. What modules are listed under each dropdown?**\nSince the groups are collapsed, the specific modules inside them are **not visible** in this view. Only the group headers are shown:\n*   **ADMISSION OFFICE** (Collapsed)\n*   **ACCOUNTANT** (Collapsed)\n*   **ACADEMIC OFFICE** (Collapsed)\n\n**5. Other Sidebar Items:**\nBelow the three office groups, there is one additional menu item:\n*   **Settings** (with a gear icon)\n\n***\n\n### **Main Content Area Analysis**\n\n**Is the main content area showing the admin's own dashboard?**\n**Yes.** The page title at the top reads \"**Admin Dashboard**\" and the content confirms it is the admin's overview page, containing:\n*   **Stats Cards:**\n    *   **Total Students:** 0\n    *   **Teachers:** 0\n    *   **Office Staff:** 4\n    *   **Fee Collected:** Rs 0\n*   **Sections:**\n    *   **Recent Announcements** (Currently empty)\n    *   **At A Glance** (Showing counts for Branches, Classes, Events, Report Cards)\n    *   **Admission Office Pulse** (Showing Enrolled, Fee Locked, Pending Lock stats)",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1785649935,
+  "id": "2026080213521069524320d3f14123",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026080213521069524320d3f14123",
+  "usage": {
+    "completion_tokens": 434,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1806,
+    "prompt_tokens_details": {
+      "cached_tokens": 4
+    },
+    "total_tokens": 2240
+  }
+}

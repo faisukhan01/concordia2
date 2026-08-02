@@ -29,6 +29,20 @@ class AcademicPortal extends StatefulWidget {
 class _AcademicPortalState extends State<AcademicPortal> {
   late AcademicTab _tab = widget.initialTab;
 
+  @override
+  void initState() {
+    super.initState();
+    // Admin-portal cleanup: admins must never land on a sub-portal dashboard.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final role = context.read<AuthProvider>().user?.role;
+      final isAdmin = role == 'admin' || role == 'super-admin';
+      if (isAdmin && _tab == AcademicTab.dashboard) {
+        _switchTo(AcademicTab.classes);
+      }
+    });
+  }
+
   void _switchTo(AcademicTab t) => setState(() => _tab = t);
 
   @override
@@ -36,22 +50,41 @@ class _AcademicPortalState extends State<AcademicPortal> {
     // Admins need this tab bar to switch a sub-portal's tasks; the portal's
     // own role already has the same items in the bottom nav, so we hide it
     // there to avoid redundancy.
+    //
+    // IMPORTANT (admin-portal cleanup): when an ADMIN opens a sub-portal, the
+    // sub-portal's own Dashboard is intentionally HIDDEN from the tab bar.
+    // The admin already has his own Admin Dashboard — sub-portal dashboards
+    // are for the portal's own role only. This mirrors the web app, where the
+    // admin sidebar's sub-portal dropdowns contain only working modules.
     final role = context.read<AuthProvider>().user!.role;
     final showTabs = role == 'admin' || role == 'super-admin';
+    final allLabels = <String>['Dashboard', 'Classes', 'Timetable', 'Exams', 'Results'];
+    final allIcons = <IconData>[
+      Icons.dashboard_outlined,
+      Icons.class_outlined,
+      Icons.calendar_today_outlined,
+      Icons.assignment_outlined,
+      Icons.description_outlined,
+    ];
+    final allValues = AcademicTab.values.toList();
+    final idx = List<int>.generate(allLabels.length, (i) => i);
+    final visibleIdx = showTabs
+        ? idx.where((i) => allValues[i] != AcademicTab.dashboard).toList()
+        : idx;
+    final visibleTabs = [
+      for (final i in visibleIdx) SubTabItem(label: allLabels[i], icon: allIcons[i]),
+    ];
+    final currentVisible = visibleIdx.indexOf(
+      visibleIdx.firstWhere((i) => allValues[i] == _tab, orElse: () => visibleIdx.first),
+    );
     return Column(
       children: [
         if (showTabs)
           SubTabBar(
-          tabs: const [
-            SubTabItem(label: 'Dashboard', icon: Icons.dashboard_outlined),
-            SubTabItem(label: 'Classes', icon: Icons.class_outlined),
-            SubTabItem(label: 'Timetable', icon: Icons.calendar_today_outlined),
-            SubTabItem(label: 'Exams', icon: Icons.assignment_outlined),
-            SubTabItem(label: 'Results', icon: Icons.description_outlined),
-          ],
-          currentIndex: _tab.index,
-          onTap: (i) => _switchTo(AcademicTab.values[i]),
-        ),
+            tabs: visibleTabs,
+            currentIndex: currentVisible,
+            onTap: (i) => _switchTo(allValues[visibleIdx[i]]),
+          ),
         Expanded(child: _buildTab()),
       ],
     );

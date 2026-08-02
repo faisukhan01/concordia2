@@ -83,3 +83,6 @@ db/*.db-journal
 .gh-token
 .gh-token-2
 gh-token.txt
+
+# GitHub Actions workflow (push with a token that has workflow scope)
+.github/workflows/
