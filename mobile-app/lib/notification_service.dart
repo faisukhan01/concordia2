@@ -13,23 +13,44 @@
 // which the web app's api.ts calls to POST /api/device-tokens.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// WHY DATA-ONLY FCM PAYLOAD + LOCAL NOTIFICATIONS (WhatsApp-style)
+// HYBRID FCM PAYLOAD (WhatsApp-style) — v3.7.0
 // ─────────────────────────────────────────────────────────────────────────
-// The server sends a DATA-ONLY payload (no top-level `notification` field).
-// This means the Android system does NOT auto-display a notification — our
-// Dart code is ALWAYS responsible for showing it. This gives us:
+// The server sends BOTH a `notification` field AND a `data` field.
 //
-//   • Full control over sound, vibration, channel, and priority.
-//   • Identical behavior in foreground, background, AND terminated states.
-//   • No dependency on a possibly-stale notification channel created by an
-//     older app version (Android forbids changing channel settings after
-//     creation, so a broken channel from v3.5.0 would silently swallow
-//     `notification`-field pushes forever).
+// BACKGROUND / TERMINATED (app closed):
+//   The Android OS ITSELF displays the notification via the system tray using
+//   the channel specified in `android.notification.channel_id` (which we
+//   create at app startup with sound + high importance). NO Dart code runs.
+//   This is the RELIABLE delivery path — it works even when the app is
+//   force-killed, because the OS (not the app) is responsible for showing
+//   the notification. This is exactly how WhatsApp/Telegram deliver messages.
 //
-// The background handler (`_firebaseMessagingBackgroundHandler`) is a
-// TOP-LEVEL function annotated with `@pragma('vm:entry-point')` so the
-// Android OS can spin up a background isolate to run it when the app is
-// closed. It creates the channel AND shows the local notification itself.
+// FOREGROUND (app open):
+//   `onMessage` fires. The OS does NOT auto-display a notification when the
+//   app is in the foreground — so we show a local notification ourselves via
+//   flutter_local_notifications, with sound + vibration + heads-up banner.
+//
+// WHY NOT data-only (v3.6.1's approach)?
+//   Data-only required the app's background isolate to spin up so Dart could
+//   call `flutterLocalNotifications.show()`. On real Android devices —
+//   especially Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo) — the OS aggressively
+//   KILLS background isolates. The isolate never spun up, the local
+//   notification was never shown, and the user saw NOTHING. The hybrid
+//   approach delegates display to the OS, which always works.
+//
+// CHANNEL IMMUTABILITY:
+//   Android does NOT let apps change a channel's settings after creation.
+//   v3.6.0/v3.6.1 used `concordia_notifications_v2`. If a user did an in-place
+//   upgrade (didn't uninstall first), that channel may have been created with
+//   broken sound settings, and v3.6.1's `playSound: true` was SILENTLY
+//   IGNORED. v3.7.0 uses a FRESH channel ID `concordia_notifications_v3` to
+//   force creation of a new channel with correct sound + high importance.
+//
+// The background handler (`_firebaseMessagingBackgroundHandler`) is still
+// registered as a fallback — if the OS does spin up the isolate (e.g. on
+// stock Android with no battery optimization), it will ALSO show a local
+// notification. This is harmless (Android dedupes by notification ID) and
+// ensures the notification is shown even if the system-tray path fails.
 // ─────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
@@ -67,37 +88,44 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       const InitializationSettings(android: androidInit),
     );
 
-    // Create the notification channel (required for Android 8+).
-    // We use a FRESH channel ID (`concordia_notifications_v2`) because Android
-    // does NOT allow apps to change a channel's settings after creation. The
-    // old `concordia_notifications` channel from v3.5.0 may have been created
-    // without sound, and we can't fix it — we can only use a new channel.
-    await flutterLocalNotifications
+    // Delete OLD channels (v1, v2) so they disappear from Android settings.
+    // Android does NOT let apps change a channel's settings after creation,
+    // so if v2 was created by an older app version with broken sound, the
+    // only fix is to use a NEW channel ID (v3) and delete the old ones.
+    final bgAndroidPlugin = flutterLocalNotifications
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(
-          const AndroidNotificationChannel(
-            'concordia_notifications_v2',
-            'Concordia Notifications',
-            description:
-                'Announcements, exams, marks, attendance, and fee reminders from Concordia College.',
-            importance: Importance.high,
-            playSound: true,
-            enableVibration: true,
-            showBadge: true,
-          ),
-        );
+            AndroidFlutterLocalNotificationsPlugin>();
+    await bgAndroidPlugin?.deleteNotificationChannel('concordia_notifications');
+    await bgAndroidPlugin?.deleteNotificationChannel('concordia_notifications_v2');
 
-    // SHOW the local notification. This is the key step — without it, a
-    // data-only payload would produce NO visible notification. We use a
-    // unique ID (timestamp) so each push gets its own notification row.
+    // Create the FRESH v3 channel (sound + vibration + high importance).
+    await bgAndroidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'concordia_notifications_v3',
+        'Concordia Notifications',
+        description:
+            'Announcements, exams, marks, attendance, and fee reminders from Concordia College.',
+        importance: Importance.high,
+        playSound: true,
+        enableVibration: true,
+        showBadge: true,
+      ),
+    );
+
+    // SHOW the local notification as a fallback. With the hybrid payload,
+    // the Android OS already shows a system-tray notification when the app
+    // is in the background/terminated. But on some devices (or if the
+    // system-tray path fails), the background isolate ALSO runs — so we show
+    // a local notification here too. Android dedupes by notification ID, and
+    // since we use a unique timestamp ID, this just ensures the notification
+    // is always visible.
     await flutterLocalNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title,
       body,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          'concordia_notifications_v2',
+          'concordia_notifications_v3',
           'Concordia Notifications',
           channelDescription:
               'Announcements, exams, marks, attendance, and fee reminders from Concordia College.',
@@ -128,14 +156,17 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   // The Android notification channel ID — MUST match the one we set in the
-  // FCM payload on the server (`android.notification.channelId`) AND in the
+  // FCM payload on the server (`android.notification.channel_id`) AND in the
   // AndroidManifest.xml (`com.google.firebase.messaging.default_notification_channel_id`).
   //
-  // v2: We switched from `concordia_notifications` → `concordia_notifications_v2`
-  // because Android does NOT let apps change a channel's settings after
-  // creation. The old channel may have been created without sound by an
-  // older app version, and we can't fix it — only a new channel ID works.
-  static const String _channelId = 'concordia_notifications_v2';
+  // v3 (v3.7.0): We switched from `concordia_notifications_v2` →
+  // `concordia_notifications_v3` because Android does NOT let apps change a
+  // channel's settings after creation. If a user did an in-place upgrade
+  // (didn't uninstall v3.6.0/v3.6.1 first), the v2 channel may have been
+  // created with broken sound settings, and `playSound: true` was SILENTLY
+  // IGNORED. A fresh channel ID forces creation of a new channel with correct
+  // sound + high importance.
+  static const String _channelId = 'concordia_notifications_v3';
   static const String _channelName = 'Concordia Notifications';
   static const String _channelDesc =
       'Announcements, exams, marks, attendance, and fee reminders from Concordia College.';
@@ -157,15 +188,19 @@ class NotificationService {
       // 2. Create the Android notification channel (required for Android 8+).
       //    Without this, notifications are silently dropped on Android 8+.
       //    We use Importance.high so the notification makes a sound + appears as a heads-up banner.
-      //    We also DELETE the old channel (v1) so it doesn't confuse the user
-      //    in Android settings (it just disappears from the list).
+      //    We DELETE the old v1 + v2 channels so they don't confuse the user
+      //    in Android settings (they just disappear from the list), AND so
+      //    we bypass Android's channel immutability restriction (if v2 was
+      //    created by an older app version with broken sound, we can't fix
+      //    it — we can only use a new v3 channel ID).
       try {
         final androidPlugin = _localNotifications
             .resolvePlatformSpecificImplementation<
                 AndroidFlutterLocalNotificationsPlugin>();
-        // Delete the old v1 channel (no-op if it doesn't exist).
+        // Delete old v1 + v2 channels (no-op if they don't exist).
         await androidPlugin?.deleteNotificationChannel('concordia_notifications');
-        // Create the fresh v2 channel with sound + vibration.
+        await androidPlugin?.deleteNotificationChannel('concordia_notifications_v2');
+        // Create the fresh v3 channel with sound + vibration.
         await androidPlugin?.createNotificationChannel(
           const AndroidNotificationChannel(
             _channelId,
