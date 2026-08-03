@@ -4,6 +4,17 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Vibration feedback -->
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- POST_NOTIFICATIONS — required on Android 13+ (API 33+) to show any notification.
+         Without this, the OS silently drops ALL notifications, including FCM background pushes. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- WAKE_LOCK — keeps the CPU awake briefly while processing an incoming FCM push
+         so the notification isn't dropped when the device is dozing. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- RECEIVE_BOOT_COMPLETED — allows the app to re-register its FCM token after a phone reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- SCHEDULE_EXACT_ALARM — for precise notification scheduling (used by flutter_local_notifications). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
     <application
         android:label="Concordia College"
@@ -32,6 +43,23 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- CRITICAL: Default notification channel for FCM background pushes.
+             When a push arrives and the app is CLOSED, the FCM SDK shows a system
+             notification automatically — but ONLY if it knows which channel to use.
+             Without this meta-data, background notifications are SILENTLY DROPPED on Android 8+. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="concordia_notifications" />
+        <!-- Default notification icon for FCM background pushes.
+             Must be a white-on-transparent drawable (NOT a mipmap with color).
+             We use ic_launcher for now — FCM will silhouette it. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
+        <!-- Default notification color (the tint applied to the icon). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/concordia_orange" />
     </application>
     <queries>
         <intent>
