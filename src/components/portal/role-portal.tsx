@@ -13,7 +13,7 @@ import {
   GraduationCap, Search, Bell, Menu, LogOut,
   PanelLeftClose, PanelLeft, Shield,
   CheckCircle2, AlertCircle, Receipt, Award, CalendarCheck, X,
-  ChevronDown,
+  ChevronDown, Sparkles,
 } from 'lucide-react';
 
 import { SuperAdminPortal } from './super-admin-portal';
@@ -28,15 +28,23 @@ import { CommandPalette } from './command-palette';
 import { OnboardingTips } from '@/components/onboarding/onboarding-tooltips';
 import { HelpWidget } from '@/components/ui/help-widget';
 import { api, setOnBlocked } from '@/lib/api';
+import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
+import { toast } from '@/hooks/use-toast';
+import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck } from 'lucide-react';
 
 // Notification icon + color mapping per type.
-// announcement=primary, complaint=danger, fee=gold, result=success, attendance=info
 const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
-  announcement: { Icon: CheckCircle2, text: 'text-primary', bg: 'bg-primary/10' },
-  complaint:    { Icon: AlertCircle,  text: 'text-rose-500', bg: 'bg-rose-500/10' },
-  fee:          { Icon: Receipt,      text: 'text-gold',     bg: 'bg-gold/10' },
-  result:       { Icon: Award,        text: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  attendance:   { Icon: CalendarCheck, text: 'text-sky-500',  bg: 'bg-sky-500/10' },
+  announcement: { Icon: Megaphone,      text: 'text-primary',    bg: 'bg-primary/10' },
+  exam:         { Icon: CalendarDays,   text: 'text-violet-600', bg: 'bg-violet-500/10' },
+  'date-sheet': { Icon: ClipboardList,  text: 'text-violet-600', bg: 'bg-violet-500/10' },
+  marks:        { Icon: GraduationCap,  text: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+  attendance:   { Icon: CalendarCheck,  text: 'text-sky-500',    bg: 'bg-sky-500/10' },
+  'fee-due':    { Icon: Wallet,         text: 'text-amber-600',  bg: 'bg-amber-500/10' },
+  'fee-paid':   { Icon: BadgeCheck,     text: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+  fee:          { Icon: Receipt,        text: 'text-gold',       bg: 'bg-gold/10' },
+  result:       { Icon: Award,          text: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+  complaint:    { Icon: AlertCircle,    text: 'text-rose-500',   bg: 'bg-rose-500/10' },
+  general:      { Icon: Bell,           text: 'text-muted-foreground', bg: 'bg-muted' },
 };
 
 function notifMeta(type: string) {
@@ -197,6 +205,40 @@ export function RolePortal() {
     fetchNotifs();
   }, [fetchNotifs]);
 
+  // ── FCM bridge: wire up the native push notification bridge + re-register
+  // the token after login (the native shell may have pushed the token before
+  // the user was authenticated).
+  useEffect(() => {
+    initFcmBridge();
+    refreshFcmTokenAfterLogin();
+  }, [user?.id]);
+
+  // ── Poll for the unread count every 60s so the bell badge stays fresh
+  //    without the user needing to open the panel. (Cheap endpoint — just a
+  //    COUNT query.)
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const { unread } = await api.getUnreadCount();
+        if (active) setNotifUnread(unread);
+      } catch {}
+    };
+    const id = setInterval(poll, 60_000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  // ── Listen for "concordia:open-notifications" — dispatched by the FCM
+  //    bridge when the user taps a notification with route='notifications'.
+  useEffect(() => {
+    function onOpen() {
+      setNotifOpen(true);
+      fetchNotifs();
+    }
+    window.addEventListener('concordia:open-notifications', onOpen);
+    return () => window.removeEventListener('concordia:open-notifications', onOpen);
+  }, [fetchNotifs]);
+
   // next-themes hydration guard
   useEffect(() => setMounted(true), []);
 
@@ -223,6 +265,79 @@ export function RolePortal() {
     const next = !notifOpen;
     setNotifOpen(next);
     if (next) fetchNotifs();
+  };
+
+  // Mark a single notification as read + navigate based on its data.route.
+  const onNotifClick = async (n: any) => {
+    if (!n?.read && n?.id) {
+      try {
+        await api.markNotificationRead(n.id);
+        // Optimistically update the local state
+        setNotifItems((prev) => prev.map((x) => x.id === n.id ? { ...x, read: 1 } : x));
+        setNotifUnread((u) => Math.max(0, u - 1));
+      } catch {}
+    }
+    // Navigate based on the notification's data payload
+    let route: string | undefined;
+    try {
+      route = n?.data ? (typeof n.data === 'string' ? JSON.parse(n.data).route : n.data.route) : undefined;
+    } catch {}
+    if (route) {
+      // Re-use the FCM bridge's tap handler by dispatching the same event
+      window.dispatchEvent(new CustomEvent('concordia:open-notifications'));
+      // The fcm-bridge handles the actual navigation via onNotificationTap.
+      // We call it directly here for in-app clicks.
+      const w = window as any;
+      if (w.concordiaNative?.onNotificationTap) {
+        const data = typeof n.data === 'string' ? JSON.parse(n.data) : (n.data || {});
+        w.concordiaNative.onNotificationTap(data);
+      }
+    }
+  };
+
+  // Mark all notifications as read.
+  const onMarkAllRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+      setNotifItems((prev) => prev.map((x) => ({ ...x, read: 1 })));
+      setNotifUnread(0);
+      toast({ title: 'All notifications marked as read' });
+    } catch {
+      toast({ title: 'Failed to mark notifications as read', variant: 'destructive' });
+    }
+  };
+
+  // Send a test push notification (only available inside the native app).
+  const [sendingTest, setSendingTest] = useState(false);
+  const onSendTest = async () => {
+    setSendingTest(true);
+    try {
+      const res = await api.sendTestNotification();
+      if (res?.success) {
+        toast({
+          title: 'Test push sent!',
+          description: res.pushed > 0
+            ? `Delivered to ${res.pushed} device(s). Check your phone's notification panel.`
+            : 'No registered devices yet — open the app on your phone first.',
+        });
+        // Refresh the in-app bell so the test notification shows up there too.
+        setTimeout(fetchNotifs, 500);
+      } else {
+        toast({
+          title: 'Push notifications not configured',
+          description: 'The server FIREBASE_SERVICE_ACCOUNT env var is not set yet. Ask the admin.',
+          variant: 'destructive',
+        });
+      }
+    } catch (e: any) {
+      toast({
+        title: 'Failed to send test push',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingTest(false);
+    }
   };
 
   const role = user?.role || 'student';
@@ -446,7 +561,7 @@ export function RolePortal() {
                   </div>
 
                   {/* Body */}
-                  <div className="flex-1 overflow-y-auto scroll-fancy">
+                  <div className="flex-1 overflow-y-auto scroll-fancy max-h-[360px]">
                     {notifLoading ? (
                       <div className="p-2 space-y-1">
                         {[0, 1, 2].map((i) => (
@@ -474,9 +589,11 @@ export function RolePortal() {
                           const { Icon, text, bg } = notifMeta(n?.type);
                           return (
                             <li key={n?.id ?? Math.random()}>
-                              <div
+                              <button
+                                type="button"
+                                onClick={() => onNotifClick(n)}
                                 className={cn(
-                                  'flex items-start gap-3 p-3 rounded-lg transition cursor-default',
+                                  'w-full text-left flex items-start gap-3 p-3 rounded-lg transition',
                                   n?.read ? 'hover:bg-accent' : 'bg-primary/5 hover:bg-primary/10'
                                 )}
                               >
@@ -490,20 +607,44 @@ export function RolePortal() {
                                       <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
                                     )}
                                   </div>
-                                  {n?.message && (
-                                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.message}</p>
+                                  {n?.body && (
+                                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.body}</p>
                                   )}
                                   <div className="text-[10px] text-muted-foreground/70 mt-1">
                                     {formatRelativeTime(n?.createdAt)}
                                   </div>
                                 </div>
-                              </div>
+                              </button>
                             </li>
                           );
                         })}
                       </ul>
                     )}
                   </div>
+
+                  {/* Footer — Mark all read + Send test (native app only) */}
+                  {(notifUnread > 0 || isNativeApp()) && (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-border shrink-0 bg-muted/30">
+                      {notifUnread > 0 ? (
+                        <button
+                          onClick={onMarkAllRead}
+                          className="text-[11px] font-medium text-primary hover:text-primary/80 transition"
+                        >
+                          Mark all as read
+                        </button>
+                      ) : <span />}
+                      {isNativeApp() && (
+                        <button
+                          onClick={onSendTest}
+                          disabled={sendingTest}
+                          className="text-[11px] font-medium text-muted-foreground hover:text-primary transition inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <Sparkles className={cn('h-3 w-3', sendingTest && 'animate-spin')} />
+                          {sendingTest ? 'Sending…' : 'Send test push'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -57,6 +57,11 @@ server.log
 *.keystore
 *.jks
 key.properties
+# Firebase service account JSON (contains private key — read from env var in prod)
+firebase-adminsdk-*.json
+*-firebase-adminsdk-*.json
+# google-services.json IS committed — it's needed for the Android build and
+# contains only the public app ID + API key (no secrets).
 
 # Local databases
 db/*.db

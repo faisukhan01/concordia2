@@ -128,6 +128,115 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true });
     }
 
+    // ===================== PUSH NOTIFICATIONS (FCM) =====================
+    // Register / refresh a device token for the logged-in user.
+    // Called by the Flutter app on every startup (after FCM gives it a token).
+    if (method === 'POST' && path === 'device-tokens') {
+      const user = await requireAuth(req);
+      const { token, platform } = body || {};
+      if (!token) return NextResponse.json({ error: 'token required' }, { status: 400 });
+      // Upsert: if this token already exists for this user, just update lastSeen.
+      const existing = await db.execute({
+        sql: 'SELECT id FROM device_tokens WHERE userId = ? AND token = ?',
+        args: [user.id, token],
+      });
+      if (existing.rows.length > 0) {
+        await db.execute({
+          sql: 'UPDATE device_tokens SET lastSeen = datetime(\'now\'), role = ? WHERE userId = ? AND token = ?',
+          args: [user.role, user.id, token],
+        });
+      } else {
+        const id = nextId('DT');
+        await db.execute({
+          sql: `INSERT INTO device_tokens (id, userId, role, token, platform, createdAt, lastSeen)
+                VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+          args: [id, user.id, user.role, token, platform || 'android'],
+        });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // Unregister a device token (called on sign-out so we don't push to a
+    // device that no longer belongs to this user).
+    if (method === 'DELETE' && path === 'device-tokens') {
+      const user = await requireAuth(req);
+      const token = query.token;
+      if (!token) return NextResponse.json({ error: 'token query param required' }, { status: 400 });
+      await db.execute({
+        sql: 'DELETE FROM device_tokens WHERE userId = ? AND token = ?',
+        args: [user.id, token],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Get notifications for the logged-in user (newest first).
+    if (method === 'GET' && path === 'notifications') {
+      const user = await requireAuth(req);
+      const limit = Math.min(parseInt(query.limit || '50', 10) || 50, 200);
+      const r = await db.execute({
+        sql: 'SELECT id, type, title, body, data, read, createdAt FROM notifications WHERE userId = ? ORDER BY createdAt DESC LIMIT ?',
+        args: [user.id, limit],
+      });
+      const unreadR = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND read = 0',
+        args: [user.id],
+      });
+      const unread = (unreadR.rows[0] as any)?.count || 0;
+      return NextResponse.json({ items: r.rows, unread });
+    }
+
+    // Get only the unread count (cheap call for the bell badge polling).
+    if (method === 'GET' && path === 'notifications/unread-count') {
+      const user = await requireAuth(req);
+      const r = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND read = 0',
+        args: [user.id],
+      });
+      return NextResponse.json({ unread: (r.rows[0] as any)?.count || 0 });
+    }
+
+    // Mark a single notification as read.
+    if (method === 'POST' && pathSegments[0] === 'notifications' && pathSegments[2] === 'read' && pathSegments.length === 3) {
+      const user = await requireAuth(req);
+      const id = pathSegments[1];
+      await db.execute({
+        sql: 'UPDATE notifications SET read = 1 WHERE id = ? AND userId = ?',
+        args: [id, user.id],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Mark ALL of the user's notifications as read.
+    if (method === 'POST' && path === 'notifications/read-all') {
+      const user = await requireAuth(req);
+      await db.execute({
+        sql: 'UPDATE notifications SET read = 1 WHERE userId = ?',
+        args: [user.id],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Send a TEST push notification to the logged-in user's devices.
+    // Useful for verifying the FCM pipeline end-to-end after setup.
+    if (method === 'POST' && path === 'notifications/test') {
+      const user = await requireAuth(req);
+      const { sendPushToUser, fcmEnabled } = await import('./fcm');
+      if (!fcmEnabled()) {
+        return NextResponse.json({
+          success: false,
+          error: 'FIREBASE_SERVICE_ACCOUNT env var is not set on the server. Ask the admin to add it in Vercel.',
+        }, { status: 503 });
+      }
+      const result = await sendPushToUser(
+        user.id,
+        'general',
+        '🔔 Concordia notifications are working!',
+        `Hi ${user.name?.split(' ')[0] || 'there'} — this is a test push notification. You'll receive real ones when announcements, exams, marks, attendance, or fees are updated.`,
+        { route: 'notifications' },
+      );
+      return NextResponse.json({ success: true, ...result });
+    }
+
     // ===================== INSTITUTES (Super Admin) =====================
     if (method === 'GET' && path === 'institutes') {
       const user = await requireAuth(req);
@@ -1181,6 +1290,29 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         args: [id, user.id, user.role, title, message, targetRole || null, targetScope || 'all',
           targetIds ? JSON.stringify(targetIds) : null, user.instituteId || null, user.branchId || null, classId || null],
       });
+
+      // ── Fire push notification to the target audience ──
+      try {
+        const { sendPushToRole, sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          const senderName = user.name || 'Concordia';
+          const body_text = message.length > 100 ? message.slice(0, 100) + '…' : message;
+          const data = { route: 'announcements', announcementId: id };
+          // Decide audience
+          if (targetRole) {
+            await sendPushToRole(targetRole, 'announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
+          } else if (targetScope === 'all' || !targetScope) {
+            // Notify every active student + teacher + staff in the branch
+            const roles = ['student', 'teacher', 'admin', 'admissions', 'accountant', 'academic'];
+            for (const r of roles) {
+              await sendPushToRole(r, 'announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[announcements] push notification failed:', e);
+      }
+
       return NextResponse.json({ id, success: true }, { status: 201 });
     }
 
@@ -1795,6 +1927,20 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           sql: 'UPDATE attendance SET records = ?, teacherId = ? WHERE id = ?',
           args: [JSON.stringify(records), user.id, existingId],
         });
+        // Notify students/parents of the update (push)
+        try {
+          const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+          if (fcmEnabled()) {
+            const absent = records.filter((r: any) => r.status === 'absent').map((r: any) => r.studentId).filter(Boolean);
+            const late = records.filter((r: any) => r.status === 'late').map((r: any) => r.studentId).filter(Boolean);
+            if (absent.length > 0) {
+              await sendPushToUsers(absent, 'attendance', `📋 Attendance marked`, `You were marked ABSENT on ${date}.`, { route: 'attendance', date });
+            }
+            if (late.length > 0) {
+              await sendPushToUsers(late, 'attendance', `📋 Attendance marked`, `You were marked LATE on ${date}.`, { route: 'attendance', date });
+            }
+          }
+        } catch (e) { console.error('[attendance] push failed:', e); }
         return NextResponse.json({ id: existingId, success: true, updated: true });
       }
 
@@ -1803,6 +1949,20 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO attendance (id, branchId, classId, date, teacherId, records) VALUES (?, ?, ?, ?, ?, ?)',
         args: [id, user.branchId, classId || null, date, user.id, JSON.stringify(records)],
       });
+      // Notify absent/late students (push)
+      try {
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          const absent = records.filter((r: any) => r.status === 'absent').map((r: any) => r.studentId).filter(Boolean);
+          const late = records.filter((r: any) => r.status === 'late').map((r: any) => r.studentId).filter(Boolean);
+          if (absent.length > 0) {
+            await sendPushToUsers(absent, 'attendance', `📋 Attendance marked`, `You were marked ABSENT on ${date}.`, { route: 'attendance', date });
+          }
+          if (late.length > 0) {
+            await sendPushToUsers(late, 'attendance', `📋 Attendance marked`, `You were marked LATE on ${date}.`, { route: 'attendance', date });
+          }
+        }
+      } catch (e) { console.error('[attendance] push failed:', e); }
       return NextResponse.json({ id, success: true }, { status: 201 });
     }
 
@@ -1848,6 +2008,31 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO results (id, branchId, exam, courseId, teacherId, totalMarks, date, records) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         args: [id, user.branchId, exam, courseId || null, user.id, totalMarks || 100, date || new Date().toISOString().slice(0, 10), JSON.stringify(records)],
       });
+
+      // ── Push to each student whose marks were just recorded ──
+      try {
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled() && Array.isArray(records)) {
+          const max = totalMarks || 100;
+          const studentIds = records.map((r: any) => r.studentId).filter(Boolean);
+          if (studentIds.length > 0) {
+            // One combined notification per student — customised with their marks.
+            for (const rec of records) {
+              if (!rec.studentId) continue;
+              const marks = Number(rec.marks) || 0;
+              const pct = max > 0 ? Math.round((marks / max) * 100) : 0;
+              await sendPushToUsers(
+                [rec.studentId],
+                'marks',
+                `📝 Marks uploaded — ${exam}`,
+                `You scored ${marks}/${max} (${pct}%). Tap to view details.`,
+                { route: 'results', exam, resultId: id },
+              );
+            }
+          }
+        }
+      } catch (e) { console.error('[results] push failed:', e); }
+
       return NextResponse.json({ id, success: true }, { status: 201 });
     }
 
@@ -1920,6 +2105,16 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO exams (id, branchId, instituteId, name, type, createdBy) VALUES (?, ?, ?, ?, ?, ?)',
         args: [id, brId, user.instituteId || null, cleanName, type || 'Monthly Test', user.id],
       });
+
+      // ── Notify all students + teachers in the branch that a new exam was scheduled ──
+      try {
+        const { sendPushToRole, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          await sendPushToRole('student', 'exam', `📅 New exam: ${cleanName}`, `An exam "${cleanName}" (${type || 'Monthly Test'}) has been scheduled. Check the date sheet for details.`, { route: 'exams', examId: id });
+          await sendPushToRole('teacher', 'exam', `📅 New exam: ${cleanName}`, `An exam "${cleanName}" (${type || 'Monthly Test'}) has been scheduled. Prepare your students.`, { route: 'exams', examId: id });
+        }
+      } catch (e) { console.error('[exams] push failed:', e); }
+
       return NextResponse.json({ id, success: true, name: cleanName, type: type || 'Monthly Test' }, { status: 201 });
     }
 
@@ -2005,6 +2200,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (!month || !year) return NextResponse.json({ error: 'month and year required' }, { status: 400 });
       const students = await db.execute({ sql: 'SELECT id, name, class, branchId, instituteId FROM users WHERE branchId = ? AND role = ?', args: [brId, 'student'] });
       if (students.rows.length === 0) return NextResponse.json({ success: true, generated: 0, message: 'No students found' });
+      const newInvoiceStudentIds: string[] = [];
       let generated = 0;
       for (const student of students.rows as any[]) {
         const existing = await db.execute({ sql: 'SELECT id FROM fee_invoices WHERE studentId = ? AND month = ? AND year = ?', args: [student.id, month, year] });
@@ -2024,7 +2220,23 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           args: [id, student.id, student.name, student.class || '', brId, student.instituteId, month, year, amount, 'Tuition', 'Unpaid', challanNo],
         });
         generated++;
+        newInvoiceStudentIds.push(student.id);
       }
+
+      // ── Notify every student who got a new invoice ──
+      try {
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled() && newInvoiceStudentIds.length > 0) {
+          await sendPushToUsers(
+            newInvoiceStudentIds,
+            'fee-due',
+            `💰 Fee invoice generated`,
+            `Your ${month} ${year} fee invoice has been generated. Please submit your payment.`,
+            { route: 'fees', month: String(month), year: String(year) },
+          );
+        }
+      } catch (e) { console.error('[fee-invoices/generate] push failed:', e); }
+
       return NextResponse.json({ success: true, generated, message: `${generated} invoices generated for ${month} ${year}` });
     }
 
@@ -2035,11 +2247,27 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const { paidAmount, paymentMethod } = body || {};
       const inv = await db.execute({ sql: 'SELECT * FROM fee_invoices WHERE id = ?', args: [id] });
       if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
-      const amount = paidAmount || (inv.rows[0] as any).amount;
+      const invoice = inv.rows[0] as any;
+      const amount = paidAmount || invoice.amount;
       await db.execute({
         sql: 'UPDATE fee_invoices SET status = ?, paidDate = ?, paidAmount = ?, paymentMethod = ? WHERE id = ?',
         args: ['Paid', new Date().toISOString().slice(0, 10), amount, paymentMethod || 'Cash', id],
       });
+
+      // ── Notify the student that their fee payment was recorded ──
+      try {
+        const { sendPushToUser, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled() && invoice.studentId) {
+          await sendPushToUser(
+            invoice.studentId,
+            'fee-paid',
+            `✅ Fee payment received`,
+            `Rs ${Number(amount).toLocaleString()} for ${invoice.month} ${invoice.year} has been marked Paid. Thank you!`,
+            { route: 'fees', invoiceId: id },
+          );
+        }
+      } catch (e) { console.error('[fee-invoices/pay] push failed:', e); }
+
       return NextResponse.json({ success: true, status: 'Paid' });
     }
 
@@ -3268,6 +3496,17 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           });
         }
       }
+
+      // ── Notify all students in the branch that the date sheet is out ──
+      try {
+        const { sendPushToRole, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          const examLabel = examName || 'exam';
+          await sendPushToRole('student', 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The date sheet for "${examLabel}" (Part ${prt}) has been published. Check the Exams section for subject-wise dates.`, { route: 'date-sheets', examId, sheetId });
+          await sendPushToRole('teacher', 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The date sheet for "${examLabel}" (Part ${prt}) is now available.`, { route: 'date-sheets', examId, sheetId });
+        }
+      } catch (e) { console.error('[date-sheets] push failed:', e); }
+
       return NextResponse.json({ id: sheetId, examId, part: prt, success: true }, { status: 201 });
     }
 

@@ -8,7 +8,10 @@
 // is 100% identical to the web app's mobile preview — because it IS the
 // web app.
 
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -53,12 +56,83 @@ class _SplashToWebViewState extends State<SplashToWebView> {
   bool _loaded = false;
   bool _offline = false;
 
+  // The most recent FCM token + notification-tap data (received from the
+  // NotificationService via the method channel). We hold these so we can
+  // re-inject them into the WebView whenever a new page loads.
+  String? _pendingToken;
+  Map<String, dynamic>? _pendingTap;
+
+  // The method channel that NotificationService uses to talk to this widget.
+  static const MethodChannel _fcmChannel = MethodChannel('concordia/fcm');
+
   static const String _webAppUrl = 'https://concordia-colleges.vercel.app/';
 
   @override
   void initState() {
     super.initState();
+    _setupMethodChannel();
     _initWebView();
+  }
+
+  void _setupMethodChannel() {
+    _fcmChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onToken':
+          _pendingToken = call.arguments['token'] as String?;
+          _pushTokenToWebView();
+          break;
+        case 'onNotificationTap':
+          _pendingTap =
+              Map<String, dynamic>.from(call.arguments['data'] as Map);
+          _pushTapToWebView();
+          break;
+        case 'onFcmReady':
+          // The web app listens for this to know it's running inside the
+          // native app (vs a regular browser tab).
+          _runJs('window.concordiaNative = window.concordiaNative || {};'
+              'window.concordiaNative.fcmReady = true;');
+          break;
+      }
+    });
+  }
+
+  /// Inject the FCM token into the WebView so the web app can register it.
+  void _pushTokenToWebView() {
+    if (_pendingToken == null) return;
+    final tokenJs = jsonEncode(_pendingToken);
+    _runJs('''
+      (function() {
+        window.concordiaNative = window.concordiaNative || {};
+        window.concordiaNative.fcmToken = $tokenJs;
+        // If the web app has registered a handler, call it.
+        if (window.concordiaNative.onToken) {
+          try { window.concordiaNative.onToken($tokenJs); } catch(e) {}
+        }
+      })();
+    ''');
+  }
+
+  /// Inject a notification-tap event into the WebView so the web app can
+  /// navigate to the right page.
+  void _pushTapToWebView() {
+    if (_pendingTap == null) return;
+    final dataJs = jsonEncode(_pendingTap);
+    _runJs('''
+      (function() {
+        window.concordiaNative = window.concordiaNative || {};
+        if (window.concordiaNative.onNotificationTap) {
+          try { window.concordiaNative.onNotificationTap($dataJs); } catch(e) {}
+        }
+      })();
+    ''');
+  }
+
+  void _runJs(String js) {
+    try {
+      _controller.runJavaScript(js);
+    } catch (e) {
+      debugPrint('[WebView] runJavaScript failed: $e');
+    }
   }
 
   void _initWebView() {
@@ -68,6 +142,14 @@ class _SplashToWebViewState extends State<SplashToWebView> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (_) {
+            // Whenever a new page loads, re-inject any pending token/tap
+            // so the web app picks them up after a navigation/refresh.
+            _pushTokenToWebView();
+            _pushTapToWebView();
+            // Mark the app as native so the web app can show a "Send Test
+            // Notification" button + hide browser-only features.
+            _runJs('window.concordiaNative = window.concordiaNative || {};'
+                'window.concordiaNative.isNativeApp = true;');
             if (!_loaded) {
               setState(() => _loaded = true);
             }
