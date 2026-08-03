@@ -690,7 +690,7 @@ export function RolePortal() {
                 )}
               </button>
               {notifOpen && (
-                <div className="absolute right-0 top-full mt-2 w-[360px] max-h-[480px] bg-card border border-border rounded-xl shadow-lg z-50 flex flex-col overflow-hidden">
+                <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-[380px] max-w-[400px] max-h-[min(80vh,520px)] bg-card border border-border rounded-xl shadow-lg z-50 flex flex-col overflow-hidden">
                   {/* Header */}
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                     <div className="flex items-center gap-2">
@@ -704,14 +704,14 @@ export function RolePortal() {
                     <button
                       onClick={() => setNotifOpen(false)}
                       aria-label="Close notifications"
-                      className="h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-accent transition"
+                      className="h-8 w-8 grid place-items-center rounded-md text-muted-foreground hover:bg-accent transition"
                     >
                       <X className="h-4 w-4" />
                     </button>
                   </div>
 
                   {/* Body */}
-                  <div className="flex-1 overflow-y-auto scroll-fancy max-h-[360px]">
+                  <div className="flex-1 overflow-y-auto scroll-fancy max-h-[min(60vh,400px)]">
                     {notifLoading ? (
                       <div className="p-2 space-y-1">
                         {[0, 1, 2].map((i) => (

@@ -44,24 +44,30 @@
             android:name="flutterEmbedding"
             android:value="2" />
         <!-- CRITICAL: Default notification channel for FCM background pushes.
-             When a push arrives and the app is CLOSED, the FCM SDK shows a system
-             notification automatically — but ONLY if it knows which channel to use.
-             Without this meta-data, background notifications are SILENTLY DROPPED on Android 8+.
+             When a push arrives and the app is CLOSED, the Android OS shows a
+             system notification automatically — but ONLY if it knows which channel
+             to use. Without this meta-data, background notifications are SILENTLY
+             DROPPED on Android 8+.
 
-             v2: Changed from `concordia_notifications` → `concordia_notifications_v2`
-             because Android does NOT let apps change a channel's settings after
-             creation. The old channel may have been created without sound by an
-             older app version. Using a fresh channel ID forces a new channel with
-             the correct sound + importance settings. -->
+             v3 (v3.7.0): Changed from `concordia_notifications_v2` →
+             `concordia_notifications_v3` because Android does NOT let apps change
+             a channel's settings after creation. If the user did an in-place
+             upgrade (didn't uninstall v3.6.0/v3.6.1 first), the v2 channel may
+             have been created with broken sound settings, and the new
+             `playSound: true` was SILENTLY IGNORED. A fresh channel ID forces
+             creation of a new channel with the correct sound + high importance. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="concordia_notifications_v2" />
+            android:value="concordia_notifications_v3" />
         <!-- Default notification icon for FCM background pushes.
-             Must be a white-on-transparent drawable (NOT a mipmap with color).
-             We use ic_launcher for now — FCM will silhouette it. -->
+             MUST be a white-on-transparent drawable (NOT a colored mipmap).
+             Android 5+ silhouettes status bar icons to white, so a colored
+             mipmap like ic_launcher becomes an unreadable white blob. We use
+             ic_notification — a clean white bell silhouette vector drawable
+             that renders correctly in the status bar at small sizes. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@mipmap/ic_launcher" />
+            android:resource="@drawable/ic_notification" />
         <!-- Default notification color (the tint applied to the icon). -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"

@@ -143,28 +143,51 @@ async function sendToTokens(
   const app = getApp();
   if (!app || tokens.length === 0) return { sent: 0, failed: 0 };
 
-  // DATA-ONLY PAYLOAD (no top-level `notification` field).
+  // ─────────────────────────────────────────────────────────────────────
+  // HYBRID PAYLOAD: `notification` field + `data` field (WhatsApp-style).
+  // ─────────────────────────────────────────────────────────────────────
+  // This is the STANDARD reliable pattern used by WhatsApp, Telegram, Gmail,
+  // and every major messaging app. Here's why we switched from data-only:
   //
-  // Why data-only instead of a `notification` field?
-  //   • A `notification` field makes FCM auto-display the banner via the
-  //     Android system tray. But auto-display depends on the notification
-  //     channel already existing with the right sound/importance settings —
-  //     and Android does NOT let apps change a channel's settings after it
-  //     is created. If a previous app version created the channel without
-  //     sound, the new version's "playSound: true" is SILENTLY IGNORED, and
-  //     the user gets banners with no sound + no background delivery.
+  // PROBLEM with data-only (v3.6.1):
+  //   • A data-only payload requires the app's BACKGROUND ISOLATE to spin up
+  //     so the Dart `_firebaseMessagingBackgroundHandler` can run and call
+  //     `flutterLocalNotifications.show()`.
+  //   • On real Android devices — ESPECIALLY Chinese OEMs (Xiaomi, Huawei,
+  //     Oppo, Vivo, Realme, OnePlus) — the OS AGGRESSIVELY KILLS background
+  //     isolates to save battery. The isolate never spins up, so the local
+  //     notification is never shown. The user sees NOTHING.
+  //   • Even on stock Android, FCM THROTTLES/DELAYS data-only messages
+  //     (even with priority:'high') because it can't verify the app will
+  //     actually show a notification — it assumes the app might just be
+  //     doing silent data sync.
   //
-  //   • With data-only, the Flutter app's onMessage / onBackgroundMessage
-  //     handlers ALWAYS run (foreground, background, AND terminated). They
-  //     show a local notification via flutter_local_notifications, which
-  //     gives us FULL control over sound, vibration, channel, and priority.
-  //     This is the WhatsApp-style behavior the user wants.
+  // SOLUTION — hybrid `notification` + `data`:
+  //   • The `notification` field makes the ANDROID OS ITSELF display the
+  //     notification via the system tray. NO Dart code is needed. This works
+  //     whether the app is in the foreground, background, OR terminated.
+  //   • The OS uses the channel specified in `android.notification.channel_id`
+  //     (which the app creates at startup with sound + high importance).
+  //   • The `data` field carries extra routing info + is delivered to the
+  //     app's onMessage handler (foreground) or onMessageOpenedApp (tap).
+  //   • This is EXACTLY how WhatsApp delivers messages — even when the app
+  //     is force-killed, the notification still appears because the OS (not
+  //     the app) is responsible for displaying it.
   //
-  //   • We set android.priority='high' so FCM delivers promptly even in
-  //     doze mode. This is the same delivery priority as notification msgs.
+  // FOREGROUND behavior:
+  //   When the app is open, `onMessage` fires. The Flutter handler reads
+  //   title/body from `message.notification` (or `data` for backward compat)
+  //   and shows a local notification with sound via our configured channel.
   //
-  // The Flutter side reads `data.title` and `data.body` (with a fallback to
-  // `message.notification` for backward compat with older app versions).
+  // CHANNEL IMMUTABILITY:
+  //   Android does NOT let apps change a channel's settings after creation.
+  //   v3.6.0/v3.6.1 used `concordia_notifications_v2` — if a user did an
+  //   in-place upgrade (didn't uninstall first), that channel may have been
+  //   created with broken sound settings, and v3.6.1's `playSound: true`
+  //   was SILENTLY IGNORED. v3.7.0 uses a FRESH channel ID
+  //   `concordia_notifications_v3` to force creation of a new channel with
+  //   correct sound + high importance.
+  // ─────────────────────────────────────────────────────────────────────
   const fullData: Record<string, string> = {
     title,
     body,
@@ -173,9 +196,50 @@ async function sendToTokens(
 
   const message: any = {
     tokens,
+    notification: {
+      title,
+      body,
+    },
     data: fullData,
     android: {
       priority: 'high',
+      notification: {
+        // MUST match the channel created at app startup + the manifest's
+        // default_notification_channel_id. This is the channel that
+        // determines sound, vibration, importance, and heads-up banner.
+        channel_id: 'concordia_notifications_v3',
+        // Use the default notification sound (the device's stock sound).
+        sound: 'default',
+        // Default vibration pattern.
+        default_vibrate_timings: true,
+        // Default LED light settings.
+        default_light_settings: true,
+        // Show on the lock screen + as a heads-up banner (slides down
+        // from the top). 'public' = fully visible on lock screen.
+        visibility: 'public',
+        // Heads-up notification priority (slides down from top).
+        notification_priority: 'PRIORITY_HIGH',
+        // Increment the badge count (launcher icon badge on supported launchers).
+        notification_count: 1,
+        // Tag allows grouping/Replacing — using 'concordia' so multiple
+        // notifications stack rather than replace each other.
+        // (Omitting tag = each push gets its own notification row.)
+        // tag: 'concordia',
+        // The status bar icon — must be a white-on-transparent drawable.
+        icon: '@drawable/ic_notification',
+        // Tint applied to the icon (Concordia orange).
+        color: '#F26522',
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          alert: { title, body },
+          sound: 'default',
+          badge: 1,
+          'content-available': 1,
+        },
+      },
     },
     webpush: {
       headers: { Urgency: 'high' },

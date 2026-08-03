@@ -176,7 +176,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '3.6.1';
+      const LATEST_APP_VERSION = '3.7.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
