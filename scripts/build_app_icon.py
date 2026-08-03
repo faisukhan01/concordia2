@@ -27,17 +27,19 @@ BRAND_ORANGE = (242, 101, 34, 255)   # #F26522
 WHITE        = (255, 255, 255, 255)
 TRANSPARENT  = (0, 0, 0, 0)
 
-OUT_WEB = "/home/z/my-project/public"
-OUT_MOB = "/home/z/my-project/mobile-app/assets/images"
-OUT_MIP = "/home/z/my-project/mobile-app/android/app/src/main/res"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT_WEB = os.path.join(ROOT, "public")
+OUT_MOB = os.path.join(ROOT, "mobile-app", "assets", "images")
+OUT_MIP = os.path.join(ROOT, "mobile-app", "android", "app", "src", "main", "res")
 
-# (size_px, path)
+# (size_px, path) — full squircle icons (orange bg + white mark)
 TARGETS = [
     (1024, f"{OUT_WEB}/app-icon-1024.png"),
     (512,  f"{OUT_WEB}/app-icon-512.png"),
     (512,  f"{OUT_WEB}/app-icon-512-clean.png"),
     (512,  f"{OUT_WEB}/app-icon.png"),
-    (512,  f"{OUT_MOB}/app-icon.png"),
+    (1024, f"{OUT_MOB}/app-icon.png"),
+    (1024, f"{OUT_MOB}/app-icon-1024.png"),
     (192,  f"{OUT_MIP}/mipmap-xxxhdpi/ic_launcher.png"),
     (192,  f"{OUT_MIP}/mipmap-xxxhdpi/ic_launcher_round.png"),
     (144,  f"{OUT_MIP}/mipmap-xxhdpi/ic_launcher.png"),
@@ -48,6 +50,16 @@ TARGETS = [
     (72,   f"{OUT_MIP}/mipmap-hdpi/ic_launcher_round.png"),
     (48,   f"{OUT_MIP}/mipmap-mdpi/ic_launcher.png"),
     (48,   f"{OUT_MIP}/mipmap-mdpi/ic_launcher_round.png"),
+]
+
+# Adaptive-icon layers (foreground = white mark on transparent for safe zone;
+# background = solid orange).  (dpi, foreground/background px)
+ADAPTIVE = [
+    ("mdpi",   108),
+    ("hdpi",   162),
+    ("xhdpi",  216),
+    ("xxhdpi", 324),
+    ("xxxhdpi",432),
 ]
 
 
@@ -190,6 +202,28 @@ def build_icon(size: int) -> Image.Image:
     return out
 
 
+def build_foreground(size: int) -> Image.Image:
+    """Adaptive-icon foreground: white logo on TRANSPARENT canvas.
+
+    Android adaptive icons reserve a ~66dp safe zone in the center of the
+    108dp canvas, so the mark is scaled to ~60% and centered.
+    """
+    # The mark mask is drawn at full size, then pasted centered at 60% scale
+    # onto a transparent canvas.
+    fg = Image.new("RGBA", (size, size), TRANSPARENT)
+    mark_size = int(size * 0.60)
+    mask = draw_logo_mask(mark_size)
+    white_layer = Image.new("RGBA", (mark_size, mark_size), WHITE)
+    offset = (size - mark_size) // 2
+    fg.paste(white_layer, (offset, offset), mask)
+    return fg
+
+
+def build_background(size: int) -> Image.Image:
+    """Adaptive-icon background: solid brand orange."""
+    return Image.new("RGBA", (size, size), BRAND_ORANGE)
+
+
 def main() -> None:
     cache: dict[int, Image.Image] = {}
     for size, path in TARGETS:
@@ -198,6 +232,16 @@ def main() -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         cache[size].save(path, format="PNG", optimize=True)
         print(f"  ✓ {path}  ({size}×{size})")
+
+    # Adaptive-icon foreground + background for each density.
+    for dpi, px in ADAPTIVE:
+        d = os.path.join(OUT_MIP, f"mipmap-{dpi}")
+        os.makedirs(d, exist_ok=True)
+        build_foreground(px).save(os.path.join(d, "ic_launcher_foreground.png"),
+                                  format="PNG", optimize=True)
+        build_background(px).save(os.path.join(d, "ic_launcher_background.png"),
+                                  format="PNG", optimize=True)
+        print(f"  ✓ mipmap-{dpi}/ic_launcher_foreground+background  ({px}px)")
     print("Done.")
 
 
