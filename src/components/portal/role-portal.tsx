@@ -423,9 +423,13 @@ export function RolePortal() {
   const [fcmDiagOpen, setFcmDiagOpen] = useState(false);
   const [fcmDiag, setFcmDiag] = useState<any>(null);
   const [fcmDiagLoading, setFcmDiagLoading] = useState(false);
+  const [bridgeDiag, setBridgeDiag] = useState<any>(null);
+  const [reregistering, setReregistering] = useState(false);
+  const [reregisterResult, setReregisterResult] = useState<string | null>(null);
   const onOpenFcmDiag = async () => {
     setFcmDiagOpen(true);
     setFcmDiagLoading(true);
+    setReregisterResult(null);
     try {
       const res = await api.getFcmStatus();
       setFcmDiag(res);
@@ -433,6 +437,40 @@ export function RolePortal() {
       setFcmDiag({ error: e?.message || 'Failed to fetch FCM status' });
     } finally {
       setFcmDiagLoading(false);
+    }
+    // Also gather client-side bridge diagnostics (what does window.concordiaNative look like?).
+    try {
+      const { getFcmBridgeDiagnostics } = await import('@/lib/fcm-bridge');
+      setBridgeDiag(getFcmBridgeDiagnostics());
+    } catch (e: any) {
+      setBridgeDiag({ error: e?.message || 'Failed to get bridge diagnostics' });
+    }
+  };
+  // Manually re-register the FCM token (pulls from Flutter via the JS bridge).
+  // Useful when the user just opened the app and the auto-poll hasn't fired yet.
+  const onReregisterToken = async () => {
+    setReregistering(true);
+    setReregisterResult(null);
+    try {
+      const { refreshFcmTokenAfterLogin } = await import('@/lib/fcm-bridge');
+      await refreshFcmTokenAfterLogin();
+      // Wait a moment for the registration to complete.
+      await new Promise((r) => setTimeout(r, 1500));
+      // Re-fetch server status to see if totalDeviceTokens increased.
+      const res = await api.getFcmStatus();
+      setFcmDiag(res);
+      // Re-fetch bridge diagnostics.
+      const { getFcmBridgeDiagnostics } = await import('@/lib/fcm-bridge');
+      setBridgeDiag(getFcmBridgeDiagnostics());
+      setReregisterResult(
+        res.totalDeviceTokens > 0
+          ? '✓ Token registered successfully! This device will now receive push notifications.'
+          : 'Token pull completed but no device token registered. Check the bridge diagnostics below — if hasFcmToken is false, the Flutter shell may not have delivered the token yet.'
+      );
+    } catch (e: any) {
+      setReregisterResult('✗ Failed: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setReregistering(false);
     }
   };
 
@@ -926,10 +964,91 @@ export function RolePortal() {
                               </div>
                             )}
 
+                            {/* This Device — client-side bridge diagnostics.
+                                Shows what window.concordiaNative looks like ON THIS
+                                DEVICE so the admin can see if the Flutter shell
+                                has delivered the FCM token. Critical for
+                                diagnosing "no notifications" issues. */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <Activity className="h-4 w-4 text-gray-500" />
+                                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-600">This Device (Bridge)</span>
+                                </div>
+                                <button
+                                  onClick={onReregisterToken}
+                                  disabled={reregistering}
+                                  className="text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] disabled:opacity-60 disabled:cursor-not-allowed px-2.5 py-1 rounded-md transition"
+                                >
+                                  {reregistering ? 'Pulling…' : 'Re-register token'}
+                                </button>
+                              </div>
+                              {reregisterResult && (
+                                <div className={`mb-3 rounded-md px-2.5 py-1.5 text-[11px] leading-relaxed ${reregisterResult.startsWith('✓') ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
+                                  {reregisterResult}
+                                </div>
+                              )}
+                              {bridgeDiag && !bridgeDiag.error ? (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">Running in native app</span>
+                                    {bridgeDiag.isNativeApp ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><CheckCircle className="h-3 w-3" /> Yes</span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500"><XCircle className="h-3 w-3" /> No (browser)</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">App version</span>
+                                    <span className="font-mono text-gray-900">{bridgeDiag.appVersion || '—'}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">FCM token received from Flutter</span>
+                                    {bridgeDiag.hasFcmToken ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><CheckCircle className="h-3 w-3" /> Yes ({bridgeDiag.fcmTokenLength} chars)</span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700"><XCircle className="h-3 w-3" /> No</span>
+                                    )}
+                                  </div>
+                                  {bridgeDiag.fcmTokenPreview && (
+                                    <div className="rounded-md bg-white border border-gray-200 px-2.5 py-1.5 text-[11px] font-mono text-gray-600 break-all">
+                                      {bridgeDiag.fcmTokenPreview}
+                                    </div>
+                                  )}
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">Pull bridge available</span>
+                                    {bridgeDiag.hasRequestTokenAsync ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><CheckCircle className="h-3 w-3" /> Yes</span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700"><XCircle className="h-3 w-3" /> No (old APK)</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">Token registered with backend</span>
+                                    {bridgeDiag.lastTokenRegistered ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><CheckCircle className="h-3 w-3" /> Yes</span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700"><XCircle className="h-3 w-3" /> Not yet</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-500 italic">
+                                  {bridgeDiag?.error || 'Bridge diagnostics unavailable.'}
+                                </p>
+                              )}
+                            </div>
+
                             {/* Help text */}
-                            <div className="rounded-lg bg-[#FFF4ED] border border-[#F26522]/20 p-3">
+                            <div className="rounded-lg bg-[#FFF4ED] border border-[#F26522]/20 p-3 space-y-2">
                               <p className="text-[11px] text-[#D4541E] leading-relaxed">
-                                <strong>How to enable true background push (app closed):</strong> If FCM push is DISABLED above, the <code className="font-mono bg-white/50 px-1 rounded">FIREBASE_SERVICE_ACCOUNT</code> env var is missing or invalid on Vercel. Download the firebase-adminsdk JSON from Firebase Console → Project Settings → Service Accounts → Generate new private key, then set the entire JSON as the env var value in Vercel.
+                                <strong>How push notifications work:</strong> When the mobile app opens, Flutter gets an FCM token from Firebase and passes it to this web app, which POSTs it to the server. The server then uses that token to send pushes via Firebase Cloud Messaging — these arrive even when the app is closed (WhatsApp-style).
+                              </p>
+                              <p className="text-[11px] text-[#D4541E] leading-relaxed">
+                                <strong>If "Registered Devices" is 0:</strong> The phone hasn't registered its token yet. Open the Concordia app on the phone, sign in, then tap "Re-register token" above. If "FCM token received from Flutter" shows No, the Flutter shell couldn't get a token (check notification permission + Google Play Services on the phone).
+                              </p>
+                              <p className="text-[11px] text-[#D4541E] leading-relaxed">
+                                <strong>If FCM push is DISABLED:</strong> The <code className="font-mono bg-white/50 px-1 rounded">FIREBASE_SERVICE_ACCOUNT</code> env var is missing or invalid on Vercel. Download the firebase-adminsdk JSON from Firebase Console → Project Settings → Service Accounts → Generate new private key, then set the entire JSON as the env var value in Vercel.
                               </p>
                             </div>
                           </>
