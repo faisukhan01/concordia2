@@ -45,17 +45,6 @@ import {
   Clock,
   UserPlus,
   TrendingUp,
-  ArrowUpRight,
-  ArrowRight,
-  Bell,
-  Activity,
-  Zap,
-  CalendarClock,
-  FileText,
-  ClipboardList,
-  Sparkles,
-  Wallet,
-  CheckCircle2,
 } from 'lucide-react';
 
 // Sub-portal components — the admin accesses every role's full portal.
@@ -92,41 +81,27 @@ function PageHeader({
   );
 }
 
-// Accent color variants for StatCard icon chips — softer than raw brand orange.
-const STAT_ACCENTS: Record<string, { chip: string; icon: string; ring: string }> = {
-  orange:  { chip: 'bg-[#FFF0E8]', icon: 'text-[#F26522]', ring: 'group-hover:border-[#F26522]/40' },
-  emerald: { chip: 'bg-emerald-50',  icon: 'text-emerald-600', ring: 'group-hover:border-emerald-200' },
-  amber:   { chip: 'bg-amber-50',    icon: 'text-amber-600',   ring: 'group-hover:border-amber-200' },
-  sky:     { chip: 'bg-sky-50',      icon: 'text-sky-600',     ring: 'group-hover:border-sky-200' },
-  violet:  { chip: 'bg-violet-50',   icon: 'text-violet-600',  ring: 'group-hover:border-violet-200' },
-};
-
 function StatCard({
   icon: Icon,
   label,
   value,
   sub,
   onClick,
-  accent = 'orange',
-  trend,
 }: {
   icon: any;
   label: string;
   value: string | number;
   sub?: string;
   onClick?: () => void;
-  accent?: keyof typeof STAT_ACCENTS;
-  trend?: { dir: 'up' | 'down'; value: string };
 }) {
-  const a = STAT_ACCENTS[accent] || STAT_ACCENTS.orange;
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'group w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all duration-200',
-        onClick ? 'hover:shadow-md hover:-translate-y-0.5 cursor-pointer ' + a.ring : 'cursor-default',
+        'w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all',
+        onClick ? 'hover:border-[#F26522] hover:shadow-sm cursor-pointer' : 'cursor-default',
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -135,26 +110,9 @@ function StatCard({
             {label}
           </div>
           <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
-          <div className="flex items-center gap-1.5 mt-1">
-            {sub && <div className="text-xs text-gray-500">{sub}</div>}
-            {trend && (
-              <span
-                className={cn(
-                  'inline-flex items-center gap-0.5 text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
-                  trend.dir === 'up'
-                    ? 'text-emerald-700 bg-emerald-50'
-                    : 'text-rose-700 bg-rose-50',
-                )}
-              >
-                {trend.dir === 'up' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3 rotate-90" />}
-                {trend.value}
-              </span>
-            )}
-          </div>
+          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
         </div>
-        <span className={cn('shrink-0 grid place-items-center h-9 w-9 rounded-lg', a.chip)}>
-          <Icon className={cn('h-[18px] w-[18px]', a.icon)} strokeWidth={2} />
-        </span>
+        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
       </div>
     </button>
   );
@@ -198,179 +156,6 @@ function EmptyState({
       <Icon className="h-5 w-5 text-gray-300 mb-2.5" />
       <div className="text-sm text-gray-500">{title}</div>
       {desc && <div className="text-xs text-gray-400 mt-1 max-w-sm">{desc}</div>}
-    </div>
-  );
-}
-
-// ───────────────────────── Hero Banner ─────────────────────────
-// Rich gradient banner replacing the flat PageHeader at the top of the
-// Admin Dashboard. Shows greeting, date, inline mini-metrics, and a
-// subtle decorative gradient — gives the dashboard a premium feel.
-
-function HeroBanner({
-  name,
-  studentsCount,
-  teachersCount,
-  feeCollected,
-}: {
-  name: string;
-  studentsCount: number;
-  teachersCount: number;
-  feeCollected: number;
-}) {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
-  const hour = now.getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-
-  const inlineStats = [
-    { label: 'Students', value: studentsCount.toLocaleString(), icon: GraduationCap },
-    { label: 'Teachers', value: teachersCount.toLocaleString(), icon: Users },
-    { label: 'Collected', value: `Rs ${feeCollected.toLocaleString()}`, icon: Wallet },
-  ];
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className="relative overflow-hidden rounded-2xl border border-[#F26522]/15 bg-gradient-to-br from-[#1A1A1A] via-[#2A1A12] to-[#7A3415] p-6 sm:p-7"
-    >
-      {/* Decorative glow blobs */}
-      <div className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-[#F26522]/30 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-amber-500/20 blur-3xl" />
-      {/* Faint dot grid texture */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.08]"
-        style={{
-          backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)',
-          backgroundSize: '18px 18px',
-        }}
-      />
-
-      <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-        <div className="min-w-0">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 backdrop-blur px-2.5 py-1 text-[11px] font-medium text-white/80 ring-1 ring-white/15">
-            <Sparkles className="h-3 w-3 text-amber-300" />
-            {dateStr}
-          </div>
-          <h1 className="mt-3 text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            {greeting}, <span className="text-[#FFB37A]">{name}</span>
-          </h1>
-          <p className="mt-1.5 text-sm text-white/65 max-w-md">
-            Here&rsquo;s what&rsquo;s happening across your institute today.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2.5 lg:justify-end">
-          {inlineStats.map((s) => (
-            <div
-              key={s.label}
-              className="flex items-center gap-2.5 rounded-xl bg-white/8 backdrop-blur px-3.5 py-2.5 ring-1 ring-white/10"
-            >
-              <span className="grid place-items-center h-8 w-8 rounded-lg bg-white/10">
-                <s.icon className="h-4 w-4 text-amber-300" strokeWidth={2} />
-              </span>
-              <div className="leading-tight">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-white/55">
-                  {s.label}
-                </div>
-                <div className="text-sm font-bold text-white tabular-nums">{s.value}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-// ───────────────────────── Quick Actions ─────────────────────────
-// Six shortcut cards that jump the admin straight into the most common
-// workflows. Removes friction of navigating dropdowns.
-
-function QuickActions({ setActiveModule }: { setActiveModule: (id: string) => void }) {
-  const actions = [
-    {
-      label: 'New Announcement',
-      desc: 'Notify students & staff',
-      icon: Megaphone,
-      accent: 'orange' as const,
-      module: 'academic:academic-announcements',
-    },
-    {
-      label: 'Schedule Exam',
-      desc: 'Add exam + date sheet',
-      icon: CalendarClock,
-      accent: 'violet' as const,
-      module: 'academic:academic-exams',
-    },
-    {
-      label: 'Record Attendance',
-      desc: 'Mark today&rsquo;s roll',
-      icon: ClipboardList,
-      accent: 'sky' as const,
-      module: 'academic:academic-attendance',
-    },
-    {
-      label: 'Create Invoice',
-      desc: 'Generate fee challan',
-      icon: FileText,
-      accent: 'amber' as const,
-      module: 'accountant:accountant-challans',
-    },
-    {
-      label: 'Enroll Student',
-      desc: 'Admission form',
-      icon: UserPlus,
-      accent: 'emerald' as const,
-      module: 'admissions:admissions-new',
-    },
-    {
-      label: 'Upload Marks',
-      desc: 'Grade entry',
-      icon: Award,
-      accent: 'orange' as const,
-      module: 'academic:academic-marks',
-    },
-  ];
-  const a = STAT_ACCENTS;
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5">
-      <SectionHeader
-        title="Quick Actions"
-        desc="Jump straight into common workflows"
-        action={
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#F26522]">
-            <Zap className="h-3.5 w-3.5" /> Shortcuts
-          </span>
-        }
-      />
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {actions.map((act) => (
-          <button
-            key={act.label}
-            type="button"
-            onClick={() => setActiveModule(act.module)}
-            className="group flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-white p-3.5 text-left transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-gray-300"
-          >
-            <span className={cn('grid place-items-center h-9 w-9 rounded-lg', a[act.accent].chip)}>
-              <act.icon className={cn('h-[18px] w-[18px]', a[act.accent].icon)} strokeWidth={2} />
-            </span>
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold text-gray-900 leading-tight">
-                {act.label}
-              </div>
-              <div className="text-[11px] text-gray-500 mt-0.5 leading-tight">{act.desc}</div>
-            </div>
-            <ArrowRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-[#F26522] group-hover:translate-x-0.5 transition-all mt-auto" />
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -509,11 +294,9 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
 
   return (
     <div className="space-y-6">
-      <HeroBanner
-        name={firstName}
-        studentsCount={stats?.totalStudents ?? students.length}
-        teachersCount={stats?.totalTeachers ?? teachers.length}
-        feeCollected={feeCollected}
+      <PageHeader
+        title={`Welcome back, ${firstName}`}
+        subtitle="Monitor everything happening across the whole institute and all portals."
       />
 
       {/* ── Live KPIs — no fake data, all from API ── */}
@@ -530,8 +313,6 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             label="Total Students"
             value={stats?.totalStudents ?? students.length}
             sub="Enrolled across all classes"
-            accent="orange"
-            trend={thisMonthCount > 0 ? { dir: 'up', value: `+${thisMonthCount} this mo.` } : undefined}
             onClick={() => setActiveModule('academic:academic-classes')}
           />
           <StatCard
@@ -539,7 +320,6 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             label="Teachers"
             value={stats?.totalTeachers ?? teachers.length}
             sub="Active faculty members"
-            accent="violet"
             onClick={() => setActiveModule('academic:academic-classes')}
           />
           <StatCard
@@ -547,21 +327,16 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             label="Office Staff"
             value={staff.length}
             sub="Admissions · accounts · academics"
-            accent="sky"
           />
           <StatCard
             icon={DollarSign}
             label="Fee Collected"
             value={fmtMoney(feeCollected)}
             sub="Collected this period"
-            accent="emerald"
             onClick={() => setActiveModule('accountant:accountant-challans')}
           />
         </div>
       )}
-
-      {/* ── Quick Actions — one-click shortcuts into common workflows ── */}
-      {!loading && <QuickActions setActiveModule={setActiveModule} />}
 
       {/* ── Analytics charts ── */}
       <motion.div
@@ -660,11 +435,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
           <SectionHeader
             title="Recent Announcements"
             desc="Latest college-wide notices"
-            action={
-              <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
-                <Bell className="h-3.5 w-3.5" /> Last 5
-              </span>
-            }
+            action={<span className="text-[11px] text-gray-400">Last 5</span>}
           />
           {loading ? (
             <div className="space-y-2.5">
@@ -706,14 +477,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <SectionHeader
-            title="At a Glance"
-            action={
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-                <Activity className="h-3.5 w-3.5" /> Live
-              </span>
-            }
-          />
+          <SectionHeader title="At a Glance" />
           {loading ? (
             <div className="space-y-3">
               {[0, 1, 2, 3].map((i) => (
@@ -741,15 +505,6 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
               ))}
             </ul>
           )}
-          {/* System health footer */}
-          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600">
-              <CheckCircle2 className="h-3.5 w-3.5" /> All systems operational
-            </span>
-            <span className="text-[11px] text-gray-400 tabular-nums">
-              Updated {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
         </div>
       </div>
 
