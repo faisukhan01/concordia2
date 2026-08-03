@@ -30,7 +30,7 @@ import { HelpWidget } from '@/components/ui/help-widget';
 import { api, setOnBlocked } from '@/lib/api';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
-import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send } from 'lucide-react';
+import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle } from 'lucide-react';
 
 // Notification icon + color mapping per type.
 const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
@@ -417,6 +417,25 @@ export function RolePortal() {
     }
   };
 
+  // FCM diagnostics — admin/super-admin only. Opens a modal showing the live
+  // server-side FCM config status + how many device tokens are registered.
+  // This is the fastest way to verify the notification pipeline end-to-end.
+  const [fcmDiagOpen, setFcmDiagOpen] = useState(false);
+  const [fcmDiag, setFcmDiag] = useState<any>(null);
+  const [fcmDiagLoading, setFcmDiagLoading] = useState(false);
+  const onOpenFcmDiag = async () => {
+    setFcmDiagOpen(true);
+    setFcmDiagLoading(true);
+    try {
+      const res = await api.getFcmStatus();
+      setFcmDiag(res);
+    } catch (e: any) {
+      setFcmDiag({ error: e?.message || 'Failed to fetch FCM status' });
+    } finally {
+      setFcmDiagLoading(false);
+    }
+  };
+
   const role = user?.role || 'student';
   const groups = ROLE_MODULES[role] || [];
   // All sidebar groups start COLLAPSED by default. The user explicitly
@@ -613,7 +632,10 @@ export function RolePortal() {
               >
                 <Bell className="h-[18px] w-[18px]" />
                 {notifUnread > 0 && (
-                  <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-card" />
+                  <span className="absolute top-1.5 right-1.5 flex">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500 ring-2 ring-card" />
+                  </span>
                 )}
               </button>
               {notifOpen && (
@@ -704,14 +726,23 @@ export function RolePortal() {
                     <div className="border-t border-border shrink-0 bg-muted/30">
                       {/* Admin-only: Broadcast "Update your app" to all users */}
                       {(role === 'admin' || role === 'super-admin') && (
-                        <button
-                          onClick={onBroadcastAppUpdate}
-                          disabled={broadcasting}
-                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] transition disabled:opacity-50"
-                        >
-                          <Send className={cn('h-3 w-3', broadcasting && 'animate-pulse')} />
-                          {broadcasting ? 'Broadcasting…' : 'Broadcast "Update App" to all users'}
-                        </button>
+                        <>
+                          <button
+                            onClick={onBroadcastAppUpdate}
+                            disabled={broadcasting}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] transition disabled:opacity-50"
+                          >
+                            <Send className={cn('h-3 w-3', broadcasting && 'animate-pulse')} />
+                            {broadcasting ? 'Broadcasting…' : 'Broadcast "Update App" to all users'}
+                          </button>
+                          <button
+                            onClick={onOpenFcmDiag}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-medium text-gray-600 hover:text-[#F26522] hover:bg-[#FFF4ED] transition border-t border-border"
+                          >
+                            <Activity className="h-3 w-3" />
+                            FCM Diagnostics
+                          </button>
+                        </>
                       )}
                       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
                         {notifUnread > 0 ? (
@@ -737,6 +768,177 @@ export function RolePortal() {
                   )}
                 </div>
               )}
+
+              {/* FCM Diagnostics modal — admin/super-admin only.
+                  Shows live server-side FCM config + registered device tokens
+                  so the admin can verify the notification pipeline end-to-end. */}
+              <AnimatePresence>
+                {fcmDiagOpen && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setFcmDiagOpen(false)}
+                    className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm grid place-items-center p-4"
+                  >
+                    <motion.div
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.95, opacity: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-gray-200"
+                    >
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 sticky top-0 bg-white">
+                        <div className="flex items-center gap-2">
+                          <div className="h-8 w-8 rounded-lg bg-[#FFF4ED] grid place-items-center">
+                            <Activity className="h-4 w-4 text-[#F26522]" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-900">FCM Diagnostics</h3>
+                            <p className="text-[11px] text-gray-500">Live server-side push notification status</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setFcmDiagOpen(false)}
+                          className="h-8 w-8 grid place-items-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      <div className="p-5 space-y-4">
+                        {fcmDiagLoading ? (
+                          <div className="flex flex-col items-center justify-center py-12 gap-3">
+                            <div className="h-8 w-8 rounded-full border-2 border-[#F26522] border-t-transparent animate-spin" />
+                            <p className="text-xs text-gray-500">Checking FCM status…</p>
+                          </div>
+                        ) : fcmDiag?.error ? (
+                          <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 flex items-start gap-2">
+                            <XCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-semibold text-rose-900">Failed to fetch status</p>
+                              <p className="text-xs text-rose-700 mt-0.5">{fcmDiag.error}</p>
+                            </div>
+                          </div>
+                        ) : fcmDiag ? (
+                          <>
+                            {/* Server config status */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Server className="h-4 w-4 text-gray-500" />
+                                <span className="text-xs font-semibold uppercase tracking-wider text-gray-600">Server Config</span>
+                              </div>
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-600">Env var set</span>
+                                  {fcmDiag.envVarSet ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                      <CheckCircle className="h-3.5 w-3.5" /> Yes ({fcmDiag.envVarLength} chars)
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700">
+                                      <XCircle className="h-3.5 w-3.5" /> No
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-600">JSON valid</span>
+                                  {fcmDiag.parseError ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700">
+                                      <XCircle className="h-3.5 w-3.5" /> Invalid
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                      <CheckCircle className="h-3.5 w-3.5" /> Valid
+                                    </span>
+                                  )}
+                                </div>
+                                {fcmDiag.parseError && (
+                                  <div className="rounded-md bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[11px] text-rose-700 font-mono break-all">
+                                    {fcmDiag.parseError}
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-600">Firebase project ID</span>
+                                  <span className="text-xs font-mono text-gray-900">{fcmDiag.projectId || '—'}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-600">Client email</span>
+                                  <span className="text-xs font-mono text-gray-900 truncate max-w-[200px]">{fcmDiag.clientEmail || '—'}</span>
+                                </div>
+                                <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                                  <span className="text-xs font-semibold text-gray-700">FCM push enabled</span>
+                                  {fcmDiag.fcmEnabled ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                                      <CheckCircle className="h-4 w-4" /> ENABLED
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-rose-700">
+                                      <XCircle className="h-4 w-4" /> DISABLED
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Device tokens registered */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <Smartphone className="h-4 w-4 text-gray-500" />
+                                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-600">Registered Devices</span>
+                                </div>
+                                <span className="text-lg font-bold text-gray-900 tabular-nums">{fcmDiag.totalDeviceTokens}</span>
+                              </div>
+                              {fcmDiag.tokensByRole && fcmDiag.tokensByRole.length > 0 ? (
+                                <div className="space-y-1.5">
+                                  {fcmDiag.tokensByRole.map((r: any) => (
+                                    <div key={r.role} className="flex items-center justify-between text-xs">
+                                      <span className="text-gray-600 capitalize">{r.role}</span>
+                                      <span className="font-semibold text-gray-900 tabular-nums">
+                                        {r.count} token(s) · {r.users} user(s)
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-500 italic">
+                                  No devices registered yet. Open the mobile app on your phone and sign in — the FCM token will register automatically.
+                                </p>
+                              )}
+                            </div>
+
+                            {/* My devices */}
+                            {fcmDiag.myDevices && fcmDiag.myDevices.length > 0 && (
+                              <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Smartphone className="h-4 w-4 text-gray-500" />
+                                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-600">Your Devices</span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {fcmDiag.myDevices.map((d: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between text-xs">
+                                      <span className="font-mono text-gray-500">{d.tokenPreview}</span>
+                                      <span className="text-gray-400">{d.platform} · {d.lastSeen}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Help text */}
+                            <div className="rounded-lg bg-[#FFF4ED] border border-[#F26522]/20 p-3">
+                              <p className="text-[11px] text-[#D4541E] leading-relaxed">
+                                <strong>How to enable true background push (app closed):</strong> If FCM push is DISABLED above, the <code className="font-mono bg-white/50 px-1 rounded">FIREBASE_SERVICE_ACCOUNT</code> env var is missing or invalid on Vercel. Download the firebase-adminsdk JSON from Firebase Console → Project Settings → Service Accounts → Generate new private key, then set the entire JSON as the env var value in Vercel.
+                              </p>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
             <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-border">
               <Avatar className="h-8 w-8 ring-1 ring-gray-200">

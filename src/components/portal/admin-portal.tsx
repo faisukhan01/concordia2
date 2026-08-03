@@ -101,7 +101,7 @@ function StatCard({
       disabled={!onClick}
       className={cn(
         'w-full text-left rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all min-h-[88px] sm:min-h-[104px] flex flex-col justify-between',
-        onClick ? 'hover:border-[#F26522] hover:shadow-md cursor-pointer' : 'cursor-default',
+        onClick ? 'hover:border-[#F26522] hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer' : 'cursor-default hover:border-gray-300 hover:shadow-sm',
       )}
     >
       <div className="flex items-start justify-between">
@@ -550,15 +550,15 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
             <button
               type="button"
               onClick={() => setActiveModule('admissions:admissions-students')}
-              className="text-left rounded-lg border border-amber-200 bg-amber-50/50 p-4 hover:border-amber-300 hover:bg-amber-50 transition-colors cursor-pointer"
+              className="text-left rounded-lg border border-[#F26522]/30 bg-[#FFF4ED] p-4 hover:border-[#F26522] hover:bg-[#FFE5D8] hover:-translate-y-0.5 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-amber-700/80">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[#D4541E]">
                 <Clock className="h-3.5 w-3.5" /> Pending Lock
               </div>
-              <div className="text-xl font-bold text-amber-700 mt-1.5">
+              <div className="text-xl font-bold text-[#D4541E] mt-1.5 tabular-nums">
                 {pendingBaseFee.length}
               </div>
-              <div className="text-[11px] text-amber-700/70 mt-0.5">
+              <div className="text-[11px] text-[#D4541E]/70 mt-0.5">
                 {pendingBaseFee.length === 0 ? 'All finalized ✓' : 'Click to review →'}
               </div>
             </button>
@@ -626,8 +626,8 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
               {recentStudents.map((u) => {
                 const locked = isLocked(u);
                 return (
-                  <TableRow key={u.id} className="border-gray-100 hover:bg-gray-50">
-                    <TableCell className="py-3 px-3 text-sm text-gray-500 font-mono">
+                  <TableRow key={u.id} className="border-gray-100 hover:bg-[#FFF4ED]/60 transition-colors">
+                    <TableCell className="py-3 px-3 text-sm text-gray-500 font-mono tabular-nums">
                       {u.rollNo || '—'}
                     </TableCell>
                     <TableCell className="py-3 px-3 text-sm font-medium text-gray-900">
@@ -645,11 +645,11 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
                     </TableCell>
                     <TableCell className="py-3 px-3 text-center">
                       {locked ? (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                        <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600">
                           <Lock className="h-3 w-3" /> Locked
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-amber-100 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                        <span className="inline-flex items-center gap-1 rounded-md border border-[#F26522]/30 bg-[#FFF4ED] px-2 py-0.5 text-[11px] font-medium text-[#D4541E]">
                           <Clock className="h-3 w-3" /> Pending
                         </span>
                       )}

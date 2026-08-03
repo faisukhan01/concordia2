@@ -186,7 +186,7 @@ function StatCard({
       disabled={!onClick}
       className={cn(
         'w-full text-left rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between',
-        onClick ? 'hover:border-[#F26522] hover:shadow-md cursor-pointer' : 'cursor-default',
+        onClick ? 'hover:border-[#F26522] hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer' : 'cursor-default hover:border-gray-300 hover:shadow-sm',
       )}
     >
       <div className="flex items-start justify-between">

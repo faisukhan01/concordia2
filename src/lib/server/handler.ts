@@ -225,6 +225,61 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
     }
 
+    // ── FCM diagnostic endpoint. Lets the admin verify the FCM pipeline status
+    //    from inside the web app: shows whether the service account env var is
+    //    set + valid, the project ID, and the count of registered device tokens
+    //    (so you can see if the mobile app is actually registering its token).
+    //    Admin/super-admin only — exposes server-internal config info.
+    if (method === 'GET' && path === 'notifications/fcm-status') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      const { fcmEnabled } = await import('./fcm');
+      const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+      let projectId: string | null = null;
+      let clientEmail: string | null = null;
+      let parseError: string | null = null;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          projectId = parsed.project_id || null;
+          clientEmail = parsed.client_email || null;
+        } catch (e: any) {
+          parseError = e?.message || 'Invalid JSON';
+        }
+      }
+      // Count registered tokens (by role, for visibility into who has devices registered).
+      const tokensByRole = await db.execute({
+        sql: `SELECT role, COUNT(*) as count, COUNT(DISTINCT userId) as users
+              FROM device_tokens
+              WHERE lastSeen > datetime('now', '-30 days')
+              GROUP BY role
+              ORDER BY count DESC`,
+      });
+      const totalTokens = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM device_tokens',
+      });
+      const myTokens = await db.execute({
+        sql: 'SELECT token, platform, createdAt, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
+        args: [user.id],
+      });
+      return NextResponse.json({
+        fcmEnabled: fcmEnabled(),
+        envVarSet: !!raw,
+        envVarLength: raw ? raw.length : 0,
+        parseError,
+        projectId,
+        clientEmail,
+        totalDeviceTokens: totalTokens.rows[0]?.count || 0,
+        tokensByRole: tokensByRole.rows,
+        myDevices: myTokens.rows.map((row: any) => ({
+          platform: row.platform,
+          tokenPreview: row.token ? `${String(row.token).slice(0, 12)}…${String(row.token).slice(-8)}` : null,
+          createdAt: row.createdAt,
+          lastSeen: row.lastSeen,
+        })),
+      });
+    }
+
     // Get notifications for the logged-in user (newest first).
     if (method === 'GET' && path === 'notifications') {
       const user = await requireAuth(req);
