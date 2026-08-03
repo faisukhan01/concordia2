@@ -9,7 +9,7 @@
 //   6. Showing a local notification banner when a push arrives
 //   7. Forwarding the token + tap events to the WebView via JavaScript bridge
 //
-// The token is passed to the web app via `window.concordia.registerToken(token)`,
+// The token is passed to the web app via `window.concordiaNative.registerToken(token)`,
 // which the web app's api.ts calls to POST /api/device-tokens.
 
 import 'dart:async';
@@ -26,9 +26,31 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Ensure Firebase is initialized in the background isolate.
   await Firebase.initializeApp();
-  // The OS will show the notification automatically because we set
-  // `notification` in the FCM payload. We don't need to do anything here,
-  // but this function must exist so the plugin knows to handle background msgs.
+
+  // CRITICAL: Create the notification channel in the background isolate too.
+  // When the app is CLOSED and a push arrives, this handler runs in a separate
+  // isolate. If the channel doesn't exist, the OS SILENTLY DROPS the notification.
+  // We create it here so background notifications always show.
+  try {
+    final flutterLocalNotifications = FlutterLocalNotificationsPlugin();
+    await flutterLocalNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'concordia_notifications',
+            'Concordia Notifications',
+            description:
+                'Announcements, exams, marks, attendance, and fee reminders from Concordia College.',
+            importance: Importance.high,
+            playSound: true,
+            enableVibration: true,
+            showBadge: true,
+          ),
+        );
+  } catch (e) {
+    debugPrint('[bg] failed to create notification channel: $e');
+  }
 }
 
 class NotificationService {
@@ -40,7 +62,8 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   // The Android notification channel ID — MUST match the one we set in the
-  // FCM payload on the server (`android.notification.channelId`).
+  // FCM payload on the server (`android.notification.channelId`) AND in the
+  // AndroidManifest.xml (`com.google.firebase.messaging.default_notification_channel_id`).
   static const String _channelId = 'concordia_notifications';
   static const String _channelName = 'Concordia Notifications';
   static const String _channelDesc =
@@ -62,6 +85,7 @@ class NotificationService {
 
       // 2. Create the Android notification channel (required for Android 8+).
       //    Without this, notifications are silently dropped on Android 8+.
+      //    We use Importance.high so the notification makes a sound + appears as a heads-up banner.
       await _localNotifications
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
@@ -78,7 +102,8 @@ class NotificationService {
           );
 
       // 3. Initialize the local notifications plugin (for foreground banners).
-      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      //    Use ic_notification (the white bell silhouette) for the status bar icon.
+      const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
       const iosInit = DarwinInitializationSettings(
         requestAlertPermission: true,
         requestBadgePermission: true,
@@ -93,7 +118,8 @@ class NotificationService {
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
       // 5. Request permission (Android 13+ shows a prompt; older versions auto-grant).
-      await FirebaseMessaging.instance.requestPermission(
+      //    CRITICAL: On Android 13+, if the user denies this, NO notifications will show.
+      final settings = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
         sound: true,
@@ -102,6 +128,25 @@ class NotificationService {
         criticalAlert: false,
         provisional: false,
       );
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        debugPrint('[NotificationService] WARNING: User denied FCM notification permission. Pushes will NOT show.');
+      }
+
+      // 5b. ALSO request permission via the local notifications plugin.
+      //     On Android 13+, this explicitly triggers the POST_NOTIFICATIONS dialog.
+      //     Some devices grant FCM permission but NOT local notification permission,
+      //     which means foreground banners + sounds won't show. This covers that gap.
+      try {
+        final androidPlugin = _localNotifications
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>();
+        final granted = await androidPlugin?.requestNotificationsPermission();
+        if (granted != true) {
+          debugPrint('[NotificationService] WARNING: User denied local notification permission.');
+        }
+      } catch (e) {
+        debugPrint('[NotificationService] local notif permission request failed: $e');
+      }
 
       // 6. Get the FCM token + register it. Also listen for token refresh.
       final token = await FirebaseMessaging.instance.getToken();
@@ -150,6 +195,8 @@ class NotificationService {
   }
 
   /// Foreground message handler — shows a local notification banner.
+  /// This is called when a push arrives WHILE THE APP IS OPEN.
+  /// The OS does NOT auto-show a notification in this case — we MUST show it ourselves.
   void _onForegroundMessage(RemoteMessage message) {
     final notification = message.notification;
     final title = notification?.title ?? 'Concordia College';
@@ -157,6 +204,8 @@ class NotificationService {
     final data = message.data;
 
     // Show a local notification (banner + sound + vibration).
+    // Use the channel we created above (with Importance.high) so it appears
+    // as a heads-up banner AND makes a sound.
     _localNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title,
@@ -168,10 +217,14 @@ class NotificationService {
           channelDescription: _channelDesc,
           importance: Importance.high,
           priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
+          icon: '@drawable/ic_notification',
           color: const Color(0xFFF26522),
           playSound: true,
           enableVibration: true,
+          // Heads-up notification (slides down from the top).
+          fullScreenIntent: false,
+          category: AndroidNotificationCategory.message,
+          visibility: NotificationVisibility.public,
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,
