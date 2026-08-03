@@ -46,7 +46,7 @@ jobs:
         run: flutter analyze --no-fatal-infos || true
 
       - name: Build release APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
 
       - name: Rename APK to concordia-college.apk
         run: |
