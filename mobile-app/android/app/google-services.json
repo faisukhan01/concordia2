@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1029444215269",
+    "project_id": "concordia-aee29",
+    "storage_bucket": "concordia-aee29.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1029444215269:android:61e94010ea811306474f0c",
+        "android_client_info": {
+          "package_name": "com.concordia.concordia_college"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCeLcVmsSRuGvuVosAO-KJ7O8BgP6NVnZk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

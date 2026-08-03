@@ -42,7 +42,7 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v3.3.0';
+const APK_VERSION = 'v3.4.0';
 const APK_UPDATED = 'August 3, 2025';
 const APK_SIZE = '~27 MB';
 

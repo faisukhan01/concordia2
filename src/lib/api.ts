@@ -361,8 +361,9 @@ export const api = {
   getTeacherAnalytics: () => cachedGet<any>('teacher/analytics'),
   // Student academic + fee analytics
   getStudentAnalytics: () => cachedGet<any>('student/analytics'),
-  // Notifications (top bar dropdown)
-  getNotifications: () => cachedGet<{ items: any[]; unread: number }>('notifications'),
+  // Notifications (top bar dropdown) — NOT cached so the user always sees fresh data.
+  getNotifications: (limit = 50) =>
+    request<{ items: any[]; unread: number }>(`notifications?limit=${limit}`),
   // Manual revenue management (Super Admin enters per institute, Institute Admin enters per branch)
   addRevenue: (body: { sourceType: string; sourceId: string; sourceName: string; amount: number; month: string; year: number; notes?: string }) =>
     request<any>('revenue', { method: 'POST', body: JSON.stringify(body) }),
@@ -501,6 +502,22 @@ export const api = {
   // ───────────────────────────────────────────────────────────
   bulkAddMiscCharges: (data: { part: string; program?: string; branchId?: string; type: string; amount: number; description?: string }) =>
     request<{ success: boolean; created: number; total: number }>('misc-charges/bulk', { method: 'POST', body: JSON.stringify(data) }),
+
+  // ───────────────────────────────────────────────────────────
+  // Push Notifications (FCM) — device token registration + in-app bell
+  // ───────────────────────────────────────────────────────────
+  registerDeviceToken: (token: string, platform: string = 'android') =>
+    request<{ success: boolean }>('device-tokens', { method: 'POST', body: JSON.stringify({ token, platform }) }),
+  unregisterDeviceToken: (token: string) =>
+    request<{ success: boolean }>(`device-tokens?token=${encodeURIComponent(token)}`, { method: 'DELETE' }),
+  getUnreadCount: () =>
+    request<{ unread: number }>('notifications/unread-count'),
+  markNotificationRead: (id: string) =>
+    request<{ success: boolean }>(`notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () =>
+    request<{ success: boolean }>('notifications/read-all', { method: 'POST' }),
+  sendTestNotification: () =>
+    request<{ success: boolean; notificationId: string; pushed: number }>('notifications/test', { method: 'POST' }),
 };
 
 // === Shared types for the v1.5.0 module APIs ===
