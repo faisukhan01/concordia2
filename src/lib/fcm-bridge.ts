@@ -78,6 +78,15 @@ export function initFcmBridge() {
       case 'fees':
         setActiveModule('accountant:accountant-challans');
         break;
+      case 'app-update':
+        // Open the download page so the user can update the app.
+        // The notification's data.url points to the /download page.
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          window.location.href = 'https://concordia-colleges.vercel.app/download';
+        }
+        break;
       case 'notifications':
         // Open the notifications panel (bell icon click is handled by the header).
         // Dispatch a custom event the header listens for.

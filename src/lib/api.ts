@@ -518,6 +518,10 @@ export const api = {
     request<{ success: boolean }>('notifications/read-all', { method: 'POST' }),
   sendTestNotification: () =>
     request<{ success: boolean; notificationId: string; pushed: number }>('notifications/test', { method: 'POST' }),
+  broadcastAppUpdate: (version?: string) =>
+    request<{ success: boolean; recipients: number; pushed: number; fcmConfigured: boolean }>('notifications/broadcast-app-update', { method: 'POST', body: JSON.stringify({ version }) }),
+  checkAppVersion: (current: string) =>
+    request<{ latest: string; current: string | null; updateAvailable: boolean; downloadUrl: string; notificationCreated: boolean }>(`app/version-check?current=${encodeURIComponent(current)}`),
 };
 
 // === Shared types for the v1.5.0 module APIs ===
