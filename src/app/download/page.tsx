@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   Smartphone,
   Bell,
-  Sparkles,
   CheckCircle2,
   ChevronRight,
   GraduationCap,
@@ -19,7 +18,6 @@ import {
   Megaphone,
   QrCode,
   Cpu,
-  Layers,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -61,7 +59,7 @@ export default function DownloadPage() {
   return (
     <div className="min-h-screen flex flex-col bg-white text-[#1A1A1A] antialiased selection:bg-[#F26522]/20">
       {/* ── Sticky header ── */}
-      <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/80 backdrop-blur-md">
+      <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 sm:px-8 py-3.5">
           <BrandLogo size="sm" />
           <a
@@ -75,45 +73,36 @@ export default function DownloadPage() {
       </header>
 
       {/* ═══════════════════════════════════════════════════════════════
-          HERO — dark gradient, app icon, headline, download + QR
+          HERO — clean white background, orange accents, app icon,
+          headline, download card with QR + button
       ═══════════════════════════════════════════════════════════════ */}
-      <section className="relative overflow-hidden">
-        {/* Dark gradient background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#1A1A1A] via-[#241510] to-[#3D1F12]" />
-        {/* Glow blobs */}
-        <motion.div
-          animate={reduce ? {} : { scale: [1, 1.15, 1], opacity: [0.35, 0.5, 0.35] }}
-          transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
-          className="pointer-events-none absolute -top-32 -right-20 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.35),_transparent_60%)] blur-3xl"
-        />
-        <motion.div
-          animate={reduce ? {} : { scale: [1, 1.1, 1], opacity: [0.15, 0.25, 0.15] }}
-          transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
-          className="pointer-events-none absolute -bottom-32 -left-20 h-[440px] w-[440px] rounded-full bg-[radial-gradient(circle,_rgba(245,158,11,0.18),_transparent_65%)] blur-3xl"
-        />
-        {/* Dot grid texture */}
+      <section className="relative overflow-hidden bg-gradient-to-b from-[#FFF8F2] via-white to-white">
+        {/* Subtle decorative dot pattern */}
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.06]"
+          className="pointer-events-none absolute inset-0 opacity-[0.5]"
           style={{
-            backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)',
-            backgroundSize: '22px 22px',
+            backgroundImage:
+              'radial-gradient(circle, rgba(242,101,34,0.07) 1px, transparent 1px)',
+            backgroundSize: '26px 26px',
           }}
         />
+        {/* Soft orange glow */}
+        <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 h-72 w-[640px] rounded-full bg-[radial-gradient(circle,_rgba(242,101,34,0.12),_transparent_70%)] blur-2xl" />
 
-        <div className="relative mx-auto max-w-5xl px-5 sm:px-8 py-14 sm:py-20">
+        <div className="relative mx-auto max-w-5xl px-5 sm:px-8 py-12 sm:py-16">
           {/* Version pill */}
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="flex justify-center"
           >
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/8 backdrop-blur px-3.5 py-1.5 ring-1 ring-white/15">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#F26522]/20 bg-[#FFF0E8] px-3.5 py-1.5">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#F26522] opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#F26522]" />
               </span>
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/80">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#D4541E]">
                 Latest Build · {APK_VERSION}
               </span>
             </div>
@@ -121,15 +110,14 @@ export default function DownloadPage() {
 
           {/* App icon */}
           <motion.div
-            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.85, y: 10 }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-8 flex justify-center"
+            className="mt-7 flex justify-center"
           >
             <div className="relative">
-              {/* Glow behind icon */}
-              <div className="absolute inset-0 -z-10 rounded-[28%] bg-[#F26522]/40 blur-2xl scale-110" />
-              <div className="relative h-24 w-24 sm:h-28 sm:w-28 overflow-hidden rounded-[28%] bg-[#F26522] shadow-[0_20px_50px_-12px_rgba(242,101,34,0.7)] ring-1 ring-white/20">
+              <div className="absolute inset-0 -z-10 rounded-[28%] bg-[#F26522]/25 blur-2xl scale-110" />
+              <div className="relative h-24 w-24 sm:h-28 sm:w-28 overflow-hidden rounded-[28%] bg-[#F26522] shadow-[0_18px_40px_-10px_rgba(242,101,34,0.55)] ring-1 ring-black/5">
                 <Image
                   src="/app-icon-512.png"
                   alt="Concordia College app icon"
@@ -143,15 +131,15 @@ export default function DownloadPage() {
 
           {/* Headline */}
           <motion.div
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
             className="mt-6 text-center"
           >
-            <h1 className="text-3xl font-extrabold leading-tight tracking-tight text-white sm:text-5xl">
+            <h1 className="text-3xl font-extrabold leading-tight tracking-tight text-gray-900 sm:text-5xl">
               Concordia College
             </h1>
-            <p className="mt-3 text-base text-white/60 sm:text-lg max-w-xl mx-auto">
+            <p className="mt-3 text-base text-gray-500 sm:text-lg max-w-xl mx-auto">
               Your entire college — admissions, academics, fees, and notifications — in one
               beautiful Android app.
             </p>
@@ -159,19 +147,19 @@ export default function DownloadPage() {
 
           {/* ── Download card (QR + Button) — the centerpiece ── */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-10 mx-auto max-w-2xl"
+            className="mt-9 mx-auto max-w-2xl"
           >
-            <div className="relative overflow-hidden rounded-3xl bg-white/[0.07] backdrop-blur-xl p-6 sm:p-8 ring-1 ring-white/15 shadow-[0_30px_60px_-20px_rgba(0,0,0,0.5)]">
-              {/* Subtle inner glow */}
-              <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-br from-white/[0.06] to-transparent" />
+            <div className="relative overflow-hidden rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.12)]">
+              {/* Top orange accent bar */}
+              <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#F26522] via-[#FF8A4C] to-[#F26522]" />
 
-              <div className="relative flex flex-col sm:flex-row items-center gap-6 sm:gap-8">
+              <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-8">
                 {/* QR code — branded, self-hosted */}
                 <div className="flex flex-col items-center gap-3 shrink-0">
-                  <div className="relative p-3 bg-white rounded-2xl shadow-lg">
+                  <div className="relative p-3 bg-white rounded-2xl border border-gray-100 shadow-sm">
                     {/* Scan line animation */}
                     {!reduce && (
                       <motion.div
@@ -195,7 +183,7 @@ export default function DownloadPage() {
                       }}
                     />
                   </div>
-                  <div className="flex items-center gap-1.5 text-white/70">
+                  <div className="flex items-center gap-1.5 text-[#D4541E]">
                     <QrCode className="h-3.5 w-3.5" />
                     <span className="text-xs font-semibold uppercase tracking-wide">
                       Scan to download
@@ -204,15 +192,15 @@ export default function DownloadPage() {
                 </div>
 
                 {/* Divider */}
-                <div className="hidden sm:block h-32 w-px bg-white/10" />
+                <div className="hidden sm:block h-32 w-px bg-gray-100" />
 
                 {/* Download button + meta */}
                 <div className="flex-1 flex flex-col items-center sm:items-start gap-4 w-full">
                   <div className="text-center sm:text-left">
-                    <div className="text-lg font-bold text-white">
+                    <div className="text-lg font-bold text-gray-900">
                       {mounted && isAndroid ? 'Update your app' : 'Get the app'}
                     </div>
-                    <div className="text-sm text-white/55 mt-0.5">
+                    <div className="text-sm text-gray-500 mt-0.5">
                       {mounted && isAndroid
                         ? 'Installs over your current version — login preserved.'
                         : 'Scan the QR with your phone, or tap below.'}
@@ -221,7 +209,7 @@ export default function DownloadPage() {
 
                   <a
                     href={APK_DOWNLOAD_URL}
-                    className="group relative inline-flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-2xl bg-[#F26522] px-7 py-4 text-base font-semibold text-white shadow-[0_12px_32px_-8px_rgba(242,101,34,0.6)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_16px_40px_-8px_rgba(242,101,34,0.7)]"
+                    className="group relative inline-flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-2xl bg-[#F26522] px-7 py-4 text-base font-semibold text-white shadow-[0_12px_28px_-8px_rgba(242,101,34,0.5)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_16px_36px_-8px_rgba(242,101,34,0.6)]"
                   >
                     <Download className="h-5 w-5" />
                     <span>{buttonLabel}</span>
@@ -240,7 +228,7 @@ export default function DownloadPage() {
                     href={GITHUB_RELEASES}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-white/50 hover:text-white/80 transition-colors"
+                    className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-[#F26522] transition-colors"
                   >
                     View all releases <ChevronRight className="h-3 w-3" />
                   </a>
@@ -255,12 +243,12 @@ export default function DownloadPage() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.4 }}
-              className="mt-6 mx-auto max-w-2xl flex items-start gap-3 rounded-2xl bg-emerald-500/10 backdrop-blur p-4 ring-1 ring-emerald-400/20"
+              className="mt-6 mx-auto max-w-2xl flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
             >
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
-              <p className="text-sm text-emerald-50/90">
-                <strong className="text-white">You&rsquo;re on Android.</strong> Tap{' '}
-                <span className="font-semibold text-emerald-300">Update App</span> above. Your login
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+              <p className="text-sm text-emerald-800">
+                <strong className="text-emerald-900">You&rsquo;re on Android.</strong> Tap{' '}
+                <span className="font-semibold text-emerald-700">Update App</span> above. Your login
                 and data are preserved after the update.
               </p>
             </motion.div>
@@ -271,7 +259,7 @@ export default function DownloadPage() {
       {/* ═══════════════════════════════════════════════════════════════
           HIGHLIGHTS — compact strip of key capabilities
       ═══════════════════════════════════════════════════════════════ */}
-      <section className="border-b border-gray-100 bg-gray-50/50">
+      <section className="border-y border-gray-100 bg-gray-50/60">
         <div className="mx-auto max-w-5xl px-5 sm:px-8 py-10">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {highlights.map((h, i) => (
@@ -281,7 +269,7 @@ export default function DownloadPage() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: '-40px' }}
                 transition={{ duration: 0.4, delay: i * 0.04 }}
-                className="group flex flex-col items-center text-center rounded-xl border border-gray-200 bg-white p-4 hover:shadow-sm hover:border-gray-300 transition-all"
+                className="group flex flex-col items-center text-center rounded-xl border border-gray-200 bg-white p-4 hover:shadow-sm hover:border-[#F26522]/30 transition-all"
               >
                 <span className="grid place-items-center h-10 w-10 rounded-lg bg-[#FFF0E8] mb-2.5 group-hover:bg-[#F26522] transition-colors">
                   <h.icon className="h-[18px] w-[18px] text-[#F26522] group-hover:text-white transition-colors" strokeWidth={2} />
@@ -374,7 +362,7 @@ export default function DownloadPage() {
           <div className="mt-14 text-center">
             <a
               href={APK_DOWNLOAD_URL}
-              className="group inline-flex items-center gap-2.5 rounded-2xl bg-[#F26522] px-8 py-4 text-base font-semibold text-white shadow-[0_12px_32px_-8px_rgba(242,101,34,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_16px_40px_-8px_rgba(242,101,34,0.65)]"
+              className="group inline-flex items-center gap-2.5 rounded-2xl bg-[#F26522] px-8 py-4 text-base font-semibold text-white shadow-[0_12px_28px_-8px_rgba(242,101,34,0.5)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4541E] hover:shadow-[0_16px_36px_-8px_rgba(242,101,34,0.6)]"
             >
               <Download className="h-5 w-5" />
               <span>{buttonLabel}</span>
@@ -390,12 +378,12 @@ export default function DownloadPage() {
       {/* ═══════════════════════════════════════════════════════════════
           FOOTER — minimal, sticky to bottom
       ═══════════════════════════════════════════════════════════════ */}
-      <footer className="mt-auto border-t border-gray-100 bg-gray-50/50">
+      <footer className="mt-auto border-t border-gray-100 bg-gray-50/60">
         <div className="mx-auto max-w-5xl px-5 sm:px-8 py-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <BrandLogo size="sm" />
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF0E8] px-2.5 py-1 text-[11px] font-semibold text-[#F26522]">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF0E8] px-2.5 py-1 text-[11px] font-semibold text-[#D4541E]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#F26522]" />
                 {APK_VERSION}
               </span>
@@ -433,8 +421,8 @@ export default function DownloadPage() {
 
 function Chip({ icon: Icon, children }: { icon?: any; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/8 backdrop-blur px-2.5 py-1 text-[11px] font-medium text-white/75 ring-1 ring-white/10">
-      {Icon && <Icon className="h-3 w-3" />}
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-600">
+      {Icon && <Icon className="h-3 w-3 text-[#F26522]" />}
       {children}
     </span>
   );
