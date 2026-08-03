@@ -185,19 +185,19 @@ function StatCard({
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'w-full text-left rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 transition-all group aspect-square sm:aspect-auto sm:min-h-[128px] flex flex-col justify-between',
+        'w-full text-left rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between',
         onClick ? 'hover:border-[#F26522] hover:shadow-md cursor-pointer' : 'cursor-default',
       )}
     >
       <div className="flex items-start justify-between">
-        <div className="h-10 w-10 rounded-xl bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
-          <Icon className="h-5 w-5 text-[#F26522] group-hover:text-white transition-colors" />
+        <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-[#F26522] group-hover:text-white transition-colors" />
         </div>
       </div>
-      <div className="min-w-0 mt-2">
-        <div className="text-2xl font-bold text-gray-900 truncate tabular-nums leading-tight">{value}</div>
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-1 truncate">{label}</div>
-        {sub && <div className="text-xs text-gray-500 mt-1 truncate">{sub}</div>}
+      <div className="min-w-0 mt-1.5">
+        <div className="text-xl sm:text-2xl font-bold text-gray-900 truncate tabular-nums leading-tight">{value}</div>
+        <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-0.5 truncate">{label}</div>
+        {sub && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{sub}</div>}
       </div>
     </button>
   );
