@@ -102,44 +102,48 @@ const btnSecondary =
 
 const fmtMoney = (n: number) => `Rs ${(Number(n) || 0).toLocaleString('en-PK')}`;
 
-const fmtDate = (iso?: string) => {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return '—';
+// SQLite datetime('now') returns UTC as "YYYY-MM-DD HH:MM:SS" (no tz marker).
+// JS treats tz-less strings as LOCAL time → causes "5h ago" for UTC+5 users.
+// Normalize to ISO 8601 UTC before parsing.
+const parseUtc = (iso?: string): Date | null => {
+  if (!iso) return null;
+  let s = iso;
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = s.replace(' ', 'T') + 'Z';
   }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const fmtDate = (iso?: string) => {
+  const d = parseUtc(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const fmtDateTime = (iso?: string) => {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return '—';
-  }
+  const d = parseUtc(iso);
+  if (!d) return '—';
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 };
 
 const relativeTime = (iso?: string) => {
-  if (!iso) return '—';
-  const diff = Date.now() - new Date(iso).getTime();
+  const d = parseUtc(iso);
+  if (!d) return '—';
+  const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60000);
   if (m < 1) return 'just now';
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d}d ago`;
+  const days = Math.floor(h / 24);
+  if (days < 30) return `${days}d ago`;
   return fmtDate(iso);
 };
 
