@@ -42,40 +42,40 @@ const APK_DOWNLOAD_URL =
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
   APK_DOWNLOAD_URL,
 )}`;
-const APK_VERSION = 'v2.1.0';
-const APK_UPDATED = 'August 3, 2026';
-const APK_SIZE = '~22 MB';
+const APK_VERSION = 'v2.3.0';
+const APK_UPDATED = 'August 3, 2025';
+const APK_SIZE = '~26 MB';
 
 const whatsNew = [
   {
     icon: Sparkles,
-    title: 'v2.1.0 — Clean New Icon',
-    desc: 'Updated app icon with a clean circular design — no rectangular background, just the Concordia shield on a sleek orange circle. Looks great on any home screen.',
-  },
-  {
-    icon: Palette,
-    title: 'Perfect Sign-in Page',
-    desc: 'The sign-in page is now EXACTLY the web app\'s frosted glass sign-in — campus photo background, frosted card, Concordia logo, everything.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'All Features Work',
-    desc: 'Admin, Admissions, Accountant, Academic, Teacher, Student — every portal works exactly as on the web. Login with admin@concordia.edu.pk / concordia123.',
+    title: 'Teacher Management',
+    desc: 'Academic Office can now add teachers directly from the mobile app. Create teacher accounts, assign subjects, and manage faculty — all from your phone.',
   },
   {
     icon: Layers,
-    title: 'Native App Shell',
-    desc: 'Native splash screen with Concordia branding, back button navigation, external links in browser, offline detection with retry.',
+    title: 'Every web feature, now mobile',
+    desc: 'Admissions, Accountant, Academic, Teacher, Student, Parent — every module from the web portal is now in the Android app. Nothing left behind.',
   },
   {
-    icon: BarChart3,
-    title: 'Adaptive Icon Support',
-    desc: 'Proper adaptive icon with foreground and background layers — works beautifully on all Android devices and launchers.',
+    icon: FileText,
+    title: 'Documents on the go',
+    desc: 'Upload, list, download, and delete student documents right from Admissions or Accountant. No more running back to a desktop.',
   },
   {
     icon: Zap,
-    title: 'Lightweight & Fast',
-    desc: 'Only 22 MB — smaller than before. Loads the web app instantly with full JavaScript support.',
+    title: 'Bulk Misc Charges',
+    desc: 'Apply a charge to every student in a Part — or a single department — in one tap. What used to take an hour now takes five seconds.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Cleaner sign-in',
+    desc: 'The sign-in screen was rebuilt from scratch — less clutter, more focus, same premium feel. Your login is preserved on update.',
+  },
+  {
+    icon: Palette,
+    title: 'Single-color theme',
+    desc: 'The whole app is now strictly Concordia orange. No more multi-color cards — one premium brand, end to end.',
   },
 ];
 
