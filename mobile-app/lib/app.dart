@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 // ── Brand colors (inlined to avoid external deps) ──────────────
 class _C {
@@ -135,10 +136,65 @@ class _SplashToWebViewState extends State<SplashToWebView> {
     }
   }
 
+  /// Fetch the FCM token directly from Firebase, with a 5s timeout.
+  /// Used when the web app requests the token via the JS channel but
+  /// `_pendingToken` hasn't been set yet (FCM init still in progress).
+  Future<String?> _fetchFcmTokenWithTimeout() async {
+    try {
+      final result = await FirebaseMessaging.instance.getToken().timeout(
+        const Duration(seconds: 5),
+      );
+      if (result != null) {
+        // Cache it so future requests are instant.
+        _pendingToken = result;
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[WebView] getToken timeout/error: $e');
+      return null;
+    }
+  }
+
   void _initWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.white)
+      // JavaScript channel the web app uses to REQUEST the FCM token on demand.
+      // The web app posts a message with a unique request id; we respond by
+      // running JS that resolves the corresponding Promise with the token.
+      // This eliminates the race condition where Flutter gets the token before
+      // the WebView's React app has registered its onToken handler.
+      ..addJavaScriptChannel(
+        'concordiaFcmRequest',
+        onMessageReceived: (JavaScriptMessage message) async {
+          // message.message is a JSON string: {"id": "<reqId>", "method": "requestToken"}
+          try {
+            final req = jsonDecode(message.message) as Map<String, dynamic>;
+            final reqId = req['id'] as String? ?? '';
+            final method = req['method'] as String? ?? '';
+            if (method == 'requestToken') {
+              // Get the token (may need to wait for FCM init).
+              String? token = _pendingToken;
+              if (token == null) {
+                // FCM might not have delivered yet — ask Firebase directly.
+                try {
+                  token = await _fetchFcmTokenWithTimeout();
+                } catch (_) {
+                  token = null;
+                }
+              }
+              // Resolve the web app's Promise.
+              final tokenJs = jsonEncode(token);
+              _runJs(
+                'window.__concordiaFcmResolve && '
+                'window.__concordiaFcmResolve(${jsonEncode(reqId)}, $tokenJs);',
+              );
+            }
+          } catch (e) {
+            debugPrint('[WebView] concordiaFcmRequest parse error: $e');
+          }
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (_) {
@@ -146,12 +202,56 @@ class _SplashToWebViewState extends State<SplashToWebView> {
             // so the web app picks them up after a navigation/refresh.
             _pushTokenToWebView();
             _pushTapToWebView();
-            // Mark the app as native so the web app can show a "Send Test
-            // Notification" button + hide browser-only features. Also inject
-            // the current app version so the web app can check for updates.
-            _runJs('window.concordiaNative = window.concordiaNative || {};'
-                'window.concordiaNative.isNativeApp = true;'
-                'window.concordiaNative.appVersion = "3.4.0";');
+            // Mark the app as native + expose a `requestTokenAsync` function
+            // the web app can CALL to pull the FCM token on demand. This
+            // eliminates the race condition where Flutter gets the token
+            // before the WebView's React app has registered its onToken
+            // handler. The web app calls requestTokenAsync() which posts a
+            // message to the `concordiaFcmRequest` JavaScript channel; the
+            // Dart side responds by resolving the Promise via
+            // window.__concordiaFcmResolve(reqId, token).
+            _runJs('''
+              window.concordiaNative = window.concordiaNative || {};
+              window.concordiaNative.isNativeApp = true;
+              window.concordiaNative.appVersion = "3.5.0";
+              (function() {
+                var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
+                var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
+                window.__concordiaFcmResolve = function(reqId, token) {
+                  try {
+                    if (resolvers[reqId]) {
+                      resolvers[reqId](token);
+                      delete resolvers[reqId];
+                    }
+                  } catch (e) {
+                    console.warn('[native] resolve error:', e);
+                  }
+                };
+                window.concordiaNative.requestTokenAsync = function() {
+                  return new Promise(function(resolve) {
+                    try {
+                      var reqId = 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                      resolvers[reqId] = resolve;
+                      // Post a message to the Dart side via the JS channel.
+                      window.concordiaFcmRequest.postMessage(JSON.stringify({
+                        id: reqId,
+                        method: 'requestToken'
+                      }));
+                      // Timeout: resolve with null after 5s so we never hang.
+                      setTimeout(function() {
+                        if (resolvers[reqId]) {
+                          resolvers[reqId](null);
+                          delete resolvers[reqId];
+                        }
+                      }, 5000);
+                    } catch (e) {
+                      console.warn('[native] requestTokenAsync error:', e);
+                      resolve(null);
+                    }
+                  });
+                };
+              })();
+            ''');
             if (!_loaded) {
               setState(() => _loaded = true);
             }
