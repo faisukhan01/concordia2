@@ -522,6 +522,18 @@ export const api = {
     request<{ success: boolean; recipients: number; pushed: number; fcmConfigured: boolean }>('notifications/broadcast-app-update', { method: 'POST', body: JSON.stringify({ version }) }),
   checkAppVersion: (current: string) =>
     request<{ latest: string; current: string | null; updateAvailable: boolean; downloadUrl: string; notificationCreated: boolean }>(`app/version-check?current=${encodeURIComponent(current)}`),
+  getFcmStatus: () =>
+    request<{
+      fcmEnabled: boolean;
+      envVarSet: boolean;
+      envVarLength: number;
+      parseError: string | null;
+      projectId: string | null;
+      clientEmail: string | null;
+      totalDeviceTokens: number;
+      tokensByRole: Array<{ role: string; count: number; users: number }>;
+      myDevices: Array<{ platform: string; tokenPreview: string | null; createdAt: string; lastSeen: string }>;
+    }>('notifications/fcm-status'),
 };
 
 // === Shared types for the v1.5.0 module APIs ===

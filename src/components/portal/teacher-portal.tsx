@@ -154,7 +154,7 @@ function StatCard({
   sub?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all hover:shadow-md hover:border-gray-300 group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between">
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all hover:shadow-md hover:border-gray-300 hover:-translate-y-0.5 active:scale-[0.98] group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between">
       <div className="flex items-start justify-between">
         <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
           <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-[#F26522] group-hover:text-white transition-colors" />
