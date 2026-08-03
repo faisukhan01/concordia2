@@ -14,6 +14,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -129,7 +130,9 @@ class NotificationService {
       // 10. Tell the web app that FCM is ready (so it can show the right UI).
       try {
         await _channel.invokeMethod('onFcmReady');
-      } catch {}
+      } catch (e) {
+        debugPrint('[NotificationService] onFcmReady failed: $e');
+      }
     } catch (e) {
       // Fail silently — the app still works without notifications. We just log.
       debugPrint('[NotificationService] init failed: $e');
