@@ -84,8 +84,8 @@ db/*.db-journal
 .gh-token-2
 gh-token.txt
 
-# GitHub Actions workflow (push with a token that has workflow scope)
-.github/workflows/
+# GitHub Actions workflow — committed so tag pushes trigger the APK build.
+# (Requires a PAT with `workflow` scope to push changes to this path.)
 build_log.txt
 *.apk
 concordia-college.apk
