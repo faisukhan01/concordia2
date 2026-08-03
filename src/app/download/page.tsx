@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import Image from 'next/image';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -44,15 +44,17 @@ const highlights = [
 // ───────────────────────── Component ─────────────────────────
 
 export default function DownloadPage() {
-  const [isAndroid, setIsAndroid] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const isAndroid = useSyncExternalStore(
+    () => () => {},
+    () => typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('android'),
+    () => false,
+  );
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const reduce = useReducedMotion();
-
-  useEffect(() => {
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
-    setIsAndroid(ua.includes('android'));
-    setMounted(true);
-  }, []);
 
   const buttonLabel = mounted && isAndroid ? 'Update App' : 'Download for Android';
 

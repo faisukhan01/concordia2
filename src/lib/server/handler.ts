@@ -169,6 +169,62 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true });
     }
 
+    // ── App version check. The mobile app calls this on startup with its
+    //    current version. If outdated, the server auto-creates an app-update
+    //    notification for this user (de-duped: at most once per 24h per user).
+    //    This guarantees every user who opens an outdated app gets the
+    //    "Update your Concordia app" notification — no manual admin action needed.
+    if (method === 'GET' && path === 'app/version-check') {
+      const user = await requireAuth(req);
+      const LATEST_APP_VERSION = '3.5.0';
+      const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
+      const current = (query.current || '').trim();
+
+      // Simple semver compare (major.minor.patch).
+      const cmp = (a: string, b: string): number => {
+        const pa = (a || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        const pb = (b || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        for (let i = 0; i < 3; i++) {
+          if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+          if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+        }
+        return 0;
+      };
+      const updateAvailable = !!current && cmp(current, LATEST_APP_VERSION) < 0;
+
+      // De-dup: only create an app-update notification if there isn't already
+      // one for this user in the last 24 hours (avoids spamming on every launch).
+      let notificationCreated = false;
+      if (updateAvailable) {
+        const recent = await db.execute({
+          sql: `SELECT id FROM notifications
+                WHERE userId = ? AND type = 'app-update'
+                AND createdAt > datetime('now', '-1 day')
+                LIMIT 1`,
+          args: [user.id],
+        });
+        if (recent.rows.length === 0) {
+          const { sendPushToUser } = await import('./fcm');
+          await sendPushToUser(
+            user.id,
+            'app-update',
+            'Update your Concordia app',
+            `A new version (${LATEST_APP_VERSION}) is available. Tap to download the latest APK.`,
+            { route: 'app-update', url: DOWNLOAD_URL, version: LATEST_APP_VERSION },
+          );
+          notificationCreated = true;
+        }
+      }
+
+      return NextResponse.json({
+        latest: LATEST_APP_VERSION,
+        current: current || null,
+        updateAvailable,
+        downloadUrl: DOWNLOAD_URL,
+        notificationCreated,
+      });
+    }
+
     // Get notifications for the logged-in user (newest first).
     if (method === 'GET' && path === 'notifications') {
       const user = await requireAuth(req);
@@ -235,6 +291,33 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         { route: 'notifications' },
       );
       return NextResponse.json({ success: true, ...result });
+    }
+
+    // ── Broadcast "Update your app" notification to ALL active users.
+    // Admin-triggered: sends an app-update push + in-app row to every user
+    // across every role. The notification's data.route = 'app-update' so the
+    // client opens the download page when tapped.
+    if (method === 'POST' && path === 'notifications/broadcast-app-update') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      const { sendPushToAll, fcmEnabled } = await import('./fcm');
+      const version = (body?.version as string) || '';
+      const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
+      const title = 'Update your Concordia app';
+      const body_text = version
+        ? `A new version (${version}) of the Concordia app is available. Tap to update now.`
+        : 'A new version of the Concordia app is available. Tap to update now.';
+      const result = await sendPushToAll('app-update', title, body_text, {
+        route: 'app-update',
+        url: DOWNLOAD_URL,
+        version,
+      });
+      return NextResponse.json({
+        success: true,
+        recipients: result.recipients,
+        pushed: result.sent,
+        fcmConfigured: fcmEnabled(),
+      });
     }
 
     // ===================== INSTITUTES (Super Admin) =====================

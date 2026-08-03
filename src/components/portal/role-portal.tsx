@@ -30,7 +30,7 @@ import { HelpWidget } from '@/components/ui/help-widget';
 import { api, setOnBlocked } from '@/lib/api';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
-import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck } from 'lucide-react';
+import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send } from 'lucide-react';
 
 // Notification icon + color mapping per type.
 const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
@@ -42,6 +42,7 @@ const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
   'fee-due':    { Icon: Wallet,         text: 'text-amber-600',  bg: 'bg-amber-500/10' },
   'fee-paid':   { Icon: BadgeCheck,     text: 'text-emerald-600', bg: 'bg-emerald-500/10' },
   fee:          { Icon: Receipt,        text: 'text-gold',       bg: 'bg-gold/10' },
+  'app-update': { Icon: Download,       text: 'text-primary',    bg: 'bg-primary/10' },
   result:       { Icon: Award,          text: 'text-emerald-600', bg: 'bg-emerald-500/10' },
   complaint:    { Icon: AlertCircle,    text: 'text-rose-500',   bg: 'bg-rose-500/10' },
   general:      { Icon: Bell,           text: 'text-muted-foreground', bg: 'bg-muted' },
@@ -213,20 +214,68 @@ export function RolePortal() {
     refreshFcmTokenAfterLogin();
   }, [user?.id]);
 
-  // ── Poll for the unread count every 60s so the bell badge stays fresh
-  //    without the user needing to open the panel. (Cheap endpoint — just a
-  //    COUNT query.)
+  // ── Track which notification IDs we've already shown as a toast banner,
+  //    so we don't re-toast them on every poll. Persisted in localStorage so
+  //    it survives page refreshes.
+  const seenNotifIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('concordia:seen-notifs');
+      if (raw) seenNotifIds.current = new Set(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  // ── Active notification poller: fetches full notifications every 25s and
+  //    shows an in-app toast banner for any NEW unread notification. This
+  //    guarantees the user sees notifications inside the WebView (the mobile
+  //    app) even when FCM server-side push is not configured — the banner
+  //    appears the moment the notification is persisted to the DB.
   useEffect(() => {
     let active = true;
     const poll = async () => {
       try {
-        const { unread } = await api.getUnreadCount();
-        if (active) setNotifUnread(unread);
+        const data = await api.getNotifications(15);
+        if (!active || !Array.isArray(data?.items)) return;
+        // Update the unread badge count.
+        setNotifUnread(typeof data.unread === 'number' ? data.unread : 0);
+        // Show a toast for each new unread notification we haven't seen yet.
+        const newOnes = data.items.filter(
+          (n) => !n.read && !seenNotifIds.current.has(n.id),
+        );
+        for (const n of newOnes) {
+          seenNotifIds.current.add(n.id);
+          toast({
+            title: n.title || 'Concordia College',
+            description: n.body || '',
+          });
+        }
+        if (newOnes.length > 0) {
+          // Persist the seen set (cap at 200 entries to avoid unbounded growth).
+          try {
+            const arr = Array.from(seenNotifIds.current).slice(-200);
+            localStorage.setItem('concordia:seen-notifs', JSON.stringify(arr));
+          } catch {}
+          // Refresh the bell panel list so the new items appear there too.
+          setNotifItems(data.items);
+        }
       } catch {}
     };
-    const id = setInterval(poll, 60_000);
-    return () => { active = false; clearInterval(id); };
+    // Initial poll after a short delay (lets the first fetchNotifs settle).
+    const t = setTimeout(poll, 3000);
+    const id = setInterval(poll, 25_000);
+    return () => { active = false; clearTimeout(t); clearInterval(id); };
   }, []);
+
+  // ── App version check: on mount, ask the server if the current app version
+  //    is outdated. If so, the server auto-creates an "Update your Concordia
+  //    app" notification for this user (de-duped per 24h). The notification
+  //    then shows up via the poller above + the bell panel.
+  useEffect(() => {
+    if (!user?.id) return;
+    const nativeVer = (window as any).concordiaNative?.appVersion as string | undefined;
+    const currentVer = nativeVer || '3.4.0'; // fallback for APKs that don't expose their version yet
+    api.checkAppVersion(currentVer).catch(() => {});
+  }, [user?.id]);
 
   // ── Listen for "concordia:open-notifications" — dispatched by the FCM
   //    bridge when the user taps a notification with route='notifications'.
@@ -283,13 +332,19 @@ export function RolePortal() {
       route = n?.data ? (typeof n.data === 'string' ? JSON.parse(n.data).route : n.data.route) : undefined;
     } catch {}
     if (route) {
-      // Re-use the FCM bridge's tap handler by dispatching the same event
-      window.dispatchEvent(new CustomEvent('concordia:open-notifications'));
       // The fcm-bridge handles the actual navigation via onNotificationTap.
       // We call it directly here for in-app clicks.
       const w = window as any;
+      const data = typeof n.data === 'string' ? JSON.parse(n.data) : (n.data || {});
+      // For app-update, the bridge navigates to the download page — close
+      // the panel first so the navigation is clean.
+      if (route === 'app-update') {
+        setNotifOpen(false);
+      } else {
+        // Re-use the FCM bridge's tap handler by dispatching the same event
+        window.dispatchEvent(new CustomEvent('concordia:open-notifications'));
+      }
       if (w.concordiaNative?.onNotificationTap) {
-        const data = typeof n.data === 'string' ? JSON.parse(n.data) : (n.data || {});
         w.concordiaNative.onNotificationTap(data);
       }
     }
@@ -337,6 +392,28 @@ export function RolePortal() {
       });
     } finally {
       setSendingTest(false);
+    }
+  };
+
+  // Broadcast "Update your app" notification to ALL users (admin/super-admin only).
+  const [broadcasting, setBroadcasting] = useState(false);
+  const onBroadcastAppUpdate = async () => {
+    setBroadcasting(true);
+    try {
+      const res = await api.broadcastAppUpdate('3.5.0');
+      toast({
+        title: 'Update notification sent to all users',
+        description: `Delivered to ${res.recipients} user(s)${res.pushed > 0 ? ` (${res.pushed} push)` : ''}. They'll see it in their bell + as a banner.`,
+      });
+      setTimeout(fetchNotifs, 500);
+    } catch (e: any) {
+      toast({
+        title: 'Failed to broadcast update notification',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBroadcasting(false);
     }
   };
 
@@ -623,26 +700,39 @@ export function RolePortal() {
                   </div>
 
                   {/* Footer — Mark all read + Send test (native app only) */}
-                  {(notifUnread > 0 || isNativeApp()) && (
-                    <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-border shrink-0 bg-muted/30">
-                      {notifUnread > 0 ? (
+                  {(notifUnread > 0 || isNativeApp() || role === 'admin' || role === 'super-admin') && (
+                    <div className="border-t border-border shrink-0 bg-muted/30">
+                      {/* Admin-only: Broadcast "Update your app" to all users */}
+                      {(role === 'admin' || role === 'super-admin') && (
                         <button
-                          onClick={onMarkAllRead}
-                          className="text-[11px] font-medium text-primary hover:text-primary/80 transition"
+                          onClick={onBroadcastAppUpdate}
+                          disabled={broadcasting}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] transition disabled:opacity-50"
                         >
-                          Mark all as read
-                        </button>
-                      ) : <span />}
-                      {isNativeApp() && (
-                        <button
-                          onClick={onSendTest}
-                          disabled={sendingTest}
-                          className="text-[11px] font-medium text-muted-foreground hover:text-primary transition inline-flex items-center gap-1 disabled:opacity-50"
-                        >
-                          <Sparkles className={cn('h-3 w-3', sendingTest && 'animate-spin')} />
-                          {sendingTest ? 'Sending…' : 'Send test push'}
+                          <Send className={cn('h-3 w-3', broadcasting && 'animate-pulse')} />
+                          {broadcasting ? 'Broadcasting…' : 'Broadcast "Update App" to all users'}
                         </button>
                       )}
+                      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                        {notifUnread > 0 ? (
+                          <button
+                            onClick={onMarkAllRead}
+                            className="text-[11px] font-medium text-primary hover:text-primary/80 transition"
+                          >
+                            Mark all as read
+                          </button>
+                        ) : <span />}
+                        {isNativeApp() && (
+                          <button
+                            onClick={onSendTest}
+                            disabled={sendingTest}
+                            className="text-[11px] font-medium text-muted-foreground hover:text-primary transition inline-flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Sparkles className={cn('h-3 w-3', sendingTest && 'animate-spin')} />
+                            {sendingTest ? 'Sending…' : 'Send test push'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

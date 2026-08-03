@@ -85,6 +85,7 @@ export type NotifType =
   | 'fee-due'
   | 'fee-paid'
   | 'salary'
+  | 'app-update'
   | 'general';
 
 async function persistNotification(
@@ -261,6 +262,26 @@ export async function sendPushToRole(
   const r = await db.execute({
     sql: `SELECT id FROM users WHERE role = ? AND status = 'Active'`,
     args: [role],
+  });
+  const userIds = r.rows.map((row: any) => row.id as string);
+  if (userIds.length === 0) return { sent: 0, recipients: 0 };
+  const res = await sendPushToUsers(userIds, type, title, body, data);
+  return { sent: res.sent, recipients: userIds.length };
+}
+
+/**
+ * Send to EVERY active user across ALL roles (admin, admissions, accountant,
+ * academic, teacher, student, super-admin). Used for institute-wide broadcasts
+ * like "update your app" announcements.
+ */
+export async function sendPushToAll(
+  type: NotifType,
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+): Promise<{ sent: number; recipients: number }> {
+  const r = await db.execute({
+    sql: `SELECT id FROM users WHERE status = 'Active'`,
   });
   const userIds = r.rows.map((row: any) => row.id as string);
   if (userIds.length === 0) return { sent: 0, recipients: 0 };

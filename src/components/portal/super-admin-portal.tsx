@@ -185,21 +185,19 @@ function StatCard({
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all group',
-        onClick ? 'hover:border-[#F26522] hover:shadow-sm cursor-pointer' : 'cursor-default',
+        'w-full text-left rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 transition-all group aspect-square sm:aspect-auto sm:min-h-[128px] flex flex-col justify-between',
+        onClick ? 'hover:border-[#F26522] hover:shadow-md cursor-pointer' : 'cursor-default',
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {label}
-          </div>
-          <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+      <div className="flex items-start justify-between">
+        <div className="h-10 w-10 rounded-xl bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-5 w-5 text-[#F26522] group-hover:text-white transition-colors" />
         </div>
-        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
-          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
-        </div>
+      </div>
+      <div className="min-w-0 mt-2">
+        <div className="text-2xl font-bold text-gray-900 truncate tabular-nums leading-tight">{value}</div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-1 truncate">{label}</div>
+        {sub && <div className="text-xs text-gray-500 mt-1 truncate">{sub}</div>}
       </div>
     </button>
   );
@@ -1987,7 +1985,7 @@ function SuperFees() {
       />
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-28" />
           ))}
@@ -1999,7 +1997,7 @@ function SuperFees() {
       ) : (
         <>
           {/* KPI strip */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <StatCard
               icon={DollarSign}
               label="Total Collected"

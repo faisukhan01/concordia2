@@ -147,9 +147,11 @@ class _SplashToWebViewState extends State<SplashToWebView> {
             _pushTokenToWebView();
             _pushTapToWebView();
             // Mark the app as native so the web app can show a "Send Test
-            // Notification" button + hide browser-only features.
+            // Notification" button + hide browser-only features. Also inject
+            // the current app version so the web app can check for updates.
             _runJs('window.concordiaNative = window.concordiaNative || {};'
-                'window.concordiaNative.isNativeApp = true;');
+                'window.concordiaNative.isNativeApp = true;'
+                'window.concordiaNative.appVersion = "3.4.0";');
             if (!_loaded) {
               setState(() => _loaded = true);
             }
