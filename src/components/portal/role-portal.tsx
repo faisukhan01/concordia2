@@ -53,9 +53,22 @@ function notifMeta(type: string) {
 }
 
 // Relative time formatting: "just now", "3m ago", "2h ago", "1d ago", "3w ago", "5mo ago", "1y ago".
+//
+// CRITICAL: The server stores `createdAt` as SQLite `datetime('now')`, which
+// returns a UTC timestamp in the format `YYYY-MM-DD HH:MM:SS` (NO timezone
+// marker). JavaScript's `new Date(iso)` treats a string WITHOUT a timezone
+// marker as LOCAL time — which means a notification created right now would
+// appear as "5h ago" for a user in Karachi (UTC+5). To fix this, we append
+// 'Z' to timestamps that look like UTC-without-tz so they're parsed as UTC.
 function formatRelativeTime(iso: string): string {
   if (!iso) return '';
-  const then = new Date(iso).getTime();
+  let normalized = iso;
+  // SQLite datetime('now') format: "YYYY-MM-DD HH:MM:SS" (space, no T, no Z).
+  // Convert to ISO 8601 UTC: "YYYY-MM-DDTHH:MM:SSZ".
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(normalized) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) {
+    normalized = normalized.replace(' ', 'T') + 'Z';
+  }
+  const then = new Date(normalized).getTime();
   if (Number.isNaN(then)) return '';
   const diff = Math.max(0, Date.now() - then);
   const sec = Math.floor(diff / 1000);

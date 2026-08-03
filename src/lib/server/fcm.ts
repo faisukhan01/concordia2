@@ -143,26 +143,39 @@ async function sendToTokens(
   const app = getApp();
   if (!app || tokens.length === 0) return { sent: 0, failed: 0 };
 
-  // Android-specific payload — high priority so the system delivers promptly,
-  // and a notification channel so it shows a banner + sound like WhatsApp.
+  // DATA-ONLY PAYLOAD (no top-level `notification` field).
+  //
+  // Why data-only instead of a `notification` field?
+  //   • A `notification` field makes FCM auto-display the banner via the
+  //     Android system tray. But auto-display depends on the notification
+  //     channel already existing with the right sound/importance settings —
+  //     and Android does NOT let apps change a channel's settings after it
+  //     is created. If a previous app version created the channel without
+  //     sound, the new version's "playSound: true" is SILENTLY IGNORED, and
+  //     the user gets banners with no sound + no background delivery.
+  //
+  //   • With data-only, the Flutter app's onMessage / onBackgroundMessage
+  //     handlers ALWAYS run (foreground, background, AND terminated). They
+  //     show a local notification via flutter_local_notifications, which
+  //     gives us FULL control over sound, vibration, channel, and priority.
+  //     This is the WhatsApp-style behavior the user wants.
+  //
+  //   • We set android.priority='high' so FCM delivers promptly even in
+  //     doze mode. This is the same delivery priority as notification msgs.
+  //
+  // The Flutter side reads `data.title` and `data.body` (with a fallback to
+  // `message.notification` for backward compat with older app versions).
+  const fullData: Record<string, string> = {
+    title,
+    body,
+    ...(data || {}),
+  };
+
   const message: any = {
     tokens,
-    notification: { title, body },
-    data: data || {},
+    data: fullData,
     android: {
       priority: 'high',
-      notification: {
-        channelId: 'concordia_notifications',
-        sound: 'default',
-        icon: '@drawable/ic_notification',
-        color: '#F26522',
-        priority: 'max',
-        defaultVibrateTimings: true,
-        defaultSound: true,
-        visibility: 'public',
-        notificationCount: 1,
-        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-      },
     },
     webpush: {
       headers: { Urgency: 'high' },
