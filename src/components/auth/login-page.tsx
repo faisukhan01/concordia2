@@ -198,6 +198,35 @@ export function LoginPage() {
                 <span className="font-mono text-white/80">Teacher ID</span> and the password given
                 by the Accountant.
               </p>
+
+              {/* Mobile-only demo account quick-fill (the right panel is hidden on mobile) */}
+              <div className="lg:hidden mt-4">
+                <details className="group rounded-lg border border-white/15 bg-white/5 overflow-hidden">
+                  <summary className="flex items-center justify-between gap-2 px-3.5 py-2.5 cursor-pointer list-none">
+                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
+                      <Sparkles className="h-3 w-3 text-[#F26522]" />
+                      Demo Accounts
+                    </span>
+                    <svg className="h-3.5 w-3.5 text-white/50 group-open:rotate-180 transition-transform" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+                  </summary>
+                  <div className="px-3.5 pb-3 space-y-1.5">
+                    {DEMO_ACCOUNTS.map(c => (
+                      <button
+                        key={c.email}
+                        type="button"
+                        onClick={() => fillDemo(c.email)}
+                        className="w-full flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 hover:bg-white/15 hover:border-[#F26522]/50 px-3 py-2 text-left transition-all"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-semibold text-white">{c.role}</div>
+                          <div className="text-[10px] text-white/50 font-mono truncate">{c.email}</div>
+                        </div>
+                        <span className="shrink-0 text-[9px] font-semibold text-white/40">concordia123</span>
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              </div>
             </div>
 
             <p className="text-center text-[11px] text-white/70 mt-5 drop-shadow">

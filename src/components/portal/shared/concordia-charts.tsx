@@ -28,7 +28,7 @@ export function SimpleBarChart(props: {
       <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={48} label={yLabel ? { value: yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } } : undefined} />
+        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={48} allowDecimals={false} domain={[0, 'auto']} label={yLabel ? { value: yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } } : undefined} />
         <Tooltip
           cursor={{ fill: BRAND_ORANGE_LIGHT }}
           contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
@@ -53,7 +53,7 @@ export function SimpleLineChart(props: {
       <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={48} />
+        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={48} allowDecimals={false} domain={[0, 'auto']} />
         <Tooltip
           contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
           formatter={(v: number) => formatValue ? formatValue(v) : v}
@@ -73,6 +73,7 @@ export function SimplePieChart(props: {
   const { data, height = 220, donut = true } = props;
   const filtered = data.filter(d => d.value > 0);
   if (filtered.length === 0) return null;
+  const total = filtered.reduce((sum, d) => sum + d.value, 0);
   return (
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
@@ -85,10 +86,24 @@ export function SimplePieChart(props: {
           innerRadius={donut ? 50 : 0}
           outerRadius={80}
           paddingAngle={2}
+          label={({ value }: { value?: number }) => (value ? `${value}` : '')}
+          labelLine={false}
         >
           {filtered.map((_, i) => (
             <Cell key={i} fill={COLORS[i % COLORS.length]} />
           ))}
+          {donut && (
+            <text
+              x="50%"
+              y="50%"
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-gray-900"
+              style={{ fontSize: 22, fontWeight: 700 }}
+            >
+              {total}
+            </text>
+          )}
         </Pie>
         <Tooltip
           contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
