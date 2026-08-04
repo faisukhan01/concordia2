@@ -402,7 +402,7 @@ export function SettingsPage({ user }: { user: any }) {
     .toUpperCase();
 
   // ─── App version for "About" section ───
-  const appVersion = nativeInfo.appVersion || '4.6.0';
+  const appVersion = nativeInfo.appVersion || '4.6.1';
 
   return (
     <div className="space-y-6 max-w-4xl pb-12">
@@ -737,7 +737,7 @@ export function SettingsPage({ user }: { user: any }) {
           />
           <HealthCheck
             label="App version"
-            ok={!!appVersion && appVersion !== '4.5.1'}
+            ok={!!appVersion && appVersion !== '4.5.0' && appVersion !== '4.5.1'}
             detail={`v${appVersion}${appUpdateAvailable ? ` · Update available (v${latestVersion})` : ' · Latest'}`}
           />
         </div>
