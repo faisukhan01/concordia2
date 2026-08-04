@@ -10,7 +10,8 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { BrandLogo } from '@/components/brand-logo';
-import { ThemeToggle } from '@/components/theme-toggle';
+// v4.1.0: ThemeToggle import REMOVED — user requested removal of the theme
+// switcher from the entire app (default light theme is the intended design).
 
 // ==================== Concordia College — Sign In ====================
 // Layout (UCP-inspired, refined):
@@ -92,10 +93,7 @@ export function LoginPage() {
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: 'url(/concordia-campus.jpg)' }}
       />
-      {/* ─── Theme toggle — top-right corner, above everything ─── */}
-      <div className="absolute top-4 right-4 z-30">
-        <ThemeToggle className="border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20 hover:border-white/40" />
-      </div>
+      {/* v4.1.0: Theme toggle REMOVED — default light theme is the intended design. */}
       {/* Barely-there gradient — only the far-left edge is darkened slightly
           so the white login card has enough contrast. Campus photo stays
           bright everywhere else. */}

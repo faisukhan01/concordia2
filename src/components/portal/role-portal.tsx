@@ -32,7 +32,9 @@ import { api, setOnBlocked } from '@/lib/api';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
 import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle, ShieldAlert } from 'lucide-react';
-import { ThemeToggle } from '@/components/theme-toggle';
+// v4.1.0: ThemeToggle REMOVED per user request — the default light theme is
+// the intended design and the toggle was never requested. Removed from both
+// the portal header and the login page.
 
 // Notification icon + color mapping per type.
 const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
@@ -263,6 +265,18 @@ export function RolePortal() {
   //    guarantees the user sees notifications inside the WebView (the mobile
   //    app) even when FCM server-side push is not configured — the banner
   //    appears the moment the notification is persisted to the DB.
+  //
+  // v4.1.0 FIX — "notification with sound on every app open":
+  //   Previously the first poll after mount treated ALL unread notifications
+  //   as "new" (because seenNotifIds started empty / localStorage hadn't
+  //   loaded yet) and fired a toast + chime for EACH one. The user heard a
+  //   sound every single time they opened the app. The fix: the FIRST poll
+  //   is now SILENT — it just populates seenNotifIds with every existing
+  //   notification ID. Only notifications that arrive AFTER the app opened
+  //   (i.e. on the 2nd, 3rd, … poll) trigger toasts + sounds. This matches
+  //   WhatsApp / Gmail behavior — you don't get re-notified for things you
+  //   already saw last time.
+  const firstPollRef = useRef(true);
   useEffect(() => {
     let active = true;
     const poll = async () => {
@@ -271,6 +285,23 @@ export function RolePortal() {
         if (!active || !Array.isArray(data?.items)) return;
         // Update the unread badge count.
         setNotifUnread(typeof data.unread === 'number' ? data.unread : 0);
+        if (firstPollRef.current) {
+          // SILENT first poll: mark every existing notification as "seen"
+          // WITHOUT showing toasts or playing sounds. This prevents the
+          // "notification with sound on every app open" bug.
+          for (const n of data.items) {
+            seenNotifIds.current.add(n.id);
+          }
+          // Still refresh the bell panel so the items show in the dropdown.
+          setNotifItems(data.items);
+          firstPollRef.current = false;
+          // Persist the seen set.
+          try {
+            const arr = Array.from(seenNotifIds.current).slice(-200);
+            localStorage.setItem('concordia:seen-notifs', JSON.stringify(arr));
+          } catch {}
+          return;
+        }
         // Show a toast for each new unread notification we haven't seen yet.
         const newOnes = data.items.filter(
           (n) => !n.read && !seenNotifIds.current.has(n.id),
@@ -814,7 +845,7 @@ export function RolePortal() {
                 <Search className="h-[18px] w-[18px]" />
               </button>
             )}
-            <ThemeToggle />
+            {/* v4.1.0: ThemeToggle removed — default light theme is the intended design. */}
             <div className="relative" ref={notifRef}>
               <button
                 onClick={toggleNotifs}
