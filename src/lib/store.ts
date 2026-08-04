@@ -46,25 +46,40 @@ type AppState = {
   logout: () => void;
 };
 
-// Use sessionStorage so each browser tab has its own independent session.
-// This prevents the "multiple tab" issue where signing in as a different user
-// in one tab would overwrite the session in other tabs.
-const sessionStorageAdapter = {
+// ─────────────────────────────────────────────────────────────────────────
+// PERSISTENCE: localStorage (NOT sessionStorage)
+// ─────────────────────────────────────────────────────────────────────────
+// WhatsApp-style session persistence: the user stays logged in across app
+// restarts, phone reboots, and WebView process kills. sessionStorage is wiped
+// the moment the WebView closes — which is exactly why the mobile app was
+// logging users out whenever they closed the app, and why background FCM
+// pushes had no live session to target.
+//
+// localStorage survives until the user explicitly logs out (or clears app
+// data), which is the correct behavior for a college portal. This is also a
+// prerequisite for reliable background notifications: the FCM device-token is
+// registered to the logged-in user, so the session must persist for pushes to
+// keep flowing to the right account.
+//
+// Multi-tab note: in a browser, two tabs share the same localStorage entry.
+// This is fine for this app (single-institution, single-session). The mobile
+// app has exactly one WebView so there's no multi-tab concern there at all.
+const localStorageAdapter = {
   getItem: (name: string) => {
     try {
-      return sessionStorage.getItem(name);
+      return localStorage.getItem(name);
     } catch {
       return null;
     }
   },
   setItem: (name: string, value: string) => {
     try {
-      sessionStorage.setItem(name, value);
+      localStorage.setItem(name, value);
     } catch {}
   },
   removeItem: (name: string) => {
     try {
-      sessionStorage.removeItem(name);
+      localStorage.removeItem(name);
     } catch {}
   },
 };
@@ -86,7 +101,7 @@ export const useApp = create<AppState>()(
     }),
     {
       name: 'concordia-app',
-      storage: createJSONStorage(() => sessionStorageAdapter),
+      storage: createJSONStorage(() => localStorageAdapter),
     }
   )
 );
