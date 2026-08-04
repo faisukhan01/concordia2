@@ -119,6 +119,21 @@ class _SplashToWebViewState extends State<SplashToWebView>
           // web app can show Realme/Xiaomi-specific setup guidance.
           _injectDeviceInfo();
           break;
+        // v4.2.0: LOCAL NOTIFICATION FALLBACK — the web app's notification
+        // poller calls this when it detects a new notification in the DB.
+        // We show a LOCAL system notification via flutter_local_notifications,
+        // identical to how the keep-alive service shows its notification.
+        // This bypasses FCM entirely — works even when FCM push fails.
+        case 'showLocalNotification':
+          try {
+            final title = call.arguments['title'] as String? ?? 'Concordia College';
+            final body = call.arguments['body'] as String? ?? '';
+            final dataStr = call.arguments['data'] as String? ?? '{}';
+            await NotificationService().showLocalNotification(title, body, dataStr);
+          } catch (e) {
+            debugPrint('[WebView] showLocalNotification failed: $e');
+          }
+          break;
       }
     });
   }
@@ -212,7 +227,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
       ..addJavaScriptChannel(
         'concordiaFcmRequest',
         onMessageReceived: (JavaScriptMessage message) async {
-          // message.message is a JSON string: {"id": "<reqId>", "method": "requestToken"}
+          // message.message is a JSON string: {"id": "<reqId>", "method": "requestToken"|"showLocalNotification"}
           try {
             final req = jsonDecode(message.message) as Map<String, dynamic>;
             final reqId = req['id'] as String? ?? '';
@@ -234,6 +249,19 @@ class _SplashToWebViewState extends State<SplashToWebView>
                 'window.__concordiaFcmResolve && '
                 'window.__concordiaFcmResolve(${jsonEncode(reqId)}, $tokenJs);',
               );
+            } else if (method == 'showLocalNotification') {
+              // v4.2.0: LOCAL NOTIFICATION FALLBACK — the web app's poller
+              // detected a new notification in the DB. Show it as a LOCAL
+              // system notification via flutter_local_notifications. This
+              // bypasses FCM entirely — works even when FCM push fails.
+              final title = req['title'] as String? ?? 'Concordia College';
+              final body = req['body'] as String? ?? '';
+              final dataStr = req['data'] as String? ?? '{}';
+              try {
+                await NotificationService().showLocalNotification(title, body, dataStr);
+              } catch (e) {
+                debugPrint('[WebView] showLocalNotification failed: $e');
+              }
             }
           } catch (e) {
             debugPrint('[WebView] concordiaFcmRequest parse error: $e');
@@ -258,7 +286,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
             _runJs('''
               window.concordiaNative = window.concordiaNative || {};
               window.concordiaNative.isNativeApp = true;
-              window.concordiaNative.appVersion = "4.1.0";
+              window.concordiaNative.appVersion = "4.2.0";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
@@ -294,6 +322,28 @@ class _SplashToWebViewState extends State<SplashToWebView>
                       resolve(null);
                     }
                   });
+                };
+                // v4.2.0: LOCAL NOTIFICATION FALLBACK — the web app calls this
+                // when its notification poller detects a new notification in
+                // the DB. We forward the call to the Dart side via the FCM
+                // MethodChannel, which shows a LOCAL system notification via
+                // flutter_local_notifications (same channel as the keep-alive
+                // service: concordia_notifications_v4, sound + high importance).
+                // This bypasses FCM entirely — works even when FCM push fails.
+                window.concordiaNative.showLocalNotification = function(title, body, dataJson) {
+                  try {
+                    // Use the FCM MethodChannel to call the Dart side.
+                    // The Dart handler in _setupMethodChannel() picks this up
+                    // and calls NotificationService().showLocalNotification().
+                    window.concordiaFcmRequest.postMessage(JSON.stringify({
+                      method: 'showLocalNotification',
+                      title: title || 'Concordia College',
+                      body: body || '',
+                      data: dataJson || '{}'
+                    }));
+                  } catch (e) {
+                    console.warn('[native] showLocalNotification error:', e);
+                  }
                 };
               })();
             ''');

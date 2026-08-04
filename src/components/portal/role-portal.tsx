@@ -29,7 +29,7 @@ import { CommandPalette } from './command-palette';
 import { OnboardingTips } from '@/components/onboarding/onboarding-tooltips';
 import { HelpWidget } from '@/components/ui/help-widget';
 import { api, setOnBlocked } from '@/lib/api';
-import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
+import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin, showLocalNotification } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
 import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle, ShieldAlert } from 'lucide-react';
 // v4.1.0: ThemeToggle REMOVED per user request — the default light theme is
@@ -316,6 +316,22 @@ export function RolePortal() {
           // notification arrives. The native mobile app handles its own sound
           // via the FCM channel, so we only play in the browser.
           playNotifSound();
+          // v4.2.0: BULLETPROOF LOCAL NOTIFICATION FALLBACK — when running
+          // inside the native app, ask Flutter to show a LOCAL SYSTEM
+          // notification (lock screen + notification shade) via
+          // flutter_local_notifications. This works EVEN IF FCM push fails,
+          // because it uses the web app's HTTP poll (not FCM) to detect the
+          // notification, then Flutter's local notification API to display it.
+          // The notification appears IDENTICALLY to the keep-alive service
+          // notification — same channel (concordia_notifications_v4), same
+          // sound, same high-importance heads-up banner.
+          if (isNativeApp()) {
+            showLocalNotification(
+              n.title || 'Concordia College',
+              n.body || '',
+              { route: (n as any).data?.route || 'notifications', notificationId: n.id },
+            );
+          }
         }
         if (newOnes.length > 0) {
           // Persist the seen set (cap at 200 entries to avoid unbounded growth).
@@ -329,8 +345,10 @@ export function RolePortal() {
       } catch {}
     };
     // Initial poll after a short delay (lets the first fetchNotifs settle).
+    // v4.2.0: Reduced poll interval from 25s → 15s so local notifications
+    // appear faster (the user wants activity notifications promptly).
     const t = setTimeout(poll, 3000);
-    const id = setInterval(poll, 25_000);
+    const id = setInterval(poll, 15_000);
     return () => { active = false; clearTimeout(t); clearInterval(id); };
   }, []);
 
@@ -745,6 +763,13 @@ export function RolePortal() {
 
   const renderPortal = () => {
     if (activeModule === 'settings') return <SettingsPage user={user} />;
+    // v4.1.0: "Download App" sidebar link → opens /download page in a new tab.
+    if (activeModule === 'download-app') {
+      if (typeof window !== 'undefined') window.open('/download', '_blank');
+      // Immediately switch back to the dashboard so the user doesn't see a blank page.
+      setTimeout(() => setActiveModule(ROLE_MODULES[user.role]?.[0]?.items?.[0]?.id || 'dashboard'), 0);
+      return null;
+    }
     switch (role) {
       case 'super-admin': return <SuperAdminPortal activeModule={activeModule} user={user} />;
       case 'admin': return <AdminPortal activeModule={activeModule} user={user} />;

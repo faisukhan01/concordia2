@@ -20,6 +20,7 @@ import {
   ClipboardList, FileText, Bell, CreditCard, Calendar, Award,
   UserPlus, UserCog, Receipt, CalendarDays, Megaphone, KeyRound,
   MessageCircle, FileSpreadsheet, Inbox, CheckCircle2,
+  Download as DownloadIcon,
 } from 'lucide-react';
 
 export type RoleModule = {
@@ -230,6 +231,7 @@ export const ROLE_MODULES: RoleModules = {
     ]},
     { group: 'Account', flat: true, items: [
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'download-app', name: 'Download App', icon: DownloadIcon, color: SECONDARY },
     ]},
   ],
 
@@ -254,6 +256,7 @@ export const ROLE_MODULES: RoleModules = {
     ]},
     { group: 'Account', flat: true, items: [
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'download-app', name: 'Download App', icon: DownloadIcon, color: SECONDARY },
     ]},
   ],
 

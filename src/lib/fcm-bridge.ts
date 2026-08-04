@@ -265,6 +265,70 @@ export function isNativeApp(): boolean {
   return !!(window as any).concordiaNative?.isNativeApp;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// v4.2.0 — LOCAL NOTIFICATION FALLBACK (bulletproof delivery)
+// ═══════════════════════════════════════════════════════════════════════
+// PROBLEM: FCM server-side push is unreliable on Realme/Chinese OEMs — the
+// OS can delay or drop FCM pushes even with a foreground service. The user
+// sees the keep-alive notification (LOCAL, shown by the app itself) but NOT
+// activity notifications (REMOTE, FCM push from server).
+//
+// SOLUTION: When the web app's notification poller detects a new notification
+// in the database, it calls this function to ask Flutter to show a LOCAL
+// system notification via flutter_local_notifications. This is EXACTLY the
+// same mechanism the keep-alive service uses — so the notification appears
+// on the lock screen + notification shade identically.
+//
+// This works EVEN IF FCM is completely broken, because it uses:
+//   1. The web app's existing 25-second poll (HTTP GET /api/notifications)
+//   2. Flutter's local notifications plugin (already configured with v4
+//      channel + sound + high importance)
+//
+// The only requirement is the WebView is running (app open or in background
+// with the foreground service keeping it alive). For terminated-app delivery,
+// FCM is still the only path — but this local fallback covers the 95% case
+// where the user has the app open or in background.
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Ask the native Flutter shell to show a LOCAL system notification.
+ * Only works when running inside the native app (isNativeApp() === true).
+ * In a regular browser, this is a no-op (the web toast handles it).
+ *
+ * @param title  Notification title (e.g. "📢 New Announcement")
+ * @param body   Notification body text
+ * @param data   Optional route data for tap handling (e.g. { route: 'announcements' })
+ */
+export function showLocalNotification(
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+): void {
+  if (typeof window === 'undefined') return;
+  const w = window as any;
+  const native = w.concordiaNative;
+  if (!native || !native.isNativeApp) return; // no-op in browser
+  // Try the async MethodChannel call. Flutter handles the rest — it calls
+  // _localNotifications.show() with the v4 channel (sound + high importance).
+  if (typeof native.showLocalNotification === 'function') {
+    try {
+      const result = native.showLocalNotification(
+        title,
+        body,
+        data ? JSON.stringify(data) : '{}',
+      );
+      // The bridge function may return a Promise (if async) — catch errors.
+      if (result && typeof result.catch === 'function') {
+        result.catch((e: any) =>
+          console.warn('[fcm] showLocalNotification failed:', e),
+        );
+      }
+    } catch (e) {
+      console.warn('[fcm] showLocalNotification error:', e);
+    }
+  }
+}
+
 /**
  * Re-register the token after login. Called when the user logs in —
  * the native shell may have already injected a token before the user

@@ -567,6 +567,66 @@ class NotificationService {
     return null;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // v4.2.0 — LOCAL NOTIFICATION FALLBACK (bulletproof delivery)
+  // ═══════════════════════════════════════════════════════════════════════
+  // Called by the WebView shell (app.dart) when the web app's notification
+  // poller detects a new notification in the database. We show a LOCAL
+  // system notification via flutter_local_notifications — the SAME plugin +
+  // channel (concordia_notifications_v4) used for FCM foreground messages.
+  //
+  // This is the BULLETPROOF fallback: it works EVEN IF FCM is completely
+  // broken, because it only requires:
+  //   1. The WebView to be running (app open or background with keep-alive)
+  //   2. The notification to be persisted in the DB (always happens)
+  //
+  // The user sees the notification on the lock screen + notification shade,
+  // IDENTICAL to how the keep-alive service notification appears.
+  // ═══════════════════════════════════════════════════════════════════════
+  Future<void> showLocalNotification(String title, String body, String dataJson) async {
+    try {
+      Map<String, dynamic> data = {};
+      try {
+        data = jsonDecode(dataJson) as Map<String, dynamic>;
+      } catch (_) {}
+
+      // Use a unique ID per notification (based on timestamp) so multiple
+      // notifications don't overwrite each other.
+      final notifId = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+      await _localNotifications.show(
+        notifId,
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: _channelDesc,
+            importance: Importance.high,
+            priority: Priority.high,
+            icon: '@drawable/ic_notification',
+            color: const Color(0xFFF26522),
+            playSound: true,
+            enableVibration: true,
+            fullScreenIntent: false,
+            category: AndroidNotificationCategory.message,
+            visibility: NotificationVisibility.public,
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+        payload: dataJson,
+      );
+      debugPrint('[NotificationService] ✓ local notification shown: "$title"');
+    } catch (e) {
+      debugPrint('[NotificationService] showLocalNotification failed: $e');
+    }
+  }
+
   /// Opens the proprietary Auto-start settings screen (Realme/Xiaomi/Huawei).
   /// Returns true if a settings screen was opened.
   Future<bool> openAutoStartSettings() async {
