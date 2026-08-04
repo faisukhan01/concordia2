@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { useApp } from '@/lib/store';
@@ -27,7 +27,7 @@ import {
   User, Lock, Eye, EyeOff, CheckCircle2, Mail, Shield, Loader2, Phone,
   Bell, BellOff, Volume2, VolumeX, Moon, Clock, Smartphone, Monitor,
   LogOut, Info, Building2, Calendar, Fingerprint, Wifi, Activity,
-  ChevronRight, Save, AlertTriangle, BookOpen, Heart,
+  ChevronRight, Save, AlertTriangle, BookOpen, Heart, Camera,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
@@ -51,14 +51,37 @@ const NOTIF_TYPES: Array<{
   { id: 'general', label: 'General', description: 'Other college notifications', icon: Info, color: 'text-gray-600' },
 ];
 
+function parseTimestamp(ts: any): number | null {
+  if (!ts) return null;
+  // Case 1: epoch milliseconds (number) — sessions table uses Date.now().
+  if (typeof ts === 'number') return ts;
+  // Case 2: numeric string (epoch millis) — try parseInt.
+  if (typeof ts === 'string' && /^\d+$/.test(ts.trim())) {
+    const n = parseInt(ts, 10);
+    return isNaN(n) ? null : n;
+  }
+  // Case 3: ISO datetime string — device_tokens.lastSeen uses SQLite
+  // datetime('now') which returns "YYYY-MM-DD HH:MM:SS" (UTC, no 'Z').
+  // We append 'Z' so JS parses it as UTC, not local time.
+  if (typeof ts === 'string') {
+    let normalized = ts.trim();
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(normalized) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) {
+      normalized = normalized.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(normalized);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  return null;
+}
+
 function formatTimestamp(ts: any): string {
-  if (!ts) return '—';
-  const n = typeof ts === 'number' ? ts : parseInt(ts, 10);
-  if (!n || isNaN(n)) return '—';
+  const n = parseTimestamp(ts);
+  if (n === null) return '—';
   try {
     const d = new Date(n);
     const now = new Date();
     const diff = now.getTime() - d.getTime();
+    if (diff < 0) return 'Just now'; // future timestamp (clock skew)
     if (diff < 60_000) return 'Just now';
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
@@ -70,9 +93,8 @@ function formatTimestamp(ts: any): string {
 }
 
 function formatDateTime(ts: any): string {
-  if (!ts) return '—';
-  const n = typeof ts === 'number' ? ts : parseInt(ts, 10);
-  if (!n || isNaN(n)) return '—';
+  const n = parseTimestamp(ts);
+  if (n === null) return '—';
   try {
     return new Date(n).toLocaleString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
@@ -95,6 +117,11 @@ export function SettingsPage({ user }: { user: any }) {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [savingPwd, setSavingPwd] = useState(false);
+
+  // ─── Profile photo state ───
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(user?.photoUrl || null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ─── Notification preferences state ───
   const [prefs, setPrefs] = useState<{
@@ -276,8 +303,74 @@ export function SettingsPage({ user }: { user: any }) {
     }
   };
 
+  // ─── Profile photo handlers ───
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Validate type.
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Invalid file', description: 'Please select an image file.', variant: 'destructive' });
+      return;
+    }
+    // Validate size (2MB).
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ title: 'Image too large', description: 'Max size is 2MB.', variant: 'destructive' });
+      return;
+    }
+    setPhotoUploading(true);
+    try {
+      // Convert to base64 data URL.
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+        try {
+          await api.uploadProfilePhoto(dataUrl);
+          setPhotoUrl(dataUrl);
+          setUser({ ...user, photoUrl: dataUrl });
+          toast({ title: 'Photo updated!', description: 'Your profile photo has been updated.' });
+        } catch (err: any) {
+          toast({ title: 'Upload failed', description: err.message || 'Unknown error', variant: 'destructive' });
+        } finally {
+          setPhotoUploading(false);
+        }
+      };
+      reader.onerror = () => {
+        setPhotoUploading(false);
+        toast({ title: 'Upload failed', description: 'Could not read the file.', variant: 'destructive' });
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setPhotoUploading(false);
+      toast({ title: 'Upload failed', description: err.message || 'Unknown error', variant: 'destructive' });
+    }
+    // Clear the input so selecting the same file again triggers onChange.
+    e.target.value = '';
+  };
+
+  const handlePhotoRemove = async () => {
+    setPhotoUploading(true);
+    try {
+      await api.removeProfilePhoto();
+      setPhotoUrl(null);
+      setUser({ ...user, photoUrl: null });
+      toast({ title: 'Photo removed', description: 'Your profile photo has been removed.' });
+    } catch (err: any) {
+      toast({ title: 'Could not remove', description: err.message || 'Unknown error', variant: 'destructive' });
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  // ─── User initials for avatar fallback ───
+  const userInitials = (user?.name || user?.email || '?')
+    .split(' ')
+    .map((s: string) => s[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
   // ─── App version for "About" section ───
-  const appVersion = nativeInfo.appVersion || '4.3.0';
+  const appVersion = nativeInfo.appVersion || '4.5.1';
 
   return (
     <div className="space-y-6 max-w-4xl pb-12">
@@ -301,6 +394,70 @@ export function SettingsPage({ user }: { user: any }) {
         <h3 className="font-bold text-base mb-4 flex items-center gap-2">
           <User className="h-4 w-4 text-primary" /> Profile Information
         </h3>
+
+        {/* Profile photo uploader */}
+        <div className="flex items-center gap-4 mb-4 pb-4 border-b border-border/40">
+          <div className="relative shrink-0">
+            {photoUrl ? (
+              <img
+                src={photoUrl}
+                alt={user?.name || 'Profile'}
+                className="h-20 w-20 rounded-full object-cover border-2 border-primary/20 shadow-sm"
+              />
+            ) : (
+              <div className="h-20 w-20 rounded-full bg-gradient-to-br from-primary to-primary/70 grid place-items-center text-white text-2xl font-bold shadow-sm">
+                {userInitials}
+              </div>
+            )}
+            {photoUploading && (
+              <div className="absolute inset-0 rounded-full bg-black/40 grid place-items-center">
+                <Loader2 className="h-5 w-5 text-white animate-spin" />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold">Profile Photo</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              JPEG, PNG, or WebP. Max 2MB. Square images work best.
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handlePhotoSelect}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={photoUploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="h-8 text-xs"
+              >
+                {photoUploading ? (
+                  <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Uploading…</>
+                ) : (
+                  <><Camera className="h-3 w-3 mr-1.5" /> {photoUrl ? 'Change' : 'Upload'}</>
+                )}
+              </Button>
+              {photoUrl && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={photoUploading}
+                  onClick={handlePhotoRemove}
+                  className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="grid sm:grid-cols-2 gap-3">
           <div className="rounded-xl bg-muted/40 p-3 border border-border/40">
             <div className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1">

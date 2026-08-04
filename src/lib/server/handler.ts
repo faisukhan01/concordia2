@@ -128,6 +128,77 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true });
     }
 
+    // v4.5.1: Upload profile photo — accepts a base64 data URL and saves it
+    // to the user's `photoUrl` field. The data URL is stored directly (no
+    // external file storage needed). Validates size (max 2MB) and type.
+    if (method === 'POST' && path === 'auth/profile-photo') {
+      const user = await requireAuth(req);
+      const { photoUrl } = body || {};
+      if (!photoUrl || typeof photoUrl !== 'string') {
+        return NextResponse.json({ error: 'photoUrl required' }, { status: 400 });
+      }
+      // Validate it's a data URL with an image/ prefix.
+      if (!photoUrl.startsWith('data:image/')) {
+        return NextResponse.json({ error: 'Must be an image data URL' }, { status: 400 });
+      }
+      // Validate size (2MB = ~2.8M base64 chars).
+      if (photoUrl.length > 2_800_000) {
+        return NextResponse.json({ error: 'Image too large (max 2MB)' }, { status: 413 });
+      }
+      // Validate allowed types (JPEG, PNG, WebP).
+      const allowedTypes = ['data:image/jpeg', 'data:image/png', 'data:image/webp', 'data:image/jpg'];
+      if (!allowedTypes.some(t => photoUrl.startsWith(t))) {
+        return NextResponse.json({ error: 'Only JPEG, PNG, and WebP are supported' }, { status: 400 });
+      }
+      await db.execute({ sql: 'UPDATE users SET photoUrl = ? WHERE id = ?', args: [photoUrl, user.id] });
+      return NextResponse.json({ success: true, photoUrl });
+    }
+
+    // v4.5.1: Remove profile photo — sets photoUrl to NULL.
+    if (method === 'DELETE' && path === 'auth/profile-photo') {
+      const user = await requireAuth(req);
+      await db.execute({ sql: 'UPDATE users SET photoUrl = NULL WHERE id = ?', args: [user.id] });
+      return NextResponse.json({ success: true });
+    }
+
+    // v4.5.1: Report an Issue — creates a notification for all staff
+    // (super-admin, admin, admissions, accountant, academic) so the
+    // management team sees every issue reported by students/parents.
+    // The reporter also gets a confirmation notification.
+    if (method === 'POST' && path === 'help/report-issue') {
+      const user = await requireAuth(req);
+      const { subject, description, category } = body || {};
+      if (!subject || typeof subject !== 'string' || subject.trim().length < 3) {
+        return NextResponse.json({ error: 'Subject is required (min 3 characters)' }, { status: 400 });
+      }
+      if (!description || typeof description !== 'string' || description.trim().length < 10) {
+        return NextResponse.json({ error: 'Description is required (min 10 characters)' }, { status: 400 });
+      }
+      const cat = (category || 'general').slice(0, 30);
+      const issueId = `ISS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      // Notify all staff about the issue.
+      const { sendPushToStaff, sendPushToUser } = await import('./fcm');
+      const senderName = user.name || user.email || 'A user';
+      const senderRole = user.roleLabel || user.role || 'user';
+      const truncatedSubject = subject.trim().slice(0, 80);
+      const truncatedDesc = description.trim().slice(0, 200);
+      await sendPushToStaff(
+        'general',
+        `🎫 New issue reported: ${truncatedSubject}`,
+        `From ${senderName} (${senderRole}): ${truncatedDesc}`,
+        { route: 'help', issueId, category: cat },
+      ).catch(() => {});
+      // Send a confirmation to the reporter.
+      await sendPushToUser(
+        user.id,
+        'general',
+        '✓ Issue received',
+        `Your issue "${truncatedSubject}" has been reported. The management team will review it shortly. Reference: ${issueId}`,
+        { route: 'help', issueId },
+      ).catch(() => {});
+      return NextResponse.json({ success: true, issueId });
+    }
+
     // v4.4.0: Sign out of ALL devices — revokes every session + deregisters
     // every FCM device token for the user. The CURRENT session is also
     // revoked, so the client must clear its local token + redirect to /login.
@@ -141,13 +212,15 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     // v4.4.0: Account & session info — exposes last login (most recent
     // session issuedAt for this user, EXCLUDING the current one), active
     // device count, and a list of recent sessions for the Settings page.
+    // v4.5.1: Only count ACTIVE (non-expired) sessions.
     if (method === 'GET' && path === 'auth/session-info') {
       const user = await requireAuth(req);
       const authHeader = req.headers.get('authorization') || '';
       const currentToken = authHeader.substring(7);
+      const now = Date.now();
       const sessR = await db.execute({
-        sql: 'SELECT token, issuedAt, expiresAt FROM sessions WHERE userId = ? ORDER BY issuedAt DESC LIMIT 10',
-        args: [user.id],
+        sql: 'SELECT token, issuedAt, expiresAt FROM sessions WHERE userId = ? AND expiresAt > ? ORDER BY issuedAt DESC LIMIT 10',
+        args: [user.id, now],
       });
       const devR = await db.execute({
         sql: 'SELECT id, platform, createdAt, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
@@ -281,7 +354,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.5.0';
+      const LATEST_APP_VERSION = '4.5.1';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 

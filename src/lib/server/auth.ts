@@ -60,9 +60,28 @@ export function nextId(prefix: string) {
 
 export async function createSession(user: any) {
   const token = 'concordia-' + crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  // v4.5.1: Clean up expired sessions for this user BEFORE creating a new one.
+  // Without this, the sessions table grows forever (every login adds a row,
+  // expired ones are never deleted) → the Settings page shows "10 active
+  // sessions" when only 1 is actually valid. We also cap at 5 most-recent
+  // sessions per user to keep the list manageable.
+  try {
+    await db.execute({
+      sql: 'DELETE FROM sessions WHERE userId = ? AND expiresAt < ?',
+      args: [user.id, now],
+    });
+    // Also cap the user's session history at 5 (keep most recent).
+    await db.execute({
+      sql: `DELETE FROM sessions WHERE userId = ? AND token NOT IN (
+        SELECT token FROM sessions WHERE userId = ? ORDER BY issuedAt DESC LIMIT 5
+      )`,
+      args: [user.id, user.id],
+    });
+  } catch {}
   await db.execute({
     sql: 'INSERT INTO sessions (token, userId, role, issuedAt, expiresAt) VALUES (?, ?, ?, ?, ?)',
-    args: [token, user.id, user.role, Date.now(), Date.now() + SESSION_TTL],
+    args: [token, user.id, user.role, now, now + SESSION_TTL],
   });
   return token;
 }
