@@ -32,7 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { useApp } from '@/lib/store';
+import { useApp, useNavState } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -83,7 +83,7 @@ import {
   Bell, Plus, Lock, AlertCircle,
   UserPlus, UserMinus, Trash2, Download, CalendarPlus, Clock,
   Printer, Pencil, ShieldAlert, KeyRound, ArrowLeft,
-  TrendingUp,
+  TrendingUp, FileSpreadsheet,
 } from 'lucide-react';
 import {
   buildReportCard,
@@ -98,12 +98,18 @@ import {
   SectionCardGrid,
   HierarchyBreadcrumb,
   DEPARTMENTS,
+  deptLabel,
 } from './shared/concordia-hierarchy';
 import {
   SimpleBarChart,
   SimplePieChart,
   ChartCard,
 } from './shared/concordia-charts';
+// Delegated sub-portals — the Academic Office reuses the Admissions & Accountant
+// views verbatim for its Student Records / Fees pages (namespaced module IDs).
+import { AdmissionsPortal } from './admissions-portal';
+import { AccountantPortal } from './accountant-portal';
+import { StudentImportDialog } from './shared/student-import-dialog';
 
 type Props = { activeModule: string; user: any };
 
@@ -239,6 +245,8 @@ function AcademicOverview({ user }: { user: any }) {
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const setActiveModule = useApp((s) => s.setActiveModule);
 
   useEffect(() => {
@@ -257,7 +265,7 @@ function AcademicOverview({ user }: { user: any }) {
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [user?.branchId]);
+  }, [user?.branchId, reloadKey]);
 
   // ── Students-per-Program bar data — counts of students whose program
   // matches one of the canonical 6 departments.
@@ -268,7 +276,7 @@ function AcademicOverview({ user }: { user: any }) {
       const p = (s.program || '').trim();
       if (map[p] != null) map[p] += 1;
     }
-    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+    return DEPARTMENTS.map((d) => ({ label: deptLabel(d), value: map[d] }));
   }, [students]);
 
   // ── Teacher distribution by subject — collapses every teacher's subjects
@@ -294,7 +302,26 @@ function AcademicOverview({ user }: { user: any }) {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={`Welcome back, ${user?.name?.split(' ')[0] || 'Academic Coordinator'}`} subtitle="Manage teachers, timetables, tests and result cards." />
+      <PageHeader
+        title={`Welcome back, ${user?.name?.split(' ')[0] || 'Academic Coordinator'}`}
+        subtitle="Manage teachers, timetables, tests and result cards."
+        action={
+          <button
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#F26522] hover:bg-[#D4541E] text-white px-4 py-2 text-sm font-semibold transition-colors"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Import Students from Excel
+          </button>
+        }
+      />
+
+      <StudentImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        branchId={user?.branchId}
+        onImported={() => setReloadKey((k) => k + 1)}
+      />
 
       {loading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -666,16 +693,18 @@ function ClassesAndTeachersView({ user }: { user: any }) {
 
   // ── Add-class single submit — passes program + part so the new class shows
   // up in the Timetable / Result Cards hierarchy drill-downs.
+  // FLATTEN MODEL: the Program IS the class. The class `name` is set to the
+  // program's canonical value so every drill-down groups all of a program's
+  // sections under one card (Program → Part → Section).
   const submitClass = async () => {
-    if (!name.trim()) { toast({ title: 'Class name is required', variant: 'destructive' }); return; }
     setSavingClass(true);
     try {
-      await api.createClass(name.trim(), section.trim() || 'A', user?.branchId, program, part);
-      toast({ title: 'Class created', description: `${name.trim()} — Section ${section.trim() || 'A'} (${program} · Part ${part})` });
-      setName(''); setSection('A');
+      await api.createClass(program, section.trim() || 'A', user?.branchId, program, part);
+      toast({ title: 'Section added', description: `${deptLabel(program)} · Part ${part} · Section ${section.trim() || 'A'}` });
+      setSection('A');
       load();
     } catch (e: any) {
-      toast({ title: 'Failed to create class', description: e?.message || 'Please try again', variant: 'destructive' });
+      toast({ title: 'Failed to add section', description: e?.message || 'Please try again', variant: 'destructive' });
     } finally { setSavingClass(false); }
   };
 
@@ -683,7 +712,6 @@ function ClassesAndTeachersView({ user }: { user: any }) {
     bulkSections.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean),
   ));
   const submitBulk = async () => {
-    if (!name.trim()) { toast({ title: 'Class name is required', variant: 'destructive' }); return; }
     if (bulkList.length === 0) { toast({ title: 'Enter at least one section', variant: 'destructive' }); return; }
     setSavingClass(true);
     setBulkProgress({ current: 0, total: bulkList.length });
@@ -693,7 +721,7 @@ function ClassesAndTeachersView({ user }: { user: any }) {
       const sec = bulkList[i];
       setBulkProgress({ current: i + 1, total: bulkList.length });
       try {
-        await api.createClass(name.trim(), sec, user?.branchId, program, part);
+        await api.createClass(program, sec, user?.branchId, program, part);
         successes.push(sec);
       } catch (e: any) {
         failures.push(`${sec} (${e?.message || 'failed'})`);
@@ -909,7 +937,7 @@ function ClassesAndTeachersView({ user }: { user: any }) {
     <div className="space-y-6">
       <PageHeader
         title="Classes & Teachers"
-        subtitle="Create class sections with program + part, add teacher logins, and assign teachers to classes."
+        subtitle="Add sections under each program (Part 1 / Part 2), add teacher logins, and assign teachers to classes."
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -936,64 +964,58 @@ function ClassesAndTeachersView({ user }: { user: any }) {
 
       {tab === 'class' && (
         <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <SectionHeader title="New Class" desc="Pick a department + part so the class shows up in the Timetable & Result Cards hierarchy." />
+          <SectionHeader title="Add Section to a Program" desc="Pick a program + part, then add its section(s). Sections appear wherever this program is selected across the app." />
           <Tabs value={mode} onValueChange={(v) => setMode(v as 'single' | 'bulk')}>
             <TabsList className="mb-4">
               <TabsTrigger value="single">Single Section</TabsTrigger>
               <TabsTrigger value="bulk">Bulk Sections</TabsTrigger>
             </TabsList>
 
-            {/* SINGLE MODE — now includes program + part */}
+            {/* SINGLE MODE — the Program IS the class; just pick Part + Section */}
             <TabsContent value="single">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 items-end">
-                <Field label="Class Name" required>
-                  <Input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Grade 10, Prep" />
-                </Field>
-                <Field label="Section">
-                  <Input value={section} onChange={(e) => setSection(e.target.value)} className={inputCls} placeholder="A" maxLength={3} />
-                </Field>
-                <Field label="Department (Program)" required>
+                <Field label="Program" required>
                   <Select value={program} onValueChange={setProgram}>
                     <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                      {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Part">
                   <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
                 </Field>
-                <div className="md:col-span-2 flex justify-end">
+                <Field label="Section" required>
+                  <Input value={section} onChange={(e) => setSection(e.target.value)} className={inputCls} placeholder="A" maxLength={3} />
+                </Field>
+                <div className="md:col-span-3 flex justify-end">
                   <button onClick={submitClass} disabled={savingClass} className={cn(btnPrimary, 'h-10')}>
                     {savingClass ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                    Create Class
+                    Add Section
                   </button>
                 </div>
               </div>
               <p className="text-[11px] text-gray-500 mt-3">
-                Classes are tagged with <span className="font-semibold">{program}</span> · Part {part}. They will appear under this department in the Timetable and Result Cards drill-downs.
+                Adds Section <span className="font-semibold">{section.trim().toUpperCase() || 'A'}</span> to <span className="font-semibold">{deptLabel(program)}</span> · Part {part}. It appears wherever this program is selected — Admissions, Accountant, Timetable and Result Cards.
               </p>
             </TabsContent>
 
-            {/* BULK MODE — also program + part */}
+            {/* BULK MODE — add several sections to a program + part at once */}
             <TabsContent value="bulk">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 items-end">
-                <Field label="Class Name" required>
-                  <Input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Grade 10" />
-                </Field>
-                <Field label="Sections (comma-separated)" required>
-                  <Input value={bulkSections} onChange={(e) => setBulkSections(e.target.value)} className={inputCls} placeholder="A, B, C, D" />
-                </Field>
-                <Field label="Department (Program)" required>
+                <Field label="Program" required>
                   <Select value={program} onValueChange={setProgram}>
                     <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                      {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Part">
                   <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+                </Field>
+                <Field label="Sections (comma-separated)" required>
+                  <Input value={bulkSections} onChange={(e) => setBulkSections(e.target.value)} className={inputCls} placeholder="A, B, C, D" />
                 </Field>
                 <div className="md:col-span-2 flex justify-end">
                   <button onClick={submitBulk} disabled={savingClass || !!bulkProgress} className={cn(btnPrimary, 'h-10')}>
@@ -1425,7 +1447,7 @@ function ClassesAndTeachersView({ user }: { user: any }) {
 type TimetableDrill = { dept: string | null; part: string; cls: { id: string; name: string; section: string } | null; section: { id: string; name: string; section: string } | null };
 
 function TimetableView({ user, classes, teachers }: { user: any; classes: any[]; teachers: any[] }) {
-  const [drill, setDrill] = useState<TimetableDrill>({ dept: null, part: '1', cls: null, section: null });
+  const [drill, setDrill] = useNavState<TimetableDrill>('timetable', { dept: null, part: '1', cls: null, section: null });
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1595,8 +1617,7 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
     setDrill({ dept, part: '1', cls: null, section: null });
   const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
     const secs = classes.filter((c) => c.name === cls.name);
-    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
-    else setDrill({ ...drill, cls, section: cls });
+    setDrill({ ...drill, cls, section: null });
   };
   const handleSelectSection = (section: { id: string; name: string; section: string }) =>
     setDrill({ ...drill, section });
@@ -1637,7 +1658,7 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
         )}
       </motion.div>
     );
-  } else if (hasMultipleSections && !drill.section) {
+  } else if (drill.cls && !drill.section) {
     body = (
       <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
         <HierarchyBreadcrumb dept={drill.dept} part={drill.part} cls={drill.cls.name} onClear={handleClearHierarchy} />
@@ -2129,7 +2150,7 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
 type ReportDrill = { dept: string | null; part: string; cls: { id: string; name: string; section: string } | null; section: { id: string; name: string; section: string } | null };
 
 function ReportCardsView({ user, classes, students, teachers, exams }: { user: any; classes: any[]; students: any[]; teachers: any[]; exams: any[] }) {
-  const [drill, setDrill] = useState<ReportDrill>({ dept: null, part: '1', cls: null, section: null });
+  const [drill, setDrill] = useNavState<ReportDrill>('report-cards', { dept: null, part: '1', cls: null, section: null });
   const [courses, setCourses] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2325,8 +2346,7 @@ function ReportCardsView({ user, classes, students, teachers, exams }: { user: a
     setDrill({ dept, part: '1', cls: null, section: null });
   const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
     const secs = classes.filter((c) => c.name === cls.name);
-    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
-    else setDrill({ ...drill, cls, section: cls });
+    setDrill({ ...drill, cls, section: null });
   };
   const handleSelectSection = (section: { id: string; name: string; section: string }) =>
     setDrill({ ...drill, section });
@@ -2367,7 +2387,7 @@ function ReportCardsView({ user, classes, students, teachers, exams }: { user: a
         )}
       </motion.div>
     );
-  } else if (hasMultipleSections && !drill.section) {
+  } else if (drill.cls && !drill.section) {
     body = (
       <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
         <HierarchyBreadcrumb dept={drill.dept} part={drill.part} cls={drill.cls.name} onClear={handleClearHierarchy} />
@@ -2551,7 +2571,17 @@ export function AcademicPortal({ activeModule, user }: Props) {
       : activeModule;
 
   let content: React.ReactNode;
-  if (effectiveModule === 'academic-overview') {
+  // ── Delegated Student-Records / Fees modules (namespaced role:moduleId) ──
+  // The Academic Office gets the SAME add-student, student-records, and fee
+  // pages the Admissions & Accountant offices use — rendered in-place, with
+  // no duplicated logic. (Kept in the render switch, not an early return, so
+  // the hook order above stays stable.)
+  if (activeModule && activeModule.includes(':')) {
+    const [ns, modId] = activeModule.split(':', 2);
+    content = ns === 'accountant'
+      ? <AccountantPortal activeModule={modId || ''} user={user} />
+      : <AdmissionsPortal activeModule={modId || ''} user={user} />;
+  } else if (effectiveModule === 'academic-overview') {
     content = <AcademicOverview user={user} />;
   } else if (effectiveModule === 'academic-announcements') {
     content = <AnnouncementsView user={user} />;

@@ -552,6 +552,20 @@ export const api = {
     request<{ success: boolean; created: number; total: number }>('misc-charges/bulk', { method: 'POST', body: JSON.stringify(data) }),
 
   // ───────────────────────────────────────────────────────────
+  // Bulk student import (Excel) — sends pre-mapped rows from the import preview.
+  // ───────────────────────────────────────────────────────────
+  importStudents: async (students: ImportStudentRow[], branchId?: string) => {
+    const r = await request<{
+      created: number; skipped: number; errors: number;
+      createdRows: { id: string; name: string; rollNo: string; program: string | null }[];
+      skippedRows: { index: number; name?: string; reason: string }[];
+      errorRows: { index: number; name?: string; error: string }[];
+    }>('students/import', { method: 'POST', body: JSON.stringify({ students, branchId }) });
+    invalidateCache();
+    return r;
+  },
+
+  // ───────────────────────────────────────────────────────────
   // Push Notifications (FCM) — device token registration + in-app bell
   // ───────────────────────────────────────────────────────────
   registerDeviceToken: (token: string, platform: string = 'android') =>
@@ -618,6 +632,23 @@ export const api = {
       tokensByRole: Array<{ role: string; count: number; users: number }>;
       myDevices: Array<{ platform: string; tokenPreview: string | null; createdAt: string; lastSeen: string }>;
     }>('notifications/fcm-status'),
+};
+
+// A single pre-mapped student row for the bulk importer.
+export type ImportStudentRow = {
+  name: string;
+  fatherName?: string;
+  phone?: string;
+  program?: string;   // canonical (may be '' → flagged)
+  part?: string;      // '1' | '2'
+  section?: string;   // default 'A'
+  baseFee?: number | string | null;
+  cnic?: string;
+  fatherCnic?: string;
+  gender?: string;
+  address?: string;
+  prevResult?: string;
+  rollNo?: string;    // usually blank → auto-generated
 };
 
 // === Shared types for the v1.5.0 module APIs ===
