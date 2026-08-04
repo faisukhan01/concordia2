@@ -324,7 +324,7 @@ export function StudentImportDialog({
             <div>
               <p className="text-lg font-bold text-gray-900">{result.created} student{result.created === 1 ? '' : 's'} imported</p>
               <p className="text-sm text-gray-500 mt-1">
-                {result.skipped} skipped (duplicates){result.errors > 0 ? ` · ${result.errors} error(s)` : ''}. Roll numbers + logins were generated; base fees are set and locked.
+                {result.skipped} skipped (duplicates){result.errors > 0 ? ` · ${result.errors} error(s)` : ''}. These are records only — <span className="font-medium text-gray-700">no logins yet</span>. The Accountant provides each login (roll number + password) after marking the fee Paid on the student&rsquo;s detail page.
               </p>
             </div>
             <div className="flex gap-2 mt-2">

@@ -805,17 +805,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const brId = body?.branchId || user.branchId;
       if (!brId) return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
 
-      // 1) Roll-number generator — continue the CC-YY-#### sequence for this branch.
-      const yy = new Date().getFullYear().toString().slice(-2);
-      const prefix = `CC-${yy}-`;
-      const existingRolls = await db.execute({ sql: 'SELECT rollNo FROM users WHERE branchId = ? AND rollNo LIKE ?', args: [brId, prefix + '%'] });
-      let seq = 0;
-      for (const r of existingRolls.rows as any[]) {
-        const m = String(r.rollNo || '').match(/(\d+)\s*$/);
-        if (m) seq = Math.max(seq, parseInt(m[1], 10));
-      }
+      // NOTE: imported students are RECORDS ONLY — NO auto roll number and NO
+      // login. The college assigns its own roll number, and the Accountant /
+      // Academic Office provide the login (real password) later, AFTER the fee
+      // is marked Paid on the student's detail page. We only use the sheet's
+      // "Roll No" column if it happens to be filled in.
 
-      // 2) Dedupe sets (by CNIC digits, and by name|father) for this branch.
+      // Dedupe sets (by CNIC digits, and by name|father) for this branch.
       const existingStudents = await db.execute({ sql: "SELECT name, fatherName, cnic FROM users WHERE branchId = ? AND role = 'student'", args: [brId] });
       const cnicSet = new Set<string>();
       const nameFatherSet = new Set<string>();
@@ -858,9 +854,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         }
         try {
           await ensureClass(program, part, section);
-          seq += 1;
-          const rollNo = (row.rollNo && String(row.rollNo).trim()) || `${prefix}${String(seq).padStart(4, '0')}`;
-          const password = rollNo; // student must change on first login
+          // Roll number only if the sheet provided one — otherwise left blank
+          // for the Accountant/Academic to assign when providing the login.
+          const rollNo = (row.rollNo && String(row.rollNo).trim()) || null;
+          // Placeholder password → hasRealLogin=false, i.e. NO login yet. The
+          // real password is set when the Accountant provides the login.
+          const password = 'tmp-' + Math.random().toString(36).slice(2, 10);
           const id = nextId('U');
           const baseFee = row.baseFee != null && row.baseFee !== '' && !Number.isNaN(Number(row.baseFee)) ? Number(row.baseFee) : null;
           await db.execute({
