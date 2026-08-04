@@ -50,6 +50,34 @@
 //   4. RESILIENT INIT — each step is in its own try/catch so a failure in
 //      one step doesn't block the others. The channel is created even if
 //      Firebase fails entirely.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// v4.0.0 CHANGES — BULLETPROOF TOKEN REGISTRATION (fixes "no notifications"):
+// ─────────────────────────────────────────────────────────────────────────
+//   ROOT CAUSE: The FCM token was not being reliably registered to the
+//   logged-in user's account. The web app's fcm-bridge polled for the token
+//   for only 60 seconds after the portal mounted. If the user wasn't logged
+//   in within those 60s, OR if Flutter delivered the token slightly late,
+//   the token was NEVER registered. The server then had no token for that
+//   user → announcements/fees pushes were silently discarded (the in-app
+//   notification row was still saved, but no push was delivered).
+//
+//   FIX:
+//   1. PERIODIC TOKEN RE-PUSH (every 60s) — Flutter re-fetches the FCM token
+//      and pushes it to the WebView every 60 seconds. This handles the case
+//      where the WebView reloaded while in the background (common on Realme)
+//      and lost the previously-injected token. Combined with the web app's
+//      forever-poll, this GUARANTEES the token is registered within seconds
+//      of the user logging in, no matter the timing.
+//
+//   2. The web app's fcm-bridge (fcm-bridge.ts) now polls FOREVER (every 60s
+//      after the initial 2-minute aggressive poll) while the user is logged
+//      in, and re-registers on every visibilitychange event. See the
+//      fcm-bridge.ts header for details.
+//
+//   3. The server now logs prominently when a push is sent to a user with
+//      ZERO tokens — this is the #1 diagnostic signal that the token isn't
+//      registered.
 // ─────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
@@ -162,6 +190,13 @@ class NotificationService {
       MethodChannel('concordia/device');
 
   bool _initialized = false;
+  // v4.0.0: Periodic timer that re-pushes the FCM token to the WebView
+  // every 60 seconds. This handles the case where the WebView reloaded
+  // while in the background (common on Realme/Chinese OEMs that freeze
+  // apps) and lost the previously-injected token. Without this, the web
+  // app's fcm-bridge would have no token to register with the backend,
+  // and push notifications would silently fail.
+  Timer? _tokenRePushTimer;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -367,6 +402,28 @@ class NotificationService {
     } catch (e) {
       debugPrint('[NotificationService] onFcmReady failed: $e');
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 13 (v4.0.0): START PERIODIC TOKEN RE-PUSH.
+    // ═══════════════════════════════════════════════════════════════════
+    // Every 60 seconds, re-fetch the FCM token and push it to the WebView.
+    // This is critical for Realme/Chinese OEMs that freeze the app in the
+    // background — when the OS thaws the app, the WebView may have reloaded
+    // and lost the injected token. Without this periodic re-push, the web
+    // app's fcm-bridge would have no token to register, and the backend
+    // would have no token to send pushes to → "no notifications on mobile".
+    _tokenRePushTimer?.cancel();
+    _tokenRePushTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      try {
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          _sendTokenToWeb(token);
+        }
+      } catch (e) {
+        debugPrint('[NotificationService] periodic token re-push failed: $e');
+      }
+    });
+    debugPrint('[NotificationService] ✓ periodic token re-push started (every 60s)');
   }
 
   /// Pass the FCM token to the web app (running inside the WebView) so it can
@@ -467,11 +524,29 @@ class NotificationService {
   /// Public method to re-register the token (called on app resume).
   /// Re-fetches the token and pushes it to the web app in case the WebView
   /// reloaded and lost the previous injection.
+  ///
+  /// v4.0.0: Also ensures the periodic token re-push timer is running.
+  /// If it was cancelled (e.g., by a hot reload), this restarts it.
   Future<void> reRegisterToken() async {
     try {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         _sendTokenToWeb(token);
+      }
+      // Ensure the periodic timer is running (it might have been cancelled).
+      if (_tokenRePushTimer == null || !_tokenRePushTimer!.isActive) {
+        _tokenRePushTimer?.cancel();
+        _tokenRePushTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+          try {
+            final t = await FirebaseMessaging.instance.getToken();
+            if (t != null) {
+              _sendTokenToWeb(t);
+            }
+          } catch (e) {
+            debugPrint('[NotificationService] periodic token re-push failed: $e');
+          }
+        });
+        debugPrint('[NotificationService] ✓ periodic token re-push restarted on resume');
       }
     } catch (e) {
       debugPrint('[NotificationService] re-register failed: $e');

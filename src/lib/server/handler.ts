@@ -169,6 +169,33 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true });
     }
 
+    // ── Device token registration STATUS ──────────────────────────────
+    // v4.0.0: Returns whether the current user has any FCM device tokens
+    // registered. The web app calls this after login to verify the token
+    // was successfully registered. If not, it re-triggers the token pull
+    // from Flutter + re-registers. This is the self-healing mechanism that
+    // catches the race condition where Flutter delivered the token before
+    // the web app was ready to register it.
+    if (method === 'GET' && path === 'device-tokens/status') {
+      const user = await requireAuth(req);
+      const r = await db.execute({
+        sql: 'SELECT token, platform, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
+        args: [user.id],
+      });
+      const tokens = r.rows as any[];
+      return NextResponse.json({
+        hasToken: tokens.length > 0,
+        tokenCount: tokens.length,
+        platform: tokens[0]?.platform || null,
+        lastSeen: tokens[0]?.lastSeen || null,
+        tokenPreviews: tokens.map((t) =>
+          t.token && t.token.length > 24
+            ? `${t.token.slice(0, 12)}…${t.token.slice(-8)}`
+            : (t.token ? `${t.token.slice(0, 8)}…` : null),
+        ),
+      });
+    }
+
     // ── App version check. The mobile app calls this on startup with its
     //    current version. If outdated, the server auto-creates an app-update
     //    notification for this user (de-duped: at most once per 24h per user).
@@ -176,7 +203,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '3.9.0';
+      const LATEST_APP_VERSION = '4.0.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
