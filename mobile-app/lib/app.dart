@@ -290,7 +290,9 @@ class _SplashToWebViewState extends State<SplashToWebView>
             _runJs('''
               window.concordiaNative = window.concordiaNative || {};
               window.concordiaNative.isNativeApp = true;
-              window.concordiaNative.appVersion = "4.5.0";
+              // KEEP IN SYNC with pubspec.yaml `version:` field.
+              // (Read at build time by GitHub Actions when building the APK.)
+              window.concordiaNative.appVersion = "4.6.1";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
