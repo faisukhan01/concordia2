@@ -151,6 +151,21 @@ export const api = {
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<any>('auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  // v4.4.0: Sign out of ALL devices — revokes every session + clears every
+  // FCM token for this user. The client must clear its stored token + redirect
+  // to /login afterwards.
+  logoutAllDevices: () =>
+    request<{ success: boolean; revokedSessions: boolean; clearedTokens: boolean }>('auth/logout-all', { method: 'POST' }),
+  // v4.4.0: Account & session info — last login, active sessions, active devices.
+  getSessionInfo: () =>
+    cachedGet<{
+      currentSession: { token: string; issuedAt: number; expiresAt: number } | null;
+      lastLogin: { token: string; issuedAt: number; expiresAt: number } | null;
+      activeSessions: number;
+      activeDevices: number;
+      sessions: Array<{ token: string; issuedAt: number; expiresAt: number }>;
+      devices: Array<{ id: string; platform: string; createdAt: string; lastSeen: string }>;
+    }>('auth/session-info'),
   // platform
   platformOverview: () => cachedGet<any>('platform/overview'),
   institutes: () => cachedGet<any[]>('institutes'),
@@ -541,6 +556,28 @@ export const api = {
     request<{ success: boolean }>(`notifications/${id}/read`, { method: 'POST' }),
   markAllNotificationsRead: () =>
     request<{ success: boolean }>('notifications/read-all', { method: 'POST' }),
+  // v4.4.0: User notification preferences (per-type mute, sound, DND hours).
+  getNotificationPreferences: () =>
+    cachedGet<{
+      mutedTypes: string[];
+      soundEnabled: boolean;
+      dndEnabled: boolean;
+      dndStart: string;
+      dndEnd: string;
+    }>('notifications/preferences'),
+  saveNotificationPreferences: (body: {
+    mutedTypes: string[];
+    soundEnabled: boolean;
+    dndEnabled: boolean;
+    dndStart: string;
+    dndEnd: string;
+  }) => {
+    invalidateCache();
+    return request<{ success: boolean }>('notifications/preferences', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
   sendTestNotification: () =>
     request<{
       success: boolean;

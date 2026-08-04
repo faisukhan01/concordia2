@@ -104,6 +104,74 @@ async function persistNotification(
   return id;
 }
 
+// ───────────────────────── v4.4.0: User preference check ─────────────────────────
+// Returns true if the user has muted this notification type OR if the user
+// is currently in their Do-Not-Disturb window. The caller uses this to skip
+// BOTH the persist (no row) AND the FCM push (no banner/sound).
+//
+// Cache: prefs are tiny + rarely change, so we cache them in-process for
+// 30 seconds per user. This avoids a DB round-trip on every notification.
+const prefsCache = new Map<string, { ts: number; prefs: any }>();
+const PREFS_TTL_MS = 30_000;
+
+export async function getUserNotifPrefs(userId: string): Promise<{
+  mutedTypes: string[];
+  soundEnabled: boolean;
+  dndEnabled: boolean;
+  dndStart: string;
+  dndEnd: string;
+}> {
+  const cached = prefsCache.get(userId);
+  if (cached && Date.now() - cached.ts < PREFS_TTL_MS) {
+    return cached.prefs;
+  }
+  let prefs: any = {};
+  try {
+    const r = await db.execute({
+      sql: 'SELECT prefs FROM notification_preferences WHERE userId = ?',
+      args: [userId],
+    });
+    if (r.rows.length > 0) {
+      prefs = JSON.parse((r.rows[0] as any).prefs || '{}');
+    }
+  } catch {}
+  const out = {
+    mutedTypes: Array.isArray(prefs.mutedTypes) ? prefs.mutedTypes : [],
+    soundEnabled: prefs.soundEnabled !== false,
+    dndEnabled: prefs.dndEnabled === true,
+    dndStart: typeof prefs.dndStart === 'string' ? prefs.dndStart : '22:00',
+    dndEnd: typeof prefs.dndEnd === 'string' ? prefs.dndEnd : '07:00',
+  };
+  prefsCache.set(userId, { ts: Date.now(), prefs: out });
+  return out;
+}
+
+// True if the user wants this notification SKIPPED entirely (muted type OR DND active).
+// CRITICAL types (app-update) are NEVER muted — users must always see update prompts.
+export async function isMutedForUser(userId: string, type: NotifType): Promise<boolean> {
+  // Critical types bypass mute + DND entirely.
+  if (type === 'app-update') return false;
+  const p = await getUserNotifPrefs(userId);
+  if (p.mutedTypes.includes(type)) return true;
+  if (p.dndEnabled) {
+    try {
+      const now = new Date();
+      const mins = now.getHours() * 60 + now.getMinutes();
+      const [sh, sm] = p.dndStart.split(':').map(Number);
+      const [eh, em] = p.dndEnd.split(':').map(Number);
+      const start = sh * 60 + sm;
+      const end = eh * 60 + em;
+      // Handle overnight window (e.g. 22:00 → 07:00).
+      if (start <= end) {
+        if (mins >= start && mins < end) return true;
+      } else {
+        if (mins >= start || mins < end) return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
 // ───────────────────────── Get device tokens for a user ─────────────────────────
 
 async function getTokensForUser(userId: string): Promise<string[]> {
@@ -293,6 +361,11 @@ export async function sendPushToUser(
   body: string,
   data?: Record<string, string>,
 ): Promise<{ notificationId: string; pushed: number }> {
+  // v4.4.0: Respect the user's mute + DND preferences. Skip BOTH the persist
+  // AND the push if the user has muted this type or is in their DND window.
+  if (await isMutedForUser(userId, type)) {
+    return { notificationId: 'muted', pushed: 0 };
+  }
   const notificationId = await persistNotification(userId, type, title, body, data);
   const tokens = await getTokensForUser(userId);
   if (tokens.length > 0) {
@@ -494,12 +567,21 @@ export async function sendPushToUsers(
   if (userIds.length === 0) return { sent: 0 };
   // De-duplicate
   const unique = Array.from(new Set(userIds));
-  // Persist one notification row per user
+  // v4.4.0: Filter out users who have muted this type OR are in their DND
+  // window. We do this BEFORE persist so muted users don't even get a row
+  // in their notifications list (which would be confusing — seeing a
+  // notification you explicitly muted).
+  const prefsByUser = await Promise.all(
+    unique.map(async (uid) => ({ uid, muted: await isMutedForUser(uid, type) })),
+  );
+  const eligible = prefsByUser.filter((p) => !p.muted).map((p) => p.uid);
+  if (eligible.length === 0) return { sent: 0 };
+  // Persist one notification row per eligible user
   await Promise.all(
-    unique.map((uid) => persistNotification(uid, type, title, body, data)),
+    eligible.map((uid) => persistNotification(uid, type, title, body, data)),
   );
   // Push to all their devices
-  const tokensByUser = await getTokensForUsers(unique);
+  const tokensByUser = await getTokensForUsers(eligible);
   let sent = 0;
   for (const [uid, tokens] of tokensByUser) {
     if (tokens.length > 0) {

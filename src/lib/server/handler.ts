@@ -128,6 +128,84 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true });
     }
 
+    // v4.4.0: Sign out of ALL devices — revokes every session + deregisters
+    // every FCM device token for the user. The CURRENT session is also
+    // revoked, so the client must clear its local token + redirect to /login.
+    if (method === 'POST' && path === 'auth/logout-all') {
+      const user = await requireAuth(req);
+      await db.execute({ sql: 'DELETE FROM sessions WHERE userId = ?', args: [user.id] });
+      await db.execute({ sql: 'DELETE FROM device_tokens WHERE userId = ?', args: [user.id] });
+      return NextResponse.json({ success: true, revokedSessions: true, clearedTokens: true });
+    }
+
+    // v4.4.0: Account & session info — exposes last login (most recent
+    // session issuedAt for this user, EXCLUDING the current one), active
+    // device count, and a list of recent sessions for the Settings page.
+    if (method === 'GET' && path === 'auth/session-info') {
+      const user = await requireAuth(req);
+      const authHeader = req.headers.get('authorization') || '';
+      const currentToken = authHeader.substring(7);
+      const sessR = await db.execute({
+        sql: 'SELECT token, issuedAt, expiresAt FROM sessions WHERE userId = ? ORDER BY issuedAt DESC LIMIT 10',
+        args: [user.id],
+      });
+      const devR = await db.execute({
+        sql: 'SELECT id, platform, createdAt, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
+        args: [user.id],
+      });
+      const otherSessions = sessR.rows.filter((r: any) => r.token !== currentToken);
+      const lastLogin = otherSessions[0] as any || null;
+      return NextResponse.json({
+        currentSession: sessR.rows.find((r: any) => r.token === currentToken) || null,
+        lastLogin,
+        activeSessions: sessR.rows.length,
+        activeDevices: devR.rows.length,
+        sessions: sessR.rows,
+        devices: devR.rows,
+      });
+    }
+
+    // v4.4.0: Get the user's notification preferences (per-type mute,
+    // sound toggle, DND hours). Defaults to all-enabled when no row exists.
+    if (method === 'GET' && path === 'notifications/preferences') {
+      const user = await requireAuth(req);
+      const r = await db.execute({
+        sql: 'SELECT prefs FROM notification_preferences WHERE userId = ?',
+        args: [user.id],
+      });
+      let prefs: any = {};
+      if (r.rows.length > 0) {
+        try { prefs = JSON.parse((r.rows[0] as any).prefs || '{}'); } catch {}
+      }
+      // Sensible defaults — everything on, no DND.
+      const defaults = {
+        mutedTypes: [] as string[],
+        soundEnabled: true,
+        dndEnabled: false,
+        dndStart: '22:00',
+        dndEnd: '07:00',
+      };
+      return NextResponse.json({ ...defaults, ...prefs });
+    }
+
+    // v4.4.0: Save the user's notification preferences.
+    if (method === 'POST' && path === 'notifications/preferences') {
+      const user = await requireAuth(req);
+      const { mutedTypes, soundEnabled, dndEnabled, dndStart, dndEnd } = body || {};
+      const prefs = JSON.stringify({
+        mutedTypes: Array.isArray(mutedTypes) ? mutedTypes.slice(0, 30) : [],
+        soundEnabled: soundEnabled !== false,
+        dndEnabled: dndEnabled === true,
+        dndStart: typeof dndStart === 'string' ? dndStart : '22:00',
+        dndEnd: typeof dndEnd === 'string' ? dndEnd : '07:00',
+      });
+      await db.execute({
+        sql: 'INSERT INTO notification_preferences (userId, prefs, updatedAt) VALUES (?, ?, datetime(\'now\')) ON CONFLICT(userId) DO UPDATE SET prefs = excluded.prefs, updatedAt = datetime(\'now\')',
+        args: [user.id, prefs],
+      });
+      return NextResponse.json({ success: true });
+    }
+
     // ===================== PUSH NOTIFICATIONS (FCM) =====================
     // Register / refresh a device token for the logged-in user.
     // Called by the Flutter app on every startup (after FCM gives it a token).
@@ -203,7 +281,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.3.0';
+      const LATEST_APP_VERSION = '4.5.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 

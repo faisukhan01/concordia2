@@ -98,6 +98,13 @@ const SCHEMA_STATEMENTS: string[] = [
   // table is the persistent record so users see the bell badge + history.
   `CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, data TEXT, read INTEGER NOT NULL DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')))`,
 
+  // ── Notification Preferences (v4.4.0) ──
+  // One row per user. Stores per-type mute toggles + sound + DND hours as
+  // JSON so we can evolve the schema without migrations. The frontend
+  // Settings page reads/writes this; the notification creation path checks
+  // it to skip muted types per user.
+  `CREATE TABLE IF NOT EXISTS notification_preferences (userId TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', updatedAt TEXT DEFAULT (datetime('now')))`,
+
   // NOTE: legacy tables (diary, sms_log, complaints, library_books,
   // transport_routes, course_materials, royalty_settings, royalty_invoices)
   // are intentionally NOT created here — they are unused by the Concordia

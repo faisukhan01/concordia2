@@ -114,11 +114,26 @@ class ConcordiaKeepAliveService : Service() {
         // the app away from recents (which kills the process + the service).
         // START_STICKY only works for OS-initiated kills, NOT user swipes.
         // The AlarmManager fires every 5 minutes and restarts the service.
+        //
+        // v4.5.0: CHANGED from setInexactRepeating → setAndAllowWhileIdle.
+        // The old method was batched/delayed by Doze mode, so the restart
+        // often didn't fire for hours. setAndAllowWhileIdle fires even in
+        // Doze (once per 9 minutes max, which is close enough to our 5-min
+        // target). We re-schedule it on every onStartCommand so it's always
+        // queued for the next window.
         scheduleSelfRestart()
 
-        // Return START_STICKY so the OS restarts the service if it kills it
-        // (e.g., under memory pressure). This maximizes uptime.
-        return START_STICKY
+        // v4.5.0: Also schedule a JobScheduler-based restart. JobScheduler
+        // is MORE resilient than AlarmManager on some OEMs (Xiaomi, Huawei)
+        // because it's not affected by the same "app freeze" heuristics.
+        // We schedule it every ~15 minutes as a belt-and-suspenders fallback.
+        scheduleJobRestart()
+
+        // Return START_REDELIVER_INTENT so the OS restarts the service AND
+        // redelivers the last intent. This is MORE reliable than START_STICKY
+        // on aggressive OEMs (Realme, Xiaomi) because the OS treats it as a
+        // stronger contract to restart the service with its original parameters.
+        return START_REDELIVER_INTENT
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -156,12 +171,31 @@ class ConcordiaKeepAliveService : Service() {
                 )
             }
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-            alarmManager.set(
-                android.app.AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + 1000L,
-                pendingIntent
-            )
-            android.util.Log.i("ConcordiaKeepAlive", "✓ Scheduled service restart after task removal (swipe-away)")
+            // v4.5.0: CHANGED from set() → setExactAndAllowWhileIdle().
+            // set() is batched/delayed in Doze mode — the restart might not
+            // fire for 30+ minutes. setExactAndAllowWhileIdle fires EXACTLY
+            // at the scheduled time AND wakes the CPU from Doze. This is the
+            // ONLY AlarmManager method that reliably fires for killed apps.
+            //
+            // On Android 12+ (API 31+), setExactAndAllowWhileIdle requires
+            // the SCHEDULE_EXACT_ALARM permission (which we have). If the
+            // user revoked it, we fall back to setAndAllowWhileIdle (less
+            // precise but still fires in Doze).
+            try {
+                alarmManager.setExactAndAllowWhileIdle(
+                    android.app.AlarmManager.RTC_WAKEUP,
+                    System.currentTimeMillis() + 1000L,
+                    pendingIntent
+                )
+            } catch (_: SecurityException) {
+                // Android 12+ exact alarm permission revoked — fall back.
+                alarmManager.setAndAllowWhileIdle(
+                    android.app.AlarmManager.RTC_WAKEUP,
+                    System.currentTimeMillis() + 1000L,
+                    pendingIntent
+                )
+            }
+            android.util.Log.i("ConcordiaKeepAlive", "✓ Scheduled service restart after task removal (swipe-away) — setExactAndAllowWhileIdle")
         } catch (e: Exception) {
             android.util.Log.e("ConcordiaKeepAlive", "Failed to schedule restart: ${e.message}", e)
         }
@@ -174,6 +208,11 @@ class ConcordiaKeepAliveService : Service() {
     // by memory pressure, or by the user), the alarm fires and restarts
     // it. This is a safety net that ensures the keep-alive service is
     // ALWAYS running, which is critical for FCM delivery on Chinese OEMs.
+    //
+    // v4.5.0: CHANGED from setInexactRepeating → setAndAllowWhileIdle.
+    // setInexactRepeating was being batched/delayed by Doze mode for hours.
+    // setAndAllowWhileIdle fires even in Doze (once per ~9 min). We
+    // re-schedule on every onStartCommand so it's always queued.
     // ═══════════════════════════════════════════════════════════════════
     private fun scheduleSelfRestart() {
         try {
@@ -194,17 +233,55 @@ class ConcordiaKeepAliveService : Service() {
                     android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
                 )
             }
-            // Schedule a repeating alarm every 5 minutes (RTC_WAKEUP wakes the
-            // CPU). setInexactRepeating is more battery-friendly than setRepeating
-            // and is sufficient for our purpose (just a keep-alive check).
-            alarmManager.setInexactRepeating(
+            // v4.5.0: setAndAllowWhileIdle fires even in Doze mode (the CPU
+            // wakes up). We re-schedule on every onStartCommand, so this
+            // effectively creates a ~5-minute periodic restart check.
+            alarmManager.setAndAllowWhileIdle(
                 android.app.AlarmManager.RTC_WAKEUP,
                 System.currentTimeMillis() + 5 * 60 * 1000L, // first fire in 5 min
-                5 * 60 * 1000L, // repeat every 5 min
                 pendingIntent
             )
         } catch (e: Exception) {
             android.util.Log.e("ConcordiaKeepAlive", "Failed to schedule self-restart: ${e.message}", e)
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // v4.5.0: scheduleJobRestart — schedules a JobScheduler job that fires
+    // every ~15 minutes to restart the keep-alive service. This is a
+    // BELT-AND-SUSPENDERS fallback to the AlarmManager restart.
+    //
+    // WHY: On some OEMs (Xiaomi MIUI, Huawei EMUI), AlarmManager-scheduled
+    // tasks are aggressively killed when the app is "frozen". JobScheduler
+    // uses a different execution path that is MORE resilient to OEM
+    // freezing. By scheduling BOTH, we maximize the chance that at least
+    // one restart mechanism fires.
+    // ═══════════════════════════════════════════════════════════════════
+    @android.annotation.SuppressLint("NewApi")
+    private fun scheduleJobRestart() {
+        try {
+            val jobScheduler = getSystemService(Context.JOB_SCHEDULER_SERVICE) as android.app.job.JobScheduler
+            // Check if the job is already scheduled (don't double-schedule).
+            val allJobs = jobScheduler.allPendingJobs
+            if (allJobs.any { it.id == 2001 }) {
+                return // already scheduled
+            }
+            val jobInfo = android.app.job.JobInfo.Builder(
+                2001,
+                android.content.ComponentName(this, ConcordiaRestartJobService::class.java)
+            )
+                .setPeriodic(15 * 60 * 1000L) // 15 minutes
+                .setPersisted(true) // survives reboot
+                .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_ANY)
+                .build()
+            val result = jobScheduler.schedule(jobInfo)
+            if (result == android.app.job.JobScheduler.RESULT_SUCCESS) {
+                android.util.Log.i("ConcordiaKeepAlive", "✓ JobScheduler restart job scheduled (every 15 min)")
+            } else {
+                android.util.Log.w("ConcordiaKeepAlive", "JobScheduler schedule returned failure: $result")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ConcordiaKeepAlive", "Failed to schedule job restart: ${e.message}", e)
         }
     }
 

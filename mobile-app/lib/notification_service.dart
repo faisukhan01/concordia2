@@ -83,10 +83,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// v4.5.0: Global navigator key — used by NotificationService to show the
+// OEM settings dialog (Auto-start + battery optimization) over the WebView.
+// Declared here (not in main.dart) to avoid circular imports between
+// main.dart and app.dart. Both files import it from here.
+final GlobalKey<NavigatorState> concordiaNavigatorKey = GlobalKey<NavigatorState>();
 
 // MUST be a top-level function (not a class method) so the Android OS can
 // call it when a push arrives while the app is in the background/terminated.
@@ -198,6 +207,16 @@ class NotificationService {
   // and push notifications would silently fail.
   Timer? _tokenRePushTimer;
 
+  // v4.5.0: Navigator key — used to show the OEM settings dialog (Auto-start
+  // + battery optimization) over the WebView. Set from app.dart via
+  // setNavigatorKey() before init() is called.
+  GlobalKey<NavigatorState>? _navigatorKey;
+
+  /// Set the navigator key so we can show dialogs over the WebView.
+  void setNavigatorKey(GlobalKey<NavigatorState>? key) {
+    _navigatorKey = key;
+  }
+
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
@@ -278,15 +297,22 @@ class NotificationService {
     // ═══════════════════════════════════════════════════════════════════
     // STEP 4: DETECT DEVICE MANUFACTURER (for Realme/Xiaomi guidance).
     // ═══════════════════════════════════════════════════════════════════
+    // v4.5.0: CRITICAL FIX — we now ACTUALLY PROMPT THE USER to enable
+    // Auto-start on Chinese OEMs. v4.3.0 only logged a debug message,
+    // which meant the user never knew they needed to enable this setting.
+    // Without Auto-start, Realme/Xiaomi KILL the app process when swiped
+    // away AND block AlarmManager/JobScheduler restarts → NO notifications
+    // when the app is closed. This is THE root cause of the user's bug.
+    String? _detectedOem;
+    bool _needsAutoStart = false;
     try {
       final info = await _deviceChannel.invokeMethod<Map>('getDeviceInfo');
       if (info != null) {
         final oem = info['oemFamily'] as String? ?? 'other';
         final needsAutoStart = info['needsAutoStart'] == true;
+        _detectedOem = oem;
+        _needsAutoStart = needsAutoStart;
         debugPrint('[NotificationService] device: ${info['manufacturer']} ${info['model']} (oem=$oem, needsAutoStart=$needsAutoStart)');
-        if (needsAutoStart) {
-          debugPrint('[NotificationService] ⚠ Chinese OEM detected ($oem). The user MUST enable Auto-start in settings for reliable background delivery.');
-        }
       }
     } catch (e) {
       debugPrint('[NotificationService] device detection failed: $e');
@@ -351,7 +377,21 @@ class NotificationService {
     // ═══════════════════════════════════════════════════════════════════
     // STEP 8: REQUEST BATTERY-OPTIMIZATION WHITELIST (Chinese OEMs).
     // ═══════════════════════════════════════════════════════════════════
-    await _requestIgnoreBatteryOptimizations();
+    // v4.5.0: We now check the ACTUAL state (isIgnoringBatteryOptimizations)
+    // and defer the prompt to Step 14 where we show a combined dialog for
+    // both battery optimization AND Auto-start. This gives the user a clear
+    // explanation of WHY these settings are needed (like WhatsApp) rather
+    // than silently opening the system dialog.
+    bool _batteryOptDenied = false;
+    try {
+      final already = await _batteryChannel.invokeMethod<bool>('isIgnoring');
+      if (already != true) {
+        _batteryOptDenied = true;
+        debugPrint('[NotificationService] ⚠ Battery optimization is NOT ignored — will prompt user');
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] battery-opt check failed: $e');
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // STEP 9: GET THE FCM TOKEN + REGISTER IT.
@@ -424,6 +464,36 @@ class NotificationService {
       }
     });
     debugPrint('[NotificationService] ✓ periodic token re-push started (every 60s)');
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 14 (v4.5.0): PROMPT FOR OEM-SPECIFIC SETTINGS (Auto-start +
+    // battery optimization). THIS IS THE CRITICAL FIX.
+    // ═══════════════════════════════════════════════════════════════════
+    // On Chinese OEMs (Realme, Xiaomi, Huawei, Oppo, Vivo, OnePlus), the OS
+    // AGGRESSIVELY kills background apps when swiped away — EVEN with a
+    // foreground service + AlarmManager + JobScheduler. The ONLY way to
+    // survive is if the user explicitly whitelists the app in:
+    //   1. Battery Optimization → "Don't optimize" (standard Android)
+    //   2. Auto-start / Startup Manager (OEM-specific, Realme ColorOS)
+    //
+    // v4.3.0 detected the OEM but NEVER prompted the user — so they never
+    // knew to enable these settings. This is THE root cause of "no
+    // notifications when app is closed".
+    //
+    // We now show a Flutter dialog explaining both settings, with buttons
+    // to open each settings screen. We persist a flag in SharedPreferences
+    // so we only show the dialog ONCE per version (not every launch).
+    // ──────────────────────────────────────────────────────────────────
+    // We schedule this with a 2-second delay so the WebView + Flutter UI
+    // are fully rendered before the dialog appears (otherwise the dialog
+    // can appear over a blank screen on cold start).
+    Future.delayed(const Duration(seconds: 2), () {
+      _promptForOemSettingsIfNeeded(
+        oem: _detectedOem,
+        needsAutoStart: _needsAutoStart,
+        batteryOptDenied: _batteryOptDenied,
+      );
+    });
   }
 
   /// Pass the FCM token to the web app (running inside the WebView) so it can
@@ -444,6 +514,168 @@ class NotificationService {
       await _batteryChannel.invokeMethod<void>('requestIgnore');
     } catch (e) {
       debugPrint('[NotificationService] battery-opt request failed: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // v4.5.0: PROMPT FOR OEM-SPECIFIC SETTINGS
+  // ═══════════════════════════════════════════════════════════════════════
+  // Shows a Flutter dialog explaining that the user MUST enable:
+  //   1. Battery Optimization whitelist (standard Android)
+  //   2. Auto-start (Realme/Xiaomi/Huawei/Oppo/Vivo/OnePlus only)
+  //
+  // Without these, the app is KILLED when swiped away and notifications
+  // DON'T arrive. This is the #1 fix for the user's bug.
+  //
+  // The dialog has buttons to open each settings screen. We persist a flag
+  // in SharedPreferences so we only show this ONCE per app version (the
+  // flag key includes the version string, so upgrading to a new version
+  // re-shows the dialog once).
+  // ═══════════════════════════════════════════════════════════════════════
+  Future<void> _promptForOemSettingsIfNeeded({
+    String? oem,
+    bool needsAutoStart = false,
+    bool batteryOptDenied = false,
+  }) async {
+    // If both settings are already satisfied, no prompt needed.
+    if (!needsAutoStart && !batteryOptDenied) {
+      debugPrint('[NotificationService] ✓ All OEM settings already satisfied — no prompt needed');
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Include the version in the key so a new version re-prompts once.
+      final flagKey = 'v4.5.0_oem_prompt_shown';
+      final alreadyShown = prefs.getBool(flagKey) ?? false;
+      if (alreadyShown) {
+        debugPrint('[NotificationService] OEM prompt already shown for this version — skipping');
+        return;
+      }
+
+      // We need a BuildContext to show a dialog. Get it from the navigator key.
+      final context = _navigatorKey?.currentContext;
+      if (context == null) {
+        debugPrint('[NotificationService] No navigator context — cannot show OEM prompt dialog');
+        return;
+      }
+
+      // Mark as shown BEFORE showing the dialog (so we don't show it twice
+      // if init() runs again before the dialog is dismissed).
+      await prefs.setBool(flagKey, true);
+
+      // Build the dialog content based on what's needed.
+      final List<String> steps = [];
+      if (batteryOptDenied) {
+        steps.add(
+          '1. Battery Optimization — tap "Enable Battery Whitelist" below, '
+          'then choose "Allow" / "Don\'t optimize" for Concordia College.',
+        );
+      }
+      if (needsAutoStart) {
+        final oemLabel = _oemDisplayName(oem);
+        steps.add(
+          '${batteryOptDenied ? '2' : '1'}. Auto-start ($oemLabel) — tap "Open Auto-start Settings" below, '
+          'then find Concordia College in the list and enable it.',
+        );
+      }
+
+      // Show the dialog.
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false, // user MUST tap a button
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.notifications_active, color: Color(0xFFF26522)),
+                SizedBox(width: 8),
+                Expanded(child: Text('Enable Notifications')),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'To receive notifications when the app is closed (like WhatsApp), '
+                    'you need to enable the following setting(s):',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 12),
+                  ...steps.map((s) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.check_circle, size: 16, color: Color(0xFFF26522)),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(s, style: const TextStyle(fontSize: 13))),
+                      ],
+                    ),
+                  )),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF26522).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF26522).withOpacity(0.2)),
+                    ),
+                    child: const Text(
+                      '⚠ Without these settings, your phone will kill the app when '
+                      'closed and you will NOT receive notifications.',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              if (needsAutoStart)
+                TextButton(
+                  onPressed: () {
+                    openAutoStartSettings();
+                  },
+                  child: const Text('Open Auto-start Settings'),
+                ),
+              if (batteryOptDenied)
+                TextButton(
+                  onPressed: () {
+                    _requestIgnoreBatteryOptimizations();
+                  },
+                  child: const Text('Enable Battery Whitelist'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFF26522),
+                ),
+                child: const Text('I\'ve done it'),
+              ),
+            ],
+          );
+        },
+      );
+      debugPrint('[NotificationService] ✓ OEM settings prompt shown');
+    } catch (e) {
+      debugPrint('[NotificationService] OEM prompt failed: $e');
+    }
+  }
+
+  /// Convert the OEM family code to a user-friendly display name.
+  String _oemDisplayName(String? oem) {
+    switch (oem) {
+      case 'realme': return 'Realme';
+      case 'oppo': return 'Oppo';
+      case 'xiaomi': return 'Xiaomi / MIUI';
+      case 'huawei': return 'Huawei / EMUI';
+      case 'vivo': return 'Vivo';
+      case 'oneplus': return 'OnePlus';
+      case 'samsung': return 'Samsung';
+      default: return 'your device';
     }
   }
 

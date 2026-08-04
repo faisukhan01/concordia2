@@ -286,10 +286,17 @@ export function RolePortal() {
     let active = true;
     const poll = async () => {
       try {
+        // v4.4.0: Fetch 15 for new-notification DETECTION (so we don't miss
+        // any if more than 5 arrive between polls), but only DISPLAY the
+        // latest 5 in the bell dropdown. The full list lives on the
+        // dedicated Notifications page.
         const data = await api.getNotifications(15);
         if (!active || !Array.isArray(data?.items)) return;
         // Update the unread badge count.
         setNotifUnread(typeof data.unread === 'number' ? data.unread : 0);
+        // Cap the displayed dropdown list at 5 — the user explicitly asked
+        // for "latest/recent 5 notifications" in the navbar icon.
+        const displayItems = data.items.slice(0, 5);
         if (firstPollRef.current) {
           // SILENT first poll: mark every existing notification as "seen"
           // WITHOUT showing toasts or playing sounds. This prevents the
@@ -298,7 +305,7 @@ export function RolePortal() {
             seenNotifIds.current.add(n.id);
           }
           // Still refresh the bell panel so the items show in the dropdown.
-          setNotifItems(data.items);
+          setNotifItems(displayItems);
           firstPollRef.current = false;
           // Persist the seen set.
           try {
@@ -345,7 +352,7 @@ export function RolePortal() {
             localStorage.setItem('concordia:seen-notifs', JSON.stringify(arr));
           } catch {}
           // Refresh the bell panel list so the new items appear there too.
-          setNotifItems(data.items);
+          setNotifItems(displayItems);
         }
       } catch {}
     };

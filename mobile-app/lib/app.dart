@@ -15,7 +15,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'notification_service.dart';
+import 'notification_service.dart' show NotificationService, concordiaNavigatorKey;
 
 // ── Brand colors (inlined to avoid external deps) ──────────────
 class _C {
@@ -33,6 +33,10 @@ class ConcordiaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Concordia College',
       debugShowCheckedModeBanner: false,
+      // v4.5.0: Use the global navigator key so NotificationService can show
+      // the OEM settings dialog (Auto-start + battery optimization) over
+      // the WebView without needing a BuildContext passed down.
+      navigatorKey: concordiaNavigatorKey,
       theme: ThemeData.light(useMaterial3: true).copyWith(
         colorScheme: const ColorScheme.light(
           primary: _C.primary,
@@ -286,7 +290,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
             _runJs('''
               window.concordiaNative = window.concordiaNative || {};
               window.concordiaNative.isNativeApp = true;
-              window.concordiaNative.appVersion = "4.3.0";
+              window.concordiaNative.appVersion = "4.5.0";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
