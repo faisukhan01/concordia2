@@ -21,10 +21,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <!-- REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — lets the app prompt the user to whitelist
-         it from battery optimization. Critical on Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo)
-         which aggressively kill background apps. The user must grant this for true
+         it from battery optimization. Critical on Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo,
+         Realme) which aggressively kill background apps. The user must grant this for true
          WhatsApp-style always-on delivery. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- FOREGROUND_SERVICE_SPECIAL_USE — required on Android 14+ (API 34+) to run a
+         foreground service of type "specialUse". We use this for the keep-alive
+         service that prevents Chinese OEMs (Realme, Xiaomi, Huawei, Oppo, Vivo)
+         from killing the app in the background. This is the same mechanism
+         WhatsApp/Telegram use for reliable push delivery on those devices.
+         "specialUse" has no time limit (unlike "dataSync" which is capped at 6h). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"/>
 
     <application
         android:label="Concordia College"
@@ -81,6 +89,31 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/concordia_orange" />
+
+        <!-- ════════════════════════════════════════════════════════════════
+             FOREGROUND SERVICE — KEEP-ALIVE (v3.9.0)
+             ════════════════════════════════════════════════════════════════
+             This service keeps the app process alive so that push notifications
+             are delivered reliably on Chinese OEM devices (Realme, Xiaomi,
+             Huawei, Oppo, Vivo, OnePlus). These OEMs aggressively freeze/kill
+             background apps — even with FCM's hybrid payload, notifications can
+             be delayed or dropped. A foreground service is exempt from these
+             killings. This is EXACTLY what WhatsApp, Telegram, Signal, and
+             Gmail do on Chinese OEMs.
+
+             foregroundServiceType="specialUse" — no time limit (unlike
+             "dataSync" which is capped at 6h on Android 14+). The sub-type
+             property explains the use case (required by Google Play policy,
+             though this app is sideloaded, not on Play Store).
+             ════════════════════════════════════════════════════════════════ -->
+        <service
+            android:name=".ConcordiaKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the app process alive so that real-time push notifications (announcements, exam alerts, fee reminders, attendance, marks) from Concordia College are delivered reliably on devices that aggressively kill background apps (Realme, Xiaomi, Huawei, Oppo, Vivo). This is the same mechanism messaging apps use for reliable message delivery." />
+        </service>
     </application>
     <queries>
         <intent>

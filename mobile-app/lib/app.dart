@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'notification_service.dart';
 
 // ── Brand colors (inlined to avoid external deps) ──────────────
 class _C {
@@ -52,7 +53,8 @@ class SplashToWebView extends StatefulWidget {
   State<SplashToWebView> createState() => _SplashToWebViewState();
 }
 
-class _SplashToWebViewState extends State<SplashToWebView> {
+class _SplashToWebViewState extends State<SplashToWebView>
+    with WidgetsBindingObserver {
   late WebViewController _controller;
   bool _loaded = false;
   bool _offline = false;
@@ -71,8 +73,29 @@ class _SplashToWebViewState extends State<SplashToWebView> {
   @override
   void initState() {
     super.initState();
+    // Observe app lifecycle (resume/pause) so we can re-register the FCM
+    // token every time the user returns to the app. This ensures the token
+    // is always current even if the WebView reloaded while in background.
+    WidgetsBinding.instance.addObserver(this);
     _setupMethodChannel();
     _initWebView();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When the app comes back to the foreground, re-register the FCM token.
+    // The WebView may have reloaded while in the background (especially on
+    // Chinese OEMs that freeze apps), so we push the token again to make
+    // sure the web app has it.
+    if (state == AppLifecycleState.resumed) {
+      NotificationService().reRegisterToken();
+    }
   }
 
   void _setupMethodChannel() {
@@ -92,9 +115,31 @@ class _SplashToWebViewState extends State<SplashToWebView> {
           // native app (vs a regular browser tab).
           _runJs('window.concordiaNative = window.concordiaNative || {};'
               'window.concordiaNative.fcmReady = true;');
+          // Also inject device info (manufacturer, OEM family, etc.) so the
+          // web app can show Realme/Xiaomi-specific setup guidance.
+          _injectDeviceInfo();
           break;
       }
     });
+  }
+
+  /// Fetch device info from the native side and inject it into the WebView
+  /// so the web app can detect Realme/Xiaomi and show OEM-specific guidance.
+  Future<void> _injectDeviceInfo() async {
+    try {
+      final info = await NotificationService().getDeviceInfo();
+      if (info != null) {
+        final infoJs = jsonEncode(info);
+        _runJs('''
+          (function() {
+            window.concordiaNative = window.concordiaNative || {};
+            window.concordiaNative.deviceInfo = $infoJs;
+          })();
+        ''');
+      }
+    } catch (e) {
+      debugPrint('[WebView] injectDeviceInfo failed: $e');
+    }
   }
 
   /// Inject the FCM token into the WebView so the web app can register it.
@@ -213,7 +258,7 @@ class _SplashToWebViewState extends State<SplashToWebView> {
             _runJs('''
               window.concordiaNative = window.concordiaNative || {};
               window.concordiaNative.isNativeApp = true;
-              window.concordiaNative.appVersion = "3.8.0";
+              window.concordiaNative.appVersion = "3.9.0";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});

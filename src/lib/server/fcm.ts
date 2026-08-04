@@ -297,6 +297,182 @@ export async function sendPushToUser(
   return { notificationId, pushed: tokens.length };
 }
 
+/**
+ * Send a TEST push to ONE user with DETAILED diagnostic info.
+ *
+ * Unlike sendPushToUser (which returns only counts), this returns:
+ *   - The token count for the user
+ *   - Masked token previews (so the user can verify it's their device)
+ *   - FCM success / failure counts
+ *   - Per-token error messages (so we can see WHY delivery failed)
+ *   - The FCM message ID (for Firebase support tickets)
+ *
+ * This is used by the "Send Test Notification" button in the admin
+ * diagnostics panel. The detailed response lets the user (and us)
+ * pinpoint exactly where the delivery chain breaks:
+ *   - 0 tokens → the device never registered (bridge/FCM init issue)
+ *   - tokens > 0 but fcmFailed > 0 → the token is invalid/stale
+ *   - fcmSuccess > 0 but phone shows nothing → Realme/OEM killed the app
+ */
+export async function sendTestPushToUser(
+  userId: string,
+): Promise<{
+  notificationId: string;
+  tokenCount: number;
+  tokenPreviews: string[];
+  fcmSuccess: number;
+  fcmFailed: number;
+  errors: Array<{ tokenPreview: string; error: string }>;
+  fcmEnabled: boolean;
+}> {
+  const title = '🔔 Concordia notifications are working!';
+  const userName = await getUserName(userId);
+  const body = `Hi ${userName} — this is a test push notification. You'll receive real ones when announcements, exams, marks, attendance, or fees are updated.`;
+
+  const notificationId = await persistNotification(
+    userId,
+    'general',
+    title,
+    body,
+    { route: 'notifications' },
+  );
+
+  const tokens = await getTokensForUser(userId);
+  const tokenPreviews = tokens.map((t) =>
+    t.length > 24 ? `${t.slice(0, 12)}…${t.slice(-8)}` : `${t.slice(0, 8)}…`,
+  );
+
+  if (tokens.length === 0) {
+    return {
+      notificationId,
+      tokenCount: 0,
+      tokenPreviews: [],
+      fcmSuccess: 0,
+      fcmFailed: 0,
+      errors: [],
+      fcmEnabled: fcmEnabled(),
+    };
+  }
+
+  const app = getApp();
+  if (!app) {
+    return {
+      notificationId,
+      tokenCount: tokens.length,
+      tokenPreviews,
+      fcmSuccess: 0,
+      fcmFailed: tokens.length,
+      errors: tokens.map((t, i) => ({
+        tokenPreview: tokenPreviews[i],
+        error: 'Firebase Admin SDK not initialized (FIREBASE_SERVICE_ACCOUNT env var missing or invalid)',
+      })),
+      fcmEnabled: false,
+    };
+  }
+
+  // Build the same hybrid payload as sendToTokens.
+  const fullData: Record<string, string> = {
+    title,
+    body,
+    route: 'notifications',
+  };
+  const message: any = {
+    tokens,
+    notification: { title, body },
+    data: fullData,
+    android: {
+      priority: 'high',
+      notification: {
+        channel_id: 'concordia_notifications_v4',
+        sound: 'default',
+        default_vibrate_timings: true,
+        default_light_settings: true,
+        visibility: 'public',
+        notification_priority: 'PRIORITY_HIGH',
+        notification_count: 1,
+        icon: '@drawable/ic_notification',
+        color: '#F26522',
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          alert: { title, body },
+          sound: 'default',
+          badge: 1,
+          'content-available': 1,
+        },
+      },
+    },
+    webpush: { headers: { Urgency: 'high' } },
+  };
+
+  const messaging: any = app.messaging ? app.messaging() : fb.messaging();
+  const errors: Array<{ tokenPreview: string; error: string }> = [];
+  let fcmSuccess = 0;
+  let fcmFailed = 0;
+
+  try {
+    const response = await messaging.sendEachForMulticast(message);
+    fcmSuccess = response.successCount || 0;
+    fcmFailed = response.failureCount || 0;
+
+    if (response.failureCount > 0) {
+      response.responses.forEach((resp: any, idx: number) => {
+        if (!resp.success) {
+          const err = resp.error as any;
+          const errMsg = err?.message || err?.code || 'Unknown FCM error';
+          errors.push({
+            tokenPreview: tokenPreviews[idx] || `token[${idx}]`,
+            error: errMsg,
+          });
+          // Clean up permanently invalid tokens.
+          if (
+            err?.code === 'messaging/invalid-registration-token' ||
+            err?.code === 'messaging/registration-token-not-registered' ||
+            err?.code === 'messaging/invalid-argument'
+          ) {
+            db.execute({
+              sql: 'DELETE FROM device_tokens WHERE token = ?',
+              args: [tokens[idx]],
+            }).catch(() => {});
+          }
+        }
+      });
+    }
+  } catch (e: any) {
+    fcmFailed = tokens.length;
+    errors.push({
+      tokenPreview: '(all)',
+      error: e?.message || 'FCM send threw an exception',
+    });
+  }
+
+  return {
+    notificationId,
+    tokenCount: tokens.length,
+    tokenPreviews,
+    fcmSuccess,
+    fcmFailed,
+    errors,
+    fcmEnabled: true,
+  };
+}
+
+/// Helper: fetch a user's first name (for the test notification greeting).
+async function getUserName(userId: string): Promise<string> {
+  try {
+    const r = await db.execute({
+      sql: 'SELECT name FROM users WHERE id = ?',
+      args: [userId],
+    });
+    const name = r.rows[0]?.name as string | undefined;
+    return name?.split(' ')[0] || 'there';
+  } catch {
+    return 'there';
+  }
+}
+
 /** Send to many users (each gets their own in-app notification row). */
 export async function sendPushToUsers(
   userIds: string[],
