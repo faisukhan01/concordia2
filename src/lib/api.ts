@@ -151,6 +151,14 @@ export const api = {
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<any>('auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  // v4.5.1: Profile photo upload/remove.
+  uploadProfilePhoto: (photoUrl: string) =>
+    request<{ success: boolean; photoUrl: string }>('auth/profile-photo', { method: 'POST', body: JSON.stringify({ photoUrl }) }),
+  removeProfilePhoto: () =>
+    request<{ success: boolean }>('auth/profile-photo', { method: 'DELETE' }),
+  // v4.5.1: Report an issue to management.
+  reportIssue: (body: { subject: string; description: string; category?: string }) =>
+    request<{ success: boolean; issueId: string }>('help/report-issue', { method: 'POST', body: JSON.stringify(body) }),
   // v4.4.0: Sign out of ALL devices — revokes every session + clears every
   // FCM token for this user. The client must clear its stored token + redirect
   // to /login afterwards.

@@ -26,6 +26,7 @@ import { TeacherPortal } from './teacher-portal';
 import { StudentPortal } from './student-portal';
 import { SettingsPage } from './settings-page';
 import { NotificationsPage } from './notifications-page';
+import { HelpPage } from './help-page';
 import { CommandPalette } from './command-palette';
 import { OnboardingTips } from '@/components/onboarding/onboarding-tooltips';
 import { HelpWidget } from '@/components/ui/help-widget';
@@ -778,6 +779,9 @@ export function RolePortal() {
     // v4.3.0: Dedicated Notifications page — shows ALL notifications (the bell
     // dropdown only shows the latest 5). Available to every role.
     if (activeModule === 'notifications') return <NotificationsPage user={user} />;
+    // v4.5.1: Dedicated Help & Support page — FAQs + contact info + report
+    // an issue form. Available to every role.
+    if (activeModule === 'help') return <HelpPage user={user} />;
     // v4.1.0: "Download App" sidebar link → opens /download page in a new tab.
     if (activeModule === 'download-app') {
       if (typeof window !== 'undefined') window.open('/download', '_blank');

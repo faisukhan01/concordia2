@@ -20,6 +20,7 @@ import {
   ClipboardList, FileText, Bell, CreditCard, Calendar, Award,
   UserPlus, UserCog, Receipt, CalendarDays, Megaphone, KeyRound,
   MessageCircle, FileSpreadsheet, Inbox, CheckCircle2,
+  LifeBuoy,
   Download as DownloadIcon,
 } from 'lucide-react';
 
@@ -83,6 +84,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -129,6 +131,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -145,6 +148,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -162,6 +166,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -189,6 +194,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -216,6 +222,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -238,6 +245,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
       { id: 'download-app', name: 'Download App', icon: DownloadIcon, color: SECONDARY },
     ]},
   ],
@@ -264,6 +272,7 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
       { id: 'download-app', name: 'Download App', icon: DownloadIcon, color: SECONDARY },
     ]},
   ],
