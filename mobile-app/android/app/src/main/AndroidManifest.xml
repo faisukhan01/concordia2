@@ -116,6 +116,18 @@
         </service>
 
         <!-- ════════════════════════════════════════════════════════════════
+             v4.5.0: JOB SERVICE — restarts the keep-alive service via
+             JobScheduler. This is a BELT-AND-SUSPENDERS fallback to the
+             AlarmManager restart. On some OEMs (Xiaomi, Huawei), AlarmManager
+             tasks are killed when the app is frozen — JobScheduler uses a
+             different execution path and survives longer.
+             ════════════════════════════════════════════════════════════════ -->
+        <service
+            android:name=".ConcordiaRestartJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- ════════════════════════════════════════════════════════════════
              v4.3.0: BOOT RECEIVER — restarts the keep-alive service after
              phone reboot or app update.
 

@@ -21,6 +21,12 @@ import 'notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // v4.5.0: Set the navigator key on NotificationService BEFORE init() so
+  // it can show the OEM settings dialog (Auto-start + battery optimization)
+  // after init completes. The key itself is declared in notification_service.dart
+  // and used by MaterialApp in app.dart.
+  NotificationService().setNavigatorKey(concordiaNavigatorKey);
+
   // Initialize Firebase + FCM push notifications.
   // Done early so the app can receive pushes as soon as possible.
   await NotificationService().init();

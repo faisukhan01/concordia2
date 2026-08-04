@@ -163,6 +163,48 @@ export function NotificationsPage({ user }: NotificationsPageProps) {
     return result;
   }, [items, filter, search]);
 
+  // ── Derived: group filtered items by date bucket (Today / Yesterday / ───
+  // This Week / This Month / Earlier). Each group is rendered with a sticky
+  // section header so the user can quickly scan their notification history.
+  const groupedItems = useMemo(() => {
+    const groups: Array<{ key: string; label: string; items: any[] }> = [];
+    const buckets: Record<string, any[]> = {
+      today: [],
+      yesterday: [],
+      thisWeek: [],
+      thisMonth: [],
+      earlier: [],
+    };
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 86_400_000;
+    const startOfWeek = startOfToday - 6 * 86_400_000;
+    const startOfMonth = startOfToday - 29 * 86_400_000;
+
+    for (const n of filteredItems) {
+      let ts: number;
+      const iso = n?.createdAt as string;
+      if (!iso) { buckets.earlier.push(n); continue; }
+      let normalized = iso;
+      if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(normalized) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) {
+        normalized = normalized.replace(' ', 'T') + 'Z';
+      }
+      ts = new Date(normalized).getTime();
+      if (Number.isNaN(ts)) { buckets.earlier.push(n); continue; }
+      if (ts >= startOfToday) buckets.today.push(n);
+      else if (ts >= startOfYesterday) buckets.yesterday.push(n);
+      else if (ts >= startOfWeek) buckets.thisWeek.push(n);
+      else if (ts >= startOfMonth) buckets.thisMonth.push(n);
+      else buckets.earlier.push(n);
+    }
+    if (buckets.today.length) groups.push({ key: 'today', label: 'Today', items: buckets.today });
+    if (buckets.yesterday.length) groups.push({ key: 'yesterday', label: 'Yesterday', items: buckets.yesterday });
+    if (buckets.thisWeek.length) groups.push({ key: 'thisWeek', label: 'This Week', items: buckets.thisWeek });
+    if (buckets.thisMonth.length) groups.push({ key: 'thisMonth', label: 'This Month', items: buckets.thisMonth });
+    if (buckets.earlier.length) groups.push({ key: 'earlier', label: 'Earlier', items: buckets.earlier });
+    return groups;
+  }, [filteredItems]);
+
   // ── Mark single as read + navigate ──
   const handleNotifClick = useCallback(async (n: any) => {
     // Toggle expand
@@ -437,89 +479,103 @@ export function NotificationsPage({ user }: NotificationsPageProps) {
             )}
           </motion.div>
         ) : (
-          /* Notification list */
-          <div className="space-y-2">
-            <AnimatePresence initial={false}>
-              {filteredItems.map((n, idx) => {
-                const { Icon, text, bg } = notifMeta(n?.type);
-                const isExpanded = expandedId === n?.id;
-                return (
-                  <motion.div
-                    key={n?.id ?? idx}
-                    layout
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.2, delay: Math.min(idx * 0.02, 0.2) }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleNotifClick(n)}
-                      className={cn(
-                        'w-full text-left flex items-start gap-3 p-4 rounded-xl border transition group',
-                        n?.read
-                          ? 'bg-card border-border hover:bg-accent/50 hover:border-border/80'
-                          : 'bg-primary/[0.03] border-primary/20 hover:bg-primary/[0.06] hover:border-primary/30',
-                      )}
-                    >
-                      {/* Icon */}
-                      <div className={cn('h-10 w-10 rounded-full grid place-items-center shrink-0', bg)}>
-                        <Icon className={cn('h-4 w-4', text)} />
-                      </div>
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={cn(
-                            'text-sm truncate',
-                            n?.read ? 'font-medium text-foreground' : 'font-semibold text-primary',
-                          )}>
-                            {n?.title}
-                          </span>
+          /* Notification list — grouped by date */
+          <div className="space-y-6">
+            {groupedItems.map((group) => (
+              <div key={group.key} className="space-y-2">
+                {/* Section header */}
+                <div className="flex items-center gap-3 pt-1 pb-1">
+                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    {group.label}
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground/60">
+                    {group.items.length} item{group.items.length === 1 ? '' : 's'}
+                  </span>
+                  <div className="flex-1 h-px bg-border/60" />
+                </div>
+                <AnimatePresence initial={false}>
+                  {group.items.map((n, idx) => {
+                    const { Icon, text, bg } = notifMeta(n?.type);
+                    const isExpanded = expandedId === n?.id;
+                    return (
+                      <motion.div
+                        key={n?.id ?? idx}
+                        layout
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2, delay: Math.min(idx * 0.02, 0.2) }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleNotifClick(n)}
+                          className={cn(
+                            'w-full text-left flex items-start gap-3 p-4 rounded-xl border transition group',
+                            n?.read
+                              ? 'bg-card border-border hover:bg-accent/50 hover:border-border/80'
+                              : 'bg-primary/[0.03] border-primary/20 hover:bg-primary/[0.06] hover:border-primary/30',
+                          )}
+                        >
+                          {/* Icon */}
+                          <div className={cn('h-10 w-10 rounded-full grid place-items-center shrink-0', bg)}>
+                            <Icon className={cn('h-4 w-4', text)} />
+                          </div>
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={cn(
+                                'text-sm truncate',
+                                n?.read ? 'font-medium text-foreground' : 'font-semibold text-primary',
+                              )}>
+                                {n?.title}
+                              </span>
+                              {!n?.read && (
+                                <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 ring-2 ring-background" />
+                              )}
+                            </div>
+                            {n?.body && (
+                              <p className={cn(
+                                'text-sm text-muted-foreground mt-1',
+                                isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-2',
+                              )}>
+                                {n.body}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <span className="text-[11px] text-muted-foreground/70 font-medium">
+                                {formatRelativeTime(n?.createdAt)}
+                              </span>
+                              {isExpanded && n?.createdAt && (
+                                <>
+                                  <span className="text-[11px] text-muted-foreground/40">·</span>
+                                  <span className="text-[11px] text-muted-foreground/60">
+                                    {formatFullDate(n?.createdAt)}
+                                  </span>
+                                </>
+                              )}
+                              {n?.type && (
+                                <>
+                                  <span className="text-[11px] text-muted-foreground/40">·</span>
+                                  <span className={cn('text-[11px] font-medium', text)}>
+                                    {notifMeta(n.type).label}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {/* Unread indicator on the right */}
                           {!n?.read && (
-                            <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 ring-2 ring-background" />
+                            <div className="shrink-0 pt-1">
+                              <div className="h-2 w-2 rounded-full bg-rose-500" />
+                            </div>
                           )}
-                        </div>
-                        {n?.body && (
-                          <p className={cn(
-                            'text-sm text-muted-foreground mt-1',
-                            isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-2',
-                          )}>
-                            {n.body}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <span className="text-[11px] text-muted-foreground/70 font-medium">
-                            {formatRelativeTime(n?.createdAt)}
-                          </span>
-                          {isExpanded && n?.createdAt && (
-                            <>
-                              <span className="text-[11px] text-muted-foreground/40">·</span>
-                              <span className="text-[11px] text-muted-foreground/60">
-                                {formatFullDate(n?.createdAt)}
-                              </span>
-                            </>
-                          )}
-                          {n?.type && (
-                            <>
-                              <span className="text-[11px] text-muted-foreground/40">·</span>
-                              <span className={cn('text-[11px] font-medium', text)}>
-                                {notifMeta(n.type).label}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      {/* Unread indicator on the right */}
-                      {!n?.read && (
-                        <div className="shrink-0 pt-1">
-                          <div className="h-2 w-2 rounded-full bg-rose-500" />
-                        </div>
-                      )}
-                    </button>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              </div>
+            ))}
 
             {/* Footer info */}
             {filteredItems.length > 0 && (
