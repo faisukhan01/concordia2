@@ -30,16 +30,14 @@ export const metadata: Metadata = {
     telephone: false,
   },
   icons: {
+    // Browser-tab favicon: the orange "C" logo the user requested. PWA install
+    // icons are supplied separately by manifest.json (below), so keeping the
+    // tab icon as favicon.png here doesn't affect the installed-app icon.
     icon: [
-      { url: "/concordia-logo.png", sizes: "any" },
-      { url: "/app-icon.png", sizes: "192x192", type: "image/png" },
-      { url: "/app-icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/favicon.png", type: "image/png" },
     ],
-    apple: [
-      { url: "/app-icon.png", sizes: "192x192", type: "image/png" },
-      { url: "/app-icon-512.png", sizes: "512x512", type: "image/png" },
-    ],
-    shortcut: ["/app-icon.png"],
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
   },
   openGraph: {
     title: "Concordia College — Management Portal",
