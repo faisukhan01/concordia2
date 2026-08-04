@@ -32,6 +32,7 @@ import { api, setOnBlocked } from '@/lib/api';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
 import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle, ShieldAlert } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 // Notification icon + color mapping per type.
 const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
@@ -813,6 +814,7 @@ export function RolePortal() {
                 <Search className="h-[18px] w-[18px]" />
               </button>
             )}
+            <ThemeToggle />
             <div className="relative" ref={notifRef}>
               <button
                 onClick={toggleNotifs}
