@@ -203,7 +203,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.0.0';
+      const LATEST_APP_VERSION = '4.1.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -1447,21 +1447,27 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
 
       // ── Fire push notification to the target audience ──
+      // v4.1.0: For institute-wide announcements (targetScope='all'), we now
+      // use sendPushToAll() which queries EVERY active user across ALL roles
+      // (super-admin, institute-admin, admin, branch-manager, admissions,
+      // accountant, academic, teacher, student). Previously we only looped
+      // through 6 roles and MISSED super-admin/institute-admin/branch-manager
+      // — which is why the user (admin) never received announcement pushes.
       try {
-        const { sendPushToRole, sendPushToUsers, fcmEnabled } = await import('./fcm');
+        const { sendPushToRole, sendPushToAll, fcmEnabled } = await import('./fcm');
         if (fcmEnabled()) {
           const senderName = user.name || 'Concordia';
           const body_text = message.length > 100 ? message.slice(0, 100) + '…' : message;
           const data = { route: 'announcements', announcementId: id };
-          // Decide audience
           if (targetRole) {
+            // Targeted at a specific role (e.g. "students only") — also notify
+            // staff so management has visibility into what was sent.
             await sendPushToRole(targetRole, 'announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
-          } else if (targetScope === 'all' || !targetScope) {
-            // Notify every active student + teacher + staff in the branch
-            const roles = ['student', 'teacher', 'admin', 'admissions', 'accountant', 'academic'];
-            for (const r of roles) {
-              await sendPushToRole(r, 'announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
-            }
+            const { sendPushToStaff } = await import('./fcm');
+            await sendPushToStaff('announcement', `📢 ${title}`, `${senderName} → ${targetRole}: ${body_text}`, data);
+          } else {
+            // Broadcast to EVERY active user — no one is left out.
+            await sendPushToAll('announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
           }
         }
       } catch (e) {
@@ -2082,9 +2088,9 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           sql: 'UPDATE attendance SET records = ?, teacherId = ? WHERE id = ?',
           args: [JSON.stringify(records), user.id, existingId],
         });
-        // Notify students/parents of the update (push)
+        // Notify students/parents of the update (push) + ALL staff (v4.1.0)
         try {
-          const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+          const { sendPushToUsers, sendPushToStaff, fcmEnabled } = await import('./fcm');
           if (fcmEnabled()) {
             const absent = records.filter((r: any) => r.status === 'absent').map((r: any) => r.studentId).filter(Boolean);
             const late = records.filter((r: any) => r.status === 'late').map((r: any) => r.studentId).filter(Boolean);
@@ -2094,6 +2100,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
             if (late.length > 0) {
               await sendPushToUsers(late, 'attendance', `📋 Attendance marked`, `You were marked LATE on ${date}.`, { route: 'attendance', date });
             }
+            await sendPushToStaff(
+              'attendance',
+              `📋 Attendance updated`,
+              `${user.name || 'A teacher'} updated attendance on ${date} — ${absent.length} absent, ${late.length} late.`,
+              { route: 'attendance', date },
+            );
           }
         } catch (e) { console.error('[attendance] push failed:', e); }
         return NextResponse.json({ id: existingId, success: true, updated: true });
@@ -2104,9 +2116,9 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO attendance (id, branchId, classId, date, teacherId, records) VALUES (?, ?, ?, ?, ?, ?)',
         args: [id, user.branchId, classId || null, date, user.id, JSON.stringify(records)],
       });
-      // Notify absent/late students (push)
+      // Notify absent/late students (push) + ALL staff (v4.1.0 staff visibility)
       try {
-        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        const { sendPushToUsers, sendPushToStaff, fcmEnabled } = await import('./fcm');
         if (fcmEnabled()) {
           const absent = records.filter((r: any) => r.status === 'absent').map((r: any) => r.studentId).filter(Boolean);
           const late = records.filter((r: any) => r.status === 'late').map((r: any) => r.studentId).filter(Boolean);
@@ -2116,6 +2128,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           if (late.length > 0) {
             await sendPushToUsers(late, 'attendance', `📋 Attendance marked`, `You were marked LATE on ${date}.`, { route: 'attendance', date });
           }
+          // v4.1.0: Notify ALL staff with a summary so management tracks attendance activity.
+          await sendPushToStaff(
+            'attendance',
+            `📋 Attendance marked`,
+            `${user.name || 'A teacher'} marked attendance on ${date} — ${absent.length} absent, ${late.length} late.`,
+            { route: 'attendance', date },
+          );
         }
       } catch (e) { console.error('[attendance] push failed:', e); }
       return NextResponse.json({ id, success: true }, { status: 201 });
@@ -2165,8 +2184,10 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
 
       // ── Push to each student whose marks were just recorded ──
+      // v4.1.0: ALSO notify ALL staff with a summary so management tracks
+      // every marks upload. The user (admin) was not receiving these before.
       try {
-        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        const { sendPushToUsers, sendPushToStaff, fcmEnabled } = await import('./fcm');
         if (fcmEnabled() && Array.isArray(records)) {
           const max = totalMarks || 100;
           const studentIds = records.map((r: any) => r.studentId).filter(Boolean);
@@ -2184,6 +2205,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
                 { route: 'results', exam, resultId: id },
               );
             }
+            // Staff summary notification.
+            await sendPushToStaff(
+              'marks',
+              `📝 Marks uploaded — ${exam}`,
+              `${user.name || 'A teacher'} uploaded marks for ${studentIds.length} student(s) in "${exam}" (out of ${max}).`,
+              { route: 'results', exam, resultId: id },
+            );
           }
         }
       } catch (e) { console.error('[results] push failed:', e); }
@@ -2261,12 +2289,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         args: [id, brId, user.instituteId || null, cleanName, type || 'Monthly Test', user.id],
       });
 
-      // ── Notify all students + teachers in the branch that a new exam was scheduled ──
+      // ── Notify all students + teachers + staff that a new exam was scheduled ──
+      // v4.1.0: Added staff notification so management tracks exam scheduling.
       try {
-        const { sendPushToRole, fcmEnabled } = await import('./fcm');
+        const { sendPushToRole, sendPushToStaff, fcmEnabled } = await import('./fcm');
         if (fcmEnabled()) {
           await sendPushToRole('student', 'exam', `📅 New exam: ${cleanName}`, `An exam "${cleanName}" (${type || 'Monthly Test'}) has been scheduled. Check the date sheet for details.`, { route: 'exams', examId: id });
           await sendPushToRole('teacher', 'exam', `📅 New exam: ${cleanName}`, `An exam "${cleanName}" (${type || 'Monthly Test'}) has been scheduled. Prepare your students.`, { route: 'exams', examId: id });
+          await sendPushToStaff('exam', `📅 New exam: ${cleanName}`, `${user.name || 'Academic Office'} scheduled "${cleanName}" (${type || 'Monthly Test'}).`, { route: 'exams', examId: id });
         }
       } catch (e) { console.error('[exams] push failed:', e); }
 
@@ -2379,14 +2409,26 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       }
 
       // ── Notify every student who got a new invoice ──
+      // v4.1.0: ALSO notify all staff (super-admin, institute-admin, admin,
+      // branch-manager, accountant, etc.) so management has visibility into
+      // fee generation activity. The user (admin) was not receiving these
+      // before because only students were notified.
       try {
-        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        const { sendPushToUsers, sendPushToStaff, fcmEnabled } = await import('./fcm');
         if (fcmEnabled() && newInvoiceStudentIds.length > 0) {
+          // 1. Notify each affected student personally.
           await sendPushToUsers(
             newInvoiceStudentIds,
             'fee-due',
             `💰 Fee invoice generated`,
             `Your ${month} ${year} fee invoice has been generated. Please submit your payment.`,
+            { route: 'fees', month: String(month), year: String(year) },
+          );
+          // 2. Notify ALL staff with a summary.
+          await sendPushToStaff(
+            'fee-due',
+            `💰 ${generated} fee invoices generated`,
+            `${generated} ${month} ${year} fee invoices were just generated for the branch.`,
             { route: 'fees', month: String(month), year: String(year) },
           );
         }
@@ -2410,14 +2452,24 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
 
       // ── Notify the student that their fee payment was recorded ──
+      // v4.1.0: ALSO notify all staff so management tracks every payment.
       try {
-        const { sendPushToUser, fcmEnabled } = await import('./fcm');
+        const { sendPushToUser, sendPushToStaff, fcmEnabled } = await import('./fcm');
         if (fcmEnabled() && invoice.studentId) {
+          // 1. Notify the student personally.
           await sendPushToUser(
             invoice.studentId,
             'fee-paid',
             `✅ Fee payment received`,
             `Rs ${Number(amount).toLocaleString()} for ${invoice.month} ${invoice.year} has been marked Paid. Thank you!`,
+            { route: 'fees', invoiceId: id },
+          );
+          // 2. Notify ALL staff with a summary.
+          const studentName = invoice.studentName || 'A student';
+          await sendPushToStaff(
+            'fee-paid',
+            `✅ Fee payment received`,
+            `Rs ${Number(amount).toLocaleString()} received from ${studentName} for ${invoice.month} ${invoice.year} (${invoice.className || 'class'}).`,
             { route: 'fees', invoiceId: id },
           );
         }

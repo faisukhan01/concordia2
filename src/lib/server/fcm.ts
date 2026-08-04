@@ -549,6 +549,46 @@ export async function sendPushToAll(
   return { sent: res.sent, recipients: userIds.length };
 }
 
+/**
+ * Send to EVERY staff member across all administrative/managerial roles.
+ *
+ * v4.1.0: The user (admin/super-admin) complained they never received
+ * notifications when announcements, fees, attendance, or marks were created
+ * — because the old code only notified the directly-affected users (e.g. the
+ * student whose fee was paid) and NOT the institute staff who need visibility
+ * into ALL activity. This helper sends a SUMMARY notification to every
+ * staff member (super-admin, institute-admin, admin, branch-manager,
+ * admissions, accountant, academic) so the management team always knows
+ * what's happening across the college.
+ *
+ * Use this alongside sendPushToUsers/sendPushToRole for any activity where
+ * staff oversight is important (fee payments, attendance, marks, exams).
+ */
+export async function sendPushToStaff(
+  type: NotifType,
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+): Promise<{ sent: number; recipients: number }> {
+  const staffRoles = [
+    'super-admin',
+    'institute-admin',
+    'admin',
+    'branch-manager',
+    'admissions',
+    'accountant',
+    'academic',
+  ];
+  let totalSent = 0;
+  let totalRecipients = 0;
+  for (const role of staffRoles) {
+    const res = await sendPushToRole(role, type, title, body, data);
+    totalSent += res.sent;
+    totalRecipients += res.recipients;
+  }
+  return { sent: totalSent, recipients: totalRecipients };
+}
+
 /** Send to every user in a specific class/section (for exams, date sheets). */
 export async function sendPushToClass(
   className: string,
