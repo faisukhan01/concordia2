@@ -25,6 +25,7 @@ import { AcademicPortal } from './academic-portal';
 import { TeacherPortal } from './teacher-portal';
 import { StudentPortal } from './student-portal';
 import { SettingsPage } from './settings-page';
+import { NotificationsPage } from './notifications-page';
 import { CommandPalette } from './command-palette';
 import { OnboardingTips } from '@/components/onboarding/onboarding-tooltips';
 import { HelpWidget } from '@/components/ui/help-widget';
@@ -226,7 +227,11 @@ export function RolePortal() {
   const fetchNotifs = useCallback(async () => {
     setNotifLoading(true);
     try {
-      const data = await api.getNotifications();
+      // v4.3.0: Fetch only the latest 5 for the bell dropdown (the full list
+      // is on the dedicated Notifications page). The poller below still fetches
+      // 15 so it can detect new notifications even if more than 5 arrive
+      // between polls.
+      const data = await api.getNotifications(5);
       setNotifItems(Array.isArray(data?.items) ? data.items : []);
       setNotifUnread(typeof data?.unread === 'number' ? data.unread : 0);
     } catch {
@@ -763,6 +768,9 @@ export function RolePortal() {
 
   const renderPortal = () => {
     if (activeModule === 'settings') return <SettingsPage user={user} />;
+    // v4.3.0: Dedicated Notifications page — shows ALL notifications (the bell
+    // dropdown only shows the latest 5). Available to every role.
+    if (activeModule === 'notifications') return <NotificationsPage user={user} />;
     // v4.1.0: "Download App" sidebar link → opens /download page in a new tab.
     if (activeModule === 'download-app') {
       if (typeof window !== 'undefined') window.open('/download', '_blank');
@@ -1024,51 +1032,57 @@ export function RolePortal() {
                     )}
                   </div>
 
-                  {/* Footer — Mark all read + Send test (native app only) */}
-                  {(notifUnread > 0 || isNativeApp() || role === 'admin' || role === 'super-admin') && (
-                    <div className="border-t border-border shrink-0 bg-muted/30">
-                      {/* Admin-only: Broadcast "Update your app" to all users */}
-                      {(role === 'admin' || role === 'super-admin') && (
-                        <>
-                          <button
-                            onClick={onBroadcastAppUpdate}
-                            disabled={broadcasting}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] transition disabled:opacity-50"
-                          >
-                            <Send className={cn('h-3 w-3', broadcasting && 'animate-pulse')} />
-                            {broadcasting ? 'Broadcasting…' : 'Broadcast "Update App" to all users'}
-                          </button>
-                          <button
-                            onClick={onOpenFcmDiag}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-medium text-gray-600 hover:text-[#F26522] hover:bg-[#FFF4ED] transition border-t border-border"
-                          >
-                            <Activity className="h-3 w-3" />
-                            FCM Diagnostics
-                          </button>
-                        </>
+                  {/* Footer — View all + Mark all read + Send test (native app only) */}
+                  <div className="border-t border-border shrink-0 bg-muted/30">
+                    {/* Admin-only: Broadcast "Update your app" to all users */}
+                    {(role === 'admin' || role === 'super-admin') && (
+                      <>
+                        <button
+                          onClick={onBroadcastAppUpdate}
+                          disabled={broadcasting}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] transition disabled:opacity-50"
+                        >
+                          <Send className={cn('h-3 w-3', broadcasting && 'animate-pulse')} />
+                          {broadcasting ? 'Broadcasting…' : 'Broadcast "Update App" to all users'}
+                        </button>
+                        <button
+                          onClick={onOpenFcmDiag}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-medium text-gray-600 hover:text-[#F26522] hover:bg-[#FFF4ED] transition border-t border-border"
+                        >
+                          <Activity className="h-3 w-3" />
+                          FCM Diagnostics
+                        </button>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                      {notifUnread > 0 ? (
+                        <button
+                          onClick={onMarkAllRead}
+                          className="text-[11px] font-medium text-primary hover:text-primary/80 transition"
+                        >
+                          Mark all as read
+                        </button>
+                      ) : <span />}
+                      {isNativeApp() && (
+                        <button
+                          onClick={onSendTest}
+                          disabled={sendingTest}
+                          className="text-[11px] font-medium text-muted-foreground hover:text-primary transition inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <Sparkles className={cn('h-3 w-3', sendingTest && 'animate-spin')} />
+                          {sendingTest ? 'Sending…' : 'Send test push'}
+                        </button>
                       )}
-                      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-                        {notifUnread > 0 ? (
-                          <button
-                            onClick={onMarkAllRead}
-                            className="text-[11px] font-medium text-primary hover:text-primary/80 transition"
-                          >
-                            Mark all as read
-                          </button>
-                        ) : <span />}
-                        {isNativeApp() && (
-                          <button
-                            onClick={onSendTest}
-                            disabled={sendingTest}
-                            className="text-[11px] font-medium text-muted-foreground hover:text-primary transition inline-flex items-center gap-1 disabled:opacity-50"
-                          >
-                            <Sparkles className={cn('h-3 w-3', sendingTest && 'animate-spin')} />
-                            {sendingTest ? 'Sending…' : 'Send test push'}
-                          </button>
-                        )}
-                      </div>
                     </div>
-                  )}
+                    {/* v4.3.0: "View all notifications" — opens the dedicated
+                        Notifications page (shows ALL notifications, not just 5). */}
+                    <button
+                      onClick={() => { setNotifOpen(false); setActiveModule('notifications'); }}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-primary bg-primary/5 hover:bg-primary/10 transition border-t border-border"
+                    >
+                      View all notifications
+                    </button>
+                  </div>
                 </div>
               )}
 
