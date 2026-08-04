@@ -272,6 +272,10 @@ async function sendToTokens(
         );
       }
     }
+    // v4.0.0: Server-side logging for diagnostics. This helps pinpoint
+    // whether the issue is token registration (0 tokens) vs FCM delivery
+    // (tokens > 0 but failed) vs OEM killing (success but no display).
+    console.info(`[fcm] push sent: title="${title.slice(0, 40)}" | tokens=${tokens.length} | success=${response.successCount} | failed=${failed}`);
     return { sent: response.successCount, failed };
   } catch (e: any) {
     console.error('[fcm] sendEachForMulticast error:', e?.message || e);
@@ -293,6 +297,12 @@ export async function sendPushToUser(
   const tokens = await getTokensForUser(userId);
   if (tokens.length > 0) {
     await sendToTokens(tokens, title, body, data);
+  } else {
+    // v4.0.0: Prominent warning — this is the #1 cause of "no notifications
+    // on mobile". The user's device token isn't registered, so the push
+    // can't be delivered. They need to open the app so the bridge can
+    // register the token.
+    console.warn(`[fcm] ⚠ NO TOKENS for user ${userId} — push "${title.slice(0, 40)}" was saved to DB but NOT delivered. The user must open the app to register their device token.`);
   }
   return { notificationId, pushed: tokens.length };
 }

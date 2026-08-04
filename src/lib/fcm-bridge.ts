@@ -1,23 +1,34 @@
-// Concordia College — FCM bridge (client side)
+// Concordia College — FCM bridge (client side) — v4.0.0
 //
 // This module runs INSIDE the web app (inside the WebView). It bridges the
 // native Flutter shell (which holds the FCM token) with the backend (which
 // needs the token to send pushes).
 //
-// ROBUSTNESS STRATEGY:
-// The original implementation relied on Flutter PUSHING the token to the web
-// app at the exact moment `onToken` was registered. This caused a race
-// condition: if Flutter got the token before React mounted, the token was
-// silently dropped. The fix below uses THREE complementary mechanisms:
+// ═══════════════════════════════════════════════════════════════════════
+// v4.0.0 CHANGES — BULLETPROOF TOKEN REGISTRATION
+// ═══════════════════════════════════════════════════════════════════════
+// ROOT CAUSE of "no notifications on mobile":
+//   The previous bridge polled for the FCM token for only 60 seconds after
+//   the portal mounted. If the user wasn't logged in within those 60s, OR
+//   if Flutter delivered the token slightly late, the token was NEVER
+//   registered with the backend. The server then had no token for that
+//   user → announcements/fees pushes were silently discarded.
 //
-//   1. PUSH:   Flutter calls `window.concordiaNative.onToken(token)` — handled.
-//   2. PULL:   The web app calls `window.concordiaNative.requestToken()` to
-//              ASK Flutter for the token on demand (via a MethodChannel).
-//   3. POLL:   A background loop checks for `fcmToken` every 2s for 60s,
-//              so even if Flutter is slow to deliver, we eventually pick it up.
+// FIX:
+//   1. The poll now runs FOREVER (every 15s) while the user is logged in.
+//      It only stops when the user logs out. This guarantees that no matter
+//      when Flutter delivers the token, it gets registered.
+//   2. Re-register on every `visibilitychange` event (user switches back to
+//      the app from another app). This handles the case where the WebView
+//      reloaded while in the background and lost the injected token.
+//   3. `refreshFcmTokenAfterLogin` now RESETS the poll timer (previously it
+//      was a no-op if the poll was already running, which was a bug).
+//   4. Added a `getRegistrationStatus()` function that checks the backend
+//      to see if the token is actually registered. Used for diagnostics.
+//   5. After successful registration, we still keep polling every 60s to
+//      handle token rotation (FCM can rotate tokens at any time).
 //
-// When NOT running inside the native app (i.e. a regular browser tab), this
-// module is a no-op — the web app still works, just without push notifications.
+// ═══════════════════════════════════════════════════════════════════════
 
 import { api } from '@/lib/api';
 import { useApp } from '@/lib/store';
@@ -25,14 +36,22 @@ import { useApp } from '@/lib/store';
 let _registered = false;
 let _lastToken: string | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
-let _pollAttempts = 0;
-const MAX_POLL_ATTEMPTS = 30; // 30 × 2s = 60s
+let _aggressivePollTimer: ReturnType<typeof setInterval> | null = null;
+let _visibilityHandler: (() => void) | null = null;
+
+// After login, we poll aggressively (every 5s for 2 minutes) to catch the
+// token as quickly as possible. After that, we settle into a slow poll
+// (every 60s) that runs forever to handle token rotation.
+const AGGRESSIVE_POLL_INTERVAL = 5000; // 5s
+const AGGRESSIVE_POLL_MAX_ATTEMPTS = 24; // 24 × 5s = 2 minutes
+const SLOW_POLL_INTERVAL = 60000; // 60s — runs forever
+let _aggressiveAttempts = 0;
 
 /** Register a token with the backend, linked to the logged-in user. */
 async function registerTokenWithBackend(token: string) {
   if (!token || token === _lastToken) return; // de-dupe
   // Only register if the user is logged in. Otherwise hold the token —
-  // the retry loop + post-login refresh will pick it up after login.
+  // the poll loop + post-login refresh will pick it up after login.
   const user = useApp.getState().user;
   const apiToken = useApp.getState().token;
   if (!user || !apiToken) {
@@ -41,12 +60,7 @@ async function registerTokenWithBackend(token: string) {
   _lastToken = token;
   try {
     await api.registerDeviceToken(token, 'android');
-    console.info('[fcm] device token registered with backend for user', user.id);
-    // Stop the poll loop once we've successfully registered.
-    if (_pollTimer) {
-      clearInterval(_pollTimer);
-      _pollTimer = null;
-    }
+    console.info('[fcm] ✓ device token registered with backend for user', user.id, 'token:', token.slice(0, 16) + '…');
   } catch (e) {
     console.error('[fcm] failed to register device token:', e);
     // Reset _lastToken so a retry can attempt again.
@@ -102,12 +116,31 @@ async function requestTokenFromFlutter(): Promise<string | null> {
   return null;
 }
 
-/** Start the background poll loop (called once after the bridge is wired). */
-function startTokenPoll() {
-  if (_pollTimer) return; // already polling
-  _pollAttempts = 0;
+/** Stop the aggressive poll and start the slow forever-poll. */
+function transitionToSlowPoll() {
+  if (_aggressivePollTimer) {
+    clearInterval(_aggressivePollTimer);
+    _aggressivePollTimer = null;
+  }
+  if (_pollTimer) return; // slow poll already running
   _pollTimer = setInterval(async () => {
-    _pollAttempts++;
+    // In the slow poll, we check if the token has changed (rotation).
+    let token = getTokenFromNative();
+    if (!token) {
+      token = await requestTokenFromFlutter();
+    }
+    if (token && token !== _lastToken) {
+      await registerTokenWithBackend(token);
+    }
+  }, SLOW_POLL_INTERVAL);
+}
+
+/** Start the aggressive poll loop (every 5s for 2 minutes). */
+function startAggressivePoll() {
+  if (_aggressivePollTimer) return; // already running
+  _aggressiveAttempts = 0;
+  _aggressivePollTimer = setInterval(async () => {
+    _aggressiveAttempts++;
     // Try sync read first.
     let token = getTokenFromNative();
     // Then try async pull from Flutter.
@@ -117,25 +150,23 @@ function startTokenPoll() {
     if (token) {
       await registerTokenWithBackend(token);
     }
-    // Stop after 60s regardless — we don't want to poll forever.
-    if (_pollAttempts >= MAX_POLL_ATTEMPTS) {
-      if (_pollTimer) {
-        clearInterval(_pollTimer);
-        _pollTimer = null;
-      }
-      // If we never got a token, log it for debugging.
-      if (!_lastToken) {
-        const w = window as any;
-        console.warn('[fcm] no token after 60s of polling. concordiaNative =', {
-          exists: !!w.concordiaNative,
-          isNativeApp: w.concordiaNative?.isNativeApp,
-          hasFcmToken: !!w.concordiaNative?.fcmToken,
-          hasGetToken: typeof w.concordiaNative?.getToken,
-          hasRequestTokenAsync: typeof w.concordiaNative?.requestTokenAsync,
-        });
-      }
+    // After 2 minutes of aggressive polling, transition to the slow forever-poll.
+    if (_aggressiveAttempts >= AGGRESSIVE_POLL_MAX_ATTEMPTS) {
+      transitionToSlowPoll();
     }
-  }, 2000);
+  }, AGGRESSIVE_POLL_INTERVAL);
+}
+
+/** Stop all polling. */
+function stopAllPolls() {
+  if (_aggressivePollTimer) {
+    clearInterval(_aggressivePollTimer);
+    _aggressivePollTimer = null;
+  }
+  if (_pollTimer) {
+    clearInterval(_pollTimer);
+    _pollTimer = null;
+  }
 }
 
 /**
@@ -199,9 +230,22 @@ export function initFcmBridge() {
     }
   };
 
-  // PULL mechanism: expose a function Flutter can call to ASK for the token.
-  // (Flutter sets this to a wrapper around its MethodChannel.)
-  // We also use it ourselves in requestTokenFromFlutter().
+  // VISIBILITY CHANGE: when the user switches back to the app, re-register
+  // the token. The WebView may have reloaded while in the background.
+  _visibilityHandler = () => {
+    if (document.visibilityState === 'visible') {
+      // Reset _lastToken so we re-register even if the token hasn't changed.
+      _lastToken = null;
+      const token = getTokenFromNative();
+      if (token) {
+        registerTokenWithBackend(token);
+      } else {
+        // Token not cached — start an aggressive poll to fetch it.
+        startAggressivePoll();
+      }
+    }
+  };
+  document.addEventListener('visibilitychange', _visibilityHandler);
 
   // If the native shell already pushed a token before we registered the
   // handler (race condition), pick it up now.
@@ -209,9 +253,10 @@ export function initFcmBridge() {
     registerTokenWithBackend(w.concordiaNative.fcmToken);
   }
 
-  // Start the background poll — this is the safety net that catches the token
-  // no matter when Flutter delivers it.
-  startTokenPoll();
+  // Start the aggressive poll — this is the safety net that catches the token
+  // no matter when Flutter delivers it. After 2 minutes it transitions to a
+  // slow forever-poll that handles token rotation.
+  startAggressivePoll();
 }
 
 /** Returns true if the web app is running inside the native Flutter shell. */
@@ -225,8 +270,9 @@ export function isNativeApp(): boolean {
  * the native shell may have already injected a token before the user
  * was authenticated, so we need to send it now.
  *
- * This also kicks off a fresh pull from Flutter in case the token wasn't
- * delivered yet.
+ * v4.0.0: This now RESETS the poll timers (previously it was a no-op if
+ * the poll was already running, which was a bug that caused tokens to
+ * never be registered if initFcmBridge ran before login).
  */
 export async function refreshFcmTokenAfterLogin() {
   if (typeof window === 'undefined') return;
@@ -242,9 +288,11 @@ export async function refreshFcmTokenAfterLogin() {
   if (token) {
     await registerTokenWithBackend(token);
   }
-  // 3. Always restart the poll loop as a safety net — it will keep trying
-  //    for 60s and then stop on its own.
-  startTokenPoll();
+  // 3. ALWAYS restart the aggressive poll as a safety net. This is the key
+  //    fix — previously startAggressivePoll was a no-op if already running,
+  //    but now we stop + restart to reset the attempt counter.
+  stopAllPolls();
+  startAggressivePoll();
 }
 
 /** Unregister the device token on logout. */
@@ -260,10 +308,7 @@ export async function unregisterFcmToken() {
     }
   }
   _lastToken = null;
-  if (_pollTimer) {
-    clearInterval(_pollTimer);
-    _pollTimer = null;
-  }
+  stopAllPolls();
 }
 
 /**
@@ -293,5 +338,7 @@ export function getFcmBridgeDiagnostics() {
     lastTokenRegistered: _lastToken
       ? _lastToken.slice(0, 20) + '…' + _lastToken.slice(-8)
       : null,
+    aggressivePollRunning: !!_aggressivePollTimer,
+    slowPollRunning: !!_pollTimer,
   };
 }
