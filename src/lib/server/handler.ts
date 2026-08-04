@@ -348,13 +348,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     }
 
     // ── App version check. The mobile app calls this on startup with its
-    //    current version. If outdated, the server auto-creates an app-update
-    //    notification for this user (de-duped: at most once per 24h per user).
-    //    This guarantees every user who opens an outdated app gets the
-    //    "Update your Concordia app" notification — no manual admin action needed.
+    //    current version. Returns whether an update is available + the
+    //    download URL. v4.6.1: no longer auto-creates push notifications —
+    //    the sidebar 'Update App' badge (driven by app/update-status below)
+    //    now handles update visibility silently without spamming users.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.6.0';
+      const LATEST_APP_VERSION = '4.6.1';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -370,36 +370,15 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       };
       const updateAvailable = !!current && cmp(current, LATEST_APP_VERSION) < 0;
 
-      // De-dup: only create an app-update notification if there isn't already
-      // one for this user in the last 24 hours (avoids spamming on every launch).
-      let notificationCreated = false;
-      if (updateAvailable) {
-        const recent = await db.execute({
-          sql: `SELECT id FROM notifications
-                WHERE userId = ? AND type = 'app-update'
-                AND createdAt > datetime('now', '-1 day')
-                LIMIT 1`,
-          args: [user.id],
-        });
-        if (recent.rows.length === 0) {
-          const { sendPushToUser } = await import('./fcm');
-          await sendPushToUser(
-            user.id,
-            'app-update',
-            'Update your Concordia app',
-            `A new version (${LATEST_APP_VERSION}) is available. Tap to download the latest APK.`,
-            { route: 'app-update', url: DOWNLOAD_URL, version: LATEST_APP_VERSION },
-          );
-          notificationCreated = true;
-        }
-      }
-
+      // v4.6.1: NO push notification spam. The sidebar 'Update App' button
+      // now silently shows a bold badge when an update is available — driven
+      // by the app/update-status endpoint below. No more 'Update your app'
+      // push notifications every 24h.
       return NextResponse.json({
         latest: LATEST_APP_VERSION,
         current: current || null,
         updateAvailable,
         downloadUrl: DOWNLOAD_URL,
-        notificationCreated,
       });
     }
 
@@ -409,7 +388,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    This replaces the annoying "update your app" push notifications.
     if (method === 'GET' && path === 'app/update-status') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.6.0';
+      const LATEST_APP_VERSION = '4.6.1';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
