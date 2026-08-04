@@ -23,18 +23,25 @@ export function SimpleBarChart(props: {
   formatValue?: (v: number) => string;
 }) {
   const { data, height = 220, color = BRAND_ORANGE, yLabel, formatValue } = props;
+  const gradientId = `bar-gradient-${color.replace('#', '')}`;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
-        <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={48} allowDecimals={false} domain={[0, 'auto']} label={yLabel ? { value: yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } } : undefined} />
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={1} />
+            <stop offset="100%" stopColor={color} stopOpacity={0.7} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.15)" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'currentColor' }} className="fill-muted-foreground" axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: 'currentColor' }} className="fill-muted-foreground" axisLine={false} tickLine={false} width={48} allowDecimals={false} domain={[0, 'auto']} label={yLabel ? { value: yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'currentColor' } } : undefined} />
         <Tooltip
           cursor={{ fill: BRAND_ORANGE_LIGHT }}
-          contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+          contentStyle={{ borderRadius: 8, border: '1px solid rgba(128,128,128,0.2)', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', background: 'var(--popover)', color: 'var(--popover-foreground)' }}
           formatter={(v: number) => formatValue ? formatValue(v) : v}
         />
-        <Bar dataKey="value" fill={color} radius={[6, 6, 0, 0]} maxBarSize={48} />
+        <Bar dataKey="value" fill={`url(#${gradientId})`} radius={[6, 6, 0, 0]} maxBarSize={48} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -123,7 +130,7 @@ export function ChartCard(props: {
 }) {
   const { title, subtitle, children, className = '' } = props;
   return (
-    <div className={`rounded-xl border border-border bg-card p-4 sm:p-5 ${className}`}>
+    <div className={`group rounded-xl border border-border bg-card p-4 sm:p-5 transition-shadow hover:shadow-md ${className}`}>
       <div className="mb-3">
         <h3 className="text-sm font-bold text-foreground">{title}</h3>
         {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
