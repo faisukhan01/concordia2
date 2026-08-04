@@ -109,6 +109,13 @@ class ConcordiaKeepAliveService : Service() {
         // doze mode). This is released when the service is destroyed.
         acquireWakeLock()
 
+        // v4.3.0: Schedule a periodic self-restart check via AlarmManager.
+        // This ensures the service restarts itself even if the user swipes
+        // the app away from recents (which kills the process + the service).
+        // START_STICKY only works for OS-initiated kills, NOT user swipes.
+        // The AlarmManager fires every 5 minutes and restarts the service.
+        scheduleSelfRestart()
+
         // Return START_STICKY so the OS restarts the service if it kills it
         // (e.g., under memory pressure). This maximizes uptime.
         return START_STICKY
@@ -117,6 +124,88 @@ class ConcordiaKeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? {
         // Not a bound service — return null.
         return null
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // v4.3.0: onTaskRemoved — called when the user swipes the app away
+    // from the recents screen. This is the #1 cause of "app closed = no
+    // notifications": swiping kills the entire process including this
+    // foreground service.
+    //
+    // We immediately restart the service so it keeps running in the
+    // background. This is the SAME mechanism used by WhatsApp/Telegram —
+    // when you swipe them away, their notification service restarts.
+    // ═══════════════════════════════════════════════════════════════════
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        try {
+            // Schedule a restart of the service 1 second after the task is removed.
+            val restartIntent = Intent(applicationContext, ConcordiaKeepAliveService::class.java)
+            val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.app.PendingIntent.getForegroundService(
+                    applicationContext,
+                    1001,
+                    restartIntent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            } else {
+                android.app.PendingIntent.getService(
+                    applicationContext,
+                    1001,
+                    restartIntent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            }
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            alarmManager.set(
+                android.app.AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + 1000L,
+                pendingIntent
+            )
+            android.util.Log.i("ConcordiaKeepAlive", "✓ Scheduled service restart after task removal (swipe-away)")
+        } catch (e: Exception) {
+            android.util.Log.e("ConcordiaKeepAlive", "Failed to schedule restart: ${e.message}", e)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // v4.3.0: scheduleSelfRestart — schedules a periodic AlarmManager
+    // check every 5 minutes. If the service has been killed (by the OEM,
+    // by memory pressure, or by the user), the alarm fires and restarts
+    // it. This is a safety net that ensures the keep-alive service is
+    // ALWAYS running, which is critical for FCM delivery on Chinese OEMs.
+    // ═══════════════════════════════════════════════════════════════════
+    private fun scheduleSelfRestart() {
+        try {
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            val restartIntent = Intent(applicationContext, ConcordiaKeepAliveService::class.java)
+            val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.app.PendingIntent.getForegroundService(
+                    applicationContext,
+                    1002,
+                    restartIntent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            } else {
+                android.app.PendingIntent.getService(
+                    applicationContext,
+                    1002,
+                    restartIntent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            }
+            // Schedule a repeating alarm every 5 minutes (RTC_WAKEUP wakes the
+            // CPU). setInexactRepeating is more battery-friendly than setRepeating
+            // and is sufficient for our purpose (just a keep-alive check).
+            alarmManager.setInexactRepeating(
+                android.app.AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + 5 * 60 * 1000L, // first fire in 5 min
+                5 * 60 * 1000L, // repeat every 5 min
+                pendingIntent
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("ConcordiaKeepAlive", "Failed to schedule self-restart: ${e.message}", e)
+        }
     }
 
     override fun onDestroy() {

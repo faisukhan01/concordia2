@@ -114,6 +114,35 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the app process alive so that real-time push notifications (announcements, exam alerts, fee reminders, attendance, marks) from Concordia College are delivered reliably on devices that aggressively kill background apps (Realme, Xiaomi, Huawei, Oppo, Vivo). This is the same mechanism messaging apps use for reliable message delivery." />
         </service>
+
+        <!-- ════════════════════════════════════════════════════════════════
+             v4.3.0: BOOT RECEIVER — restarts the keep-alive service after
+             phone reboot or app update.
+
+             Without this, after a phone reboot the keep-alive service is
+             NOT running until the user manually opens the app. This means
+             FCM pushes would be unreliable (the app process isn't alive to
+             receive them) — the user would miss notifications.
+
+             This receiver listens for:
+               • BOOT_COMPLETED — phone just booted
+               • MY_PACKAGE_REPLACED — app was updated to a new version
+               • QUICKBOOT_POWERON — OEM-specific boot (Xiaomi/Huawei)
+
+             and immediately restarts the keep-alive service. This is the
+             SAME mechanism WhatsApp/Telegram/Signal use.
+             ════════════════════════════════════════════════════════════════ -->
+        <receiver
+            android:name=".ConcordiaBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
     <queries>
         <intent>
