@@ -203,7 +203,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.1.0';
+      const LATEST_APP_VERSION = '4.2.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -2089,11 +2089,17 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           args: [JSON.stringify(records), user.id, existingId],
         });
         // Notify students/parents of the update (push) + ALL staff (v4.1.0)
+        // v4.2.0: ALSO notify PRESENT students (user explicitly asked for
+        // present OR absent notifications, not just absent/late).
         try {
           const { sendPushToUsers, sendPushToStaff, fcmEnabled } = await import('./fcm');
           if (fcmEnabled()) {
-            const absent = records.filter((r: any) => r.status === 'absent').map((r: any) => r.studentId).filter(Boolean);
-            const late = records.filter((r: any) => r.status === 'late').map((r: any) => r.studentId).filter(Boolean);
+            const present = records.filter((r: any) => r.status === 'present' || r.status === 'Present').map((r: any) => r.studentId).filter(Boolean);
+            const absent = records.filter((r: any) => r.status === 'absent' || r.status === 'Absent').map((r: any) => r.studentId).filter(Boolean);
+            const late = records.filter((r: any) => r.status === 'late' || r.status === 'Late').map((r: any) => r.studentId).filter(Boolean);
+            if (present.length > 0) {
+              await sendPushToUsers(present, 'attendance', `✅ Attendance marked`, `You were marked PRESENT on ${date}.`, { route: 'attendance', date });
+            }
             if (absent.length > 0) {
               await sendPushToUsers(absent, 'attendance', `📋 Attendance marked`, `You were marked ABSENT on ${date}.`, { route: 'attendance', date });
             }
@@ -2103,7 +2109,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
             await sendPushToStaff(
               'attendance',
               `📋 Attendance updated`,
-              `${user.name || 'A teacher'} updated attendance on ${date} — ${absent.length} absent, ${late.length} late.`,
+              `${user.name || 'A teacher'} updated attendance on ${date} — ${present.length} present, ${absent.length} absent, ${late.length} late.`,
               { route: 'attendance', date },
             );
           }
@@ -2116,12 +2122,18 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO attendance (id, branchId, classId, date, teacherId, records) VALUES (?, ?, ?, ?, ?, ?)',
         args: [id, user.branchId, classId || null, date, user.id, JSON.stringify(records)],
       });
-      // Notify absent/late students (push) + ALL staff (v4.1.0 staff visibility)
+      // Notify present/absent/late students (push) + ALL staff (v4.1.0 staff visibility)
+      // v4.2.0: ALSO notify PRESENT students (user explicitly asked for
+      // present OR absent notifications, not just absent/late).
       try {
         const { sendPushToUsers, sendPushToStaff, fcmEnabled } = await import('./fcm');
         if (fcmEnabled()) {
-          const absent = records.filter((r: any) => r.status === 'absent').map((r: any) => r.studentId).filter(Boolean);
-          const late = records.filter((r: any) => r.status === 'late').map((r: any) => r.studentId).filter(Boolean);
+          const present = records.filter((r: any) => r.status === 'present' || r.status === 'Present').map((r: any) => r.studentId).filter(Boolean);
+          const absent = records.filter((r: any) => r.status === 'absent' || r.status === 'Absent').map((r: any) => r.studentId).filter(Boolean);
+          const late = records.filter((r: any) => r.status === 'late' || r.status === 'Late').map((r: any) => r.studentId).filter(Boolean);
+          if (present.length > 0) {
+            await sendPushToUsers(present, 'attendance', `✅ Attendance marked`, `You were marked PRESENT on ${date}.`, { route: 'attendance', date });
+          }
           if (absent.length > 0) {
             await sendPushToUsers(absent, 'attendance', `📋 Attendance marked`, `You were marked ABSENT on ${date}.`, { route: 'attendance', date });
           }
@@ -2132,7 +2144,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           await sendPushToStaff(
             'attendance',
             `📋 Attendance marked`,
-            `${user.name || 'A teacher'} marked attendance on ${date} — ${absent.length} absent, ${late.length} late.`,
+            `${user.name || 'A teacher'} marked attendance on ${date} — ${present.length} present, ${absent.length} absent, ${late.length} late.`,
             { route: 'attendance', date },
           );
         }
