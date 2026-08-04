@@ -6,7 +6,7 @@ import { useApp } from '@/lib/store';
 import { ROLE_MODULES, roleAccent } from '@/lib/role-modules';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { BrandLogo } from '@/components/brand-logo';
 import {
@@ -30,7 +30,10 @@ import { HelpPage } from './help-page';
 import { CommandPalette } from './command-palette';
 import { OnboardingTips } from '@/components/onboarding/onboarding-tooltips';
 import { HelpWidget } from '@/components/ui/help-widget';
+import { ProfileDropdown } from '@/components/portal/profile-dropdown';
+import { WhatsNewDialog, useWhatsNewAutoOpen } from '@/components/portal/whats-new-dialog';
 import { api, setOnBlocked } from '@/lib/api';
+import { useAppUpdateChecker } from '@/lib/use-app-update-checker';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin, showLocalNotification } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
 import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle, ShieldAlert } from 'lucide-react';
@@ -94,6 +97,7 @@ function formatRelativeTime(iso: string): string {
 
 function SidebarContent({ role, collapsed, groupOpen, setGroupOpen, activeModule, setActiveModule, setMobileOpen, user, logout }: any) {
   const groups = ROLE_MODULES[role] || [];
+  const appUpdateAvailable = useApp((s: any) => s.appUpdateAvailable);
   return (
     <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
       {/* ─── Brand header — fixed 64px height, perfectly aligned with the top bar ─── */}
@@ -133,6 +137,8 @@ function SidebarContent({ role, collapsed, groupOpen, setGroupOpen, activeModule
                   <div className="space-y-0.5">
                     {group.items.map((m: any) => {
                       const isActive = activeModule === m.id;
+                      const isUpdateBtn = m.id === 'download-app';
+                      const showUpdateBadge = isUpdateBtn && appUpdateAvailable && !isActive;
                       return (
                         <button
                           key={m.id}
@@ -143,14 +149,35 @@ function SidebarContent({ role, collapsed, groupOpen, setGroupOpen, activeModule
                             collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
                             isActive
                               ? 'bg-[#F26522] text-white shadow-sm shadow-[#F26522]/20'
-                              : 'text-gray-600 hover:bg-[#FFF0E8] hover:text-[#F26522]'
+                              : showUpdateBadge
+                                ? 'bg-[#FFF0E8] text-[#F26522] ring-1 ring-[#F26522]/30 font-bold'
+                                : 'text-gray-600 hover:bg-[#FFF0E8] hover:text-[#F26522]'
                           )}
                         >
                           <m.icon className={cn(
                             'h-[17px] w-[17px] shrink-0 transition-colors',
-                            isActive ? 'text-white' : 'text-gray-400 group-hover:text-[#F26522]'
+                            isActive ? 'text-white' : showUpdateBadge ? 'text-[#F26522]' : 'text-gray-400 group-hover:text-[#F26522]'
                           )} />
                           {!collapsed && <span className="truncate flex-1 text-left">{m.name}</span>}
+                          {/* Update Available badge */}
+                          {showUpdateBadge && !collapsed && (
+                            <span className="flex items-center gap-1 shrink-0">
+                              <span className="relative flex h-1.5 w-1.5">
+                                <span className="absolute inline-flex h-full w-full rounded-full bg-[#F26522] opacity-75 animate-ping" />
+                                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#F26522]" />
+                              </span>
+                              <span className="text-[9px] font-bold uppercase tracking-wide text-[#F26522] bg-white px-1.5 py-0.5 rounded-full border border-[#F26522]/20">
+                                New
+                              </span>
+                            </span>
+                          )}
+                          {/* Collapsed mode: just a dot */}
+                          {showUpdateBadge && collapsed && (
+                            <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
+                              <span className="absolute inline-flex h-full w-full rounded-full bg-[#F26522] opacity-75 animate-ping" />
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#F26522] ring-1 ring-white" />
+                            </span>
+                          )}
                         </button>
                       );
                     })}
@@ -167,6 +194,9 @@ function SidebarContent({ role, collapsed, groupOpen, setGroupOpen, activeModule
         {!collapsed ? (
           <div className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-[#FFF0E8] transition-colors group">
             <Avatar className="h-9 w-9 shrink-0 ring-1 ring-gray-200">
+              {user?.photoUrl ? (
+                <AvatarImage src={user.photoUrl} alt={user?.name || 'User'} className="object-cover" />
+              ) : null}
               <AvatarFallback
                 className="text-white text-xs font-bold"
                 style={{ background: 'linear-gradient(135deg, #F26522 0%, #D4541E 100%)' }}
@@ -199,6 +229,32 @@ export function RolePortal() {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [blockedMsg, setBlockedMsg] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  // v4.6.0: Silent app-update checker — shows a badge on the sidebar
+  // "Update App" button when a new version is available. Replaces the
+  // annoying "update your app" push notifications.
+  useAppUpdateChecker();
+  // v4.5.2: What's New dialog (auto-opens once per version).
+  const [whatsNewOpen, setWhatsNewOpen] = useWhatsNewAutoOpen();
+  // v4.5.2: Snooze the "must change password" banner for 7 days. The banner
+  // re-appears automatically after the snooze window expires, so the user
+  // is still nudged to secure their account — just not on every single page.
+  const [pwBannerSnoozed, setPwBannerSnoozed] = useState(false);
+  useEffect(() => {
+    try {
+      const snoozedAt = Number(localStorage.getItem('concordia:pw-banner-snoozed') || 0);
+      const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+      if (snoozedAt && Date.now() - snoozedAt < SEVEN_DAYS) {
+        setPwBannerSnoozed(true);
+      } else if (snoozedAt) {
+        // expired — clear it so the banner shows again.
+        localStorage.removeItem('concordia:pw-banner-snoozed');
+      }
+    } catch {}
+  }, []);
+  const snoozePwBanner = () => {
+    try { localStorage.setItem('concordia:pw-banner-snoozed', String(Date.now())); } catch {}
+    setPwBannerSnoozed(true);
+  };
 
   // --- Notifications dropdown state ---
   const [notifOpen, setNotifOpen] = useState(false);
@@ -1493,19 +1549,28 @@ export function RolePortal() {
                 )}
               </AnimatePresence>
             </div>
-            <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-border">
-              <Avatar className="h-8 w-8 ring-1 ring-gray-200">
-                <AvatarFallback
-                  className="text-white text-[11px] font-bold"
-                  style={{ background: 'linear-gradient(135deg, #F26522 0%, #D4541E 100%)' }}
-                >
-                  {(user?.name || 'A').split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden md:block leading-tight">
-                <div className="text-[13px] font-semibold text-[#1A1A1A] truncate max-w-[160px]">{user?.name}</div>
-                <div className="text-[11px] text-gray-400 truncate max-w-[160px]">{user?.roleLabel}</div>
-              </div>
+            {/* v4.5.2: Profile dropdown menu — replaces the static avatar+name block.
+                Clicking opens a Radix DropdownMenu with: My Profile, Notifications,
+                Help & Support, What's New, Download App, Sign Out. Shows photoUrl. */}
+            <div className="flex items-center pl-1.5 sm:pl-2 sm:border-l border-border">
+              <ProfileDropdown
+                user={user ? {
+                  id: user.id,
+                  name: user.name,
+                  email: user.email,
+                  role: user.role,
+                  roleLabel: user.roleLabel,
+                  photoUrl: user.photoUrl ?? null,
+                  campus: user.campus,
+                  rollNo: user.rollNo,
+                } : null}
+                onNavigate={(id) => setActiveModule(id)}
+                onShowWhatsNew={() => setWhatsNewOpen(true)}
+                onDownloadApp={() => {
+                  if (typeof window !== 'undefined') window.open('/download', '_blank');
+                }}
+                onSignOut={logout}
+              />
             </div>
           </div>
         </header>
@@ -1513,25 +1578,60 @@ export function RolePortal() {
         <main className="flex-1 p-4 sm:p-6 overflow-x-hidden">
           {/* Onboarding tips banner — dismissible, remembered via localStorage */}
           <OnboardingTips />
-          {/* Must change password banner — shown on ALL portals when user has default/admin-assigned password */}
-          {user?.mustChangePassword && activeModule !== 'settings' && (
+          {/* Must change password banner — shown on ALL portals when user has
+              default/admin-assigned password. v4.5.2: snoozeable for 7 days so
+              it doesn't follow the user on every page forever. Re-appears
+              automatically after the snooze window expires. */}
+          {user?.mustChangePassword && activeModule !== 'settings' && !pwBannerSnoozed && (
             <motion.div
-              initial={{ opacity: 0, y: -10 }}
+              initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-center justify-between gap-3 shadow-sm"
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.25 }}
+              className="mb-4"
             >
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-amber-200/80 grid place-items-center shrink-0">
-                  <Shield className="h-5 w-5 text-amber-700" />
-                </div>
-                <div>
-                  <div className="font-semibold text-sm text-amber-900">Please change your password</div>
-                  <div className="text-xs text-amber-800">You're using a password assigned by your administrator. Change it now to secure your account.</div>
+              <div className="relative overflow-hidden rounded-xl border border-rose-200/70 bg-white shadow-sm">
+                {/* Left accent bar */}
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-rose-500 to-orange-500" />
+                {/* Soft decorative gradient */}
+                <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-rose-50/80 blur-2xl" aria-hidden />
+
+                <div className="relative flex items-center gap-3.5 py-3 pl-4 pr-3">
+                  {/* Icon */}
+                  <div className="relative h-9 w-9 shrink-0">
+                    <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-rose-500 to-orange-500 shadow-sm" />
+                    <Shield className="absolute inset-0 m-auto h-4 w-4 text-white" strokeWidth={2.2} />
+                  </div>
+
+                  {/* Text */}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold text-gray-900">
+                      Secure your account
+                    </div>
+                    <div className="text-[12px] text-gray-500 mt-0.5 leading-snug">
+                      You're using an admin-assigned password. Please change it to protect your account.
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={snoozePwBanner}
+                      title="Snooze for 7 days"
+                      className="hidden sm:flex h-7 px-2.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-md transition-colors"
+                    >
+                      Later
+                    </button>
+                    <button
+                      onClick={() => setActiveModule('settings')}
+                      className="h-7 px-3.5 text-[11px] font-semibold text-white bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 rounded-md transition-all shadow-sm"
+                    >
+                      Change now
+                    </button>
+                  </div>
                 </div>
               </div>
-              <Button size="sm" className="bg-[#F26522] hover:bg-[#D4541E] text-white shrink-0 shadow-sm" onClick={() => setActiveModule('settings')}>
-                Change now
-              </Button>
             </motion.div>
           )}
           <AnimatePresence mode="wait">

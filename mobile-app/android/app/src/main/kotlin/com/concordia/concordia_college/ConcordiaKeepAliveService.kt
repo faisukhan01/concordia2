@@ -233,12 +233,17 @@ class ConcordiaKeepAliveService : Service() {
                     android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
                 )
             }
-            // v4.5.0: setAndAllowWhileIdle fires even in Doze mode (the CPU
-            // wakes up). We re-schedule on every onStartCommand, so this
-            // effectively creates a ~5-minute periodic restart check.
+            // v4.6.0: CHANGED from 5 min → 60 seconds for FASTER recovery.
+            // The user reported that notifications don't arrive when the app
+            // is closed. The 5-min restart window was too long — if a push
+            // arrived during those 5 min, the foreground service was dead
+            // and couldn't help. 60 seconds gives the service a much faster
+            // recovery window while still being battery-friendly (the alarm
+            // only fires if the service is actually dead — if it's running,
+            // onStartCommand is a no-op).
             alarmManager.setAndAllowWhileIdle(
                 android.app.AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + 5 * 60 * 1000L, // first fire in 5 min
+                System.currentTimeMillis() + 60 * 1000L, // first fire in 60 sec
                 pendingIntent
             )
         } catch (e: Exception) {
@@ -270,7 +275,8 @@ class ConcordiaKeepAliveService : Service() {
                 2001,
                 android.content.ComponentName(this, ConcordiaRestartJobService::class.java)
             )
-                .setPeriodic(15 * 60 * 1000L) // 15 minutes
+                // v4.6.0: 15 min → 5 min for faster recovery after app kill.
+                .setPeriodic(5 * 60 * 1000L) // 5 minutes
                 .setPersisted(true) // survives reboot
                 .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_ANY)
                 .build()

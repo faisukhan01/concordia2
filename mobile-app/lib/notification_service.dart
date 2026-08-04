@@ -546,7 +546,7 @@ class NotificationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       // Include the version in the key so a new version re-prompts once.
-      final flagKey = 'v4.5.0_oem_prompt_shown';
+      final flagKey = 'v4.6.0_oem_prompt_shown';
       final alreadyShown = prefs.getBool(flagKey) ?? false;
       if (alreadyShown) {
         debugPrint('[NotificationService] OEM prompt already shown for this version — skipping');
@@ -564,98 +564,149 @@ class NotificationService {
       // if init() runs again before the dialog is dismissed).
       await prefs.setBool(flagKey, true);
 
-      // Build the dialog content based on what's needed.
-      final List<String> steps = [];
-      if (batteryOptDenied) {
-        steps.add(
-          '1. Battery Optimization — tap "Enable Battery Whitelist" below, '
-          'then choose "Allow" / "Don\'t optimize" for Concordia College.',
-        );
-      }
-      if (needsAutoStart) {
-        final oemLabel = _oemDisplayName(oem);
-        steps.add(
-          '${batteryOptDenied ? '2' : '1'}. Auto-start ($oemLabel) — tap "Open Auto-start Settings" below, '
-          'then find Concordia College in the list and enable it.',
-        );
-      }
-
-      // Show the dialog.
+      // v4.6.0: Completely redesigned dialog — SHORT, CLEAN, AESTHETIC.
+      // Old dialog was too wordy and confused users. New dialog uses a
+      // simple card layout with clear visual hierarchy and minimal text.
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
-        barrierDismissible: false, // user MUST tap a button
+        barrierDismissible: false,
         builder: (dialogContext) {
-          return AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.notifications_active, color: Color(0xFFF26522)),
-                SizedBox(width: 8),
-                Expanded(child: Text('Enable Notifications')),
-              ],
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-            content: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'To receive notifications when the app is closed (like WhatsApp), '
-                    'you need to enable the following setting(s):',
-                    style: TextStyle(fontSize: 14),
+                  // ── Header: icon + title ──
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFF26522), Color(0xFFFF8A4C)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.notifications_active_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Enable Notifications',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1A1A1A),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  ...steps.map((s) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 16),
+
+                  // ── Short description ──
+                  const Text(
+                    'Get alerts even when the app is closed — just like WhatsApp.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF666666),
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Action cards ──
+                  if (batteryOptDenied) ...[
+                    _SettingCard(
+                      icon: Icons.battery_full_rounded,
+                      title: 'Battery Whitelist',
+                      subtitle: 'Allow background activity',
+                      onTap: () => _requestIgnoreBatteryOptimizations(),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (needsAutoStart) ...[
+                    _SettingCard(
+                      icon: Icons.power_settings_new_rounded,
+                      title: 'Auto-start',
+                      subtitle: 'Enable for ${_oemDisplayName(oem)}',
+                      onTap: () => openAutoStartSettings(),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+
+                  // ── Warning ──
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF3E0),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
                       children: [
-                        const Icon(Icons.check_circle, size: 16, color: Color(0xFFF26522)),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(s, style: const TextStyle(fontSize: 13))),
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 16,
+                          color: Color(0xFFF26522),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Without these, notifications won\'t arrive when the app is closed.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFFD4541E),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                  )),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF26522).withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFF26522).withOpacity(0.2)),
-                    ),
-                    child: const Text(
-                      '⚠ Without these settings, your phone will kill the app when '
-                      'closed and you will NOT receive notifications.',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Done button ──
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF26522),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'I\'ve done it',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            actions: [
-              if (needsAutoStart)
-                TextButton(
-                  onPressed: () {
-                    openAutoStartSettings();
-                  },
-                  child: const Text('Open Auto-start Settings'),
-                ),
-              if (batteryOptDenied)
-                TextButton(
-                  onPressed: () {
-                    _requestIgnoreBatteryOptimizations();
-                  },
-                  child: const Text('Enable Battery Whitelist'),
-                ),
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFF26522),
-                ),
-                child: const Text('I\'ve done it'),
-              ),
-            ],
           );
         },
       );
@@ -869,5 +920,81 @@ class NotificationService {
       debugPrint('[NotificationService] openAutoStartSettings failed: $e');
       return false;
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// v4.6.0: _SettingCard — a small reusable card widget used in the
+// OEM settings prompt dialog. Shows an icon + title + subtitle + chevron,
+// with a tap handler. Designed to be clean, minimal, and tappable.
+// ═══════════════════════════════════════════════════════════════════════
+class _SettingCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _SettingCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFF8F9FA),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF26522).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: const Color(0xFFF26522), size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1A1A1A),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF999999),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFFCCCCCC),
+                size: 22,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

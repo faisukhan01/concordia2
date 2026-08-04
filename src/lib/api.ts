@@ -601,6 +601,11 @@ export const api = {
     request<{ success: boolean; recipients: number; pushed: number; fcmConfigured: boolean }>('notifications/broadcast-app-update', { method: 'POST', body: JSON.stringify({ version }) }),
   checkAppVersion: (current: string) =>
     request<{ latest: string; current: string | null; updateAvailable: boolean; downloadUrl: string; notificationCreated: boolean }>(`app/version-check?current=${encodeURIComponent(current)}`),
+  // v4.6.0: Silent update check — does NOT send a push notification.
+  // Returns whether an update is available so the web app can show a
+  // badge on the sidebar "Update App" button instead of spamming pushes.
+  getAppUpdateStatus: (current: string) =>
+    request<{ latest: string; current: string | null; updateAvailable: boolean; downloadUrl: string }>(`app/update-status?current=${encodeURIComponent(current)}`),
   getFcmStatus: () =>
     request<{
       fcmEnabled: boolean;
