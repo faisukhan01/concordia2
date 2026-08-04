@@ -31,7 +31,7 @@ import { HelpWidget } from '@/components/ui/help-widget';
 import { api, setOnBlocked } from '@/lib/api';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
-import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle } from 'lucide-react';
+import { Megaphone, CalendarDays, ClipboardList, Wallet, BadgeCheck, Download, Send, Activity, Smartphone, Server, CheckCircle2 as CheckCircle, XCircle, ShieldAlert } from 'lucide-react';
 
 // Notification icon + color mapping per type.
 const notifIconMap: Record<string, { Icon: any; text: string; bg: string }> = {
@@ -398,20 +398,42 @@ export function RolePortal() {
     }
   };
 
-  // Send a test push notification (only available inside the native app).
+  // Send a test push notification. Available both inside the native app
+  // (from the notification panel) and from the FCM diagnostics modal (for
+  // admins on desktop). Returns detailed diagnostic info.
   const [sendingTest, setSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
   const onSendTest = async () => {
     setSendingTest(true);
+    setTestResult(null);
     try {
       const res = await api.sendTestNotification();
+      setTestResult(res);
       if (res?.success) {
-        toast({
-          title: 'Test push sent!',
-          description: res.pushed > 0
-            ? `Delivered to ${res.pushed} device(s). Check your phone's notification panel.`
-            : 'No registered devices yet — open the app on your phone first.',
-        });
-        // Refresh the in-app bell so the test notification shows up there too.
+        if (!res.fcmEnabled) {
+          toast({
+            title: 'Push notifications not configured',
+            description: 'The server FIREBASE_SERVICE_ACCOUNT env var is not set. Ask the admin to add it in Vercel.',
+            variant: 'destructive',
+          });
+        } else if (res.tokenCount === 0) {
+          toast({
+            title: 'No device registered',
+            description: 'Your phone has not registered its FCM token yet. Open the Concordia app on your phone and sign in, then try again.',
+            variant: 'destructive',
+          });
+        } else if (res.fcmSuccess > 0) {
+          toast({
+            title: '✓ Test push sent!',
+            description: `FCM accepted delivery for ${res.fcmSuccess} of ${res.tokenCount} device(s). Check your phone's notification panel — it should arrive within a few seconds. If it doesn't, see the Realme setup steps below.`,
+          });
+        } else {
+          toast({
+            title: 'FCM delivery failed',
+            description: `${res.fcmFailed} of ${res.tokenCount} device(s) failed. See the error details below.`,
+            variant: 'destructive',
+          });
+        }
         setTimeout(fetchNotifs, 500);
       } else {
         toast({
@@ -1224,6 +1246,147 @@ export function RolePortal() {
                               )}
                             </div>
 
+                            {/* Send Test Push + Result — the fastest way to
+                                verify the ENTIRE pipeline end-to-end. Sends
+                                a real FCM push to THIS user's devices and
+                                shows the detailed result (token count, FCM
+                                success/failure, error messages). */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <Send className="h-4 w-4 text-gray-500" />
+                                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-600">Test Push</span>
+                                </div>
+                                <button
+                                  onClick={onSendTest}
+                                  disabled={sendingTest}
+                                  className="text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] disabled:opacity-60 disabled:cursor-not-allowed px-3 py-1.5 rounded-md transition inline-flex items-center gap-1.5"
+                                >
+                                  <Sparkles className={cn('h-3 w-3', sendingTest && 'animate-spin')} />
+                                  {sendingTest ? 'Sending…' : 'Send test push'}
+                                </button>
+                              </div>
+                              {testResult && (
+                                <div className="space-y-2 mt-3">
+                                  {testResult.fcmEnabled ? (
+                                    <div className="grid grid-cols-3 gap-2 text-center">
+                                      <div className="rounded-lg bg-white border border-gray-200 px-2 py-2">
+                                        <div className="text-lg font-bold text-gray-900 tabular-nums">{testResult.tokenCount}</div>
+                                        <div className="text-[10px] text-gray-500 uppercase tracking-wide">Devices</div>
+                                      </div>
+                                      <div className="rounded-lg bg-white border border-emerald-200 px-2 py-2">
+                                        <div className="text-lg font-bold text-emerald-700 tabular-nums">{testResult.fcmSuccess}</div>
+                                        <div className="text-[10px] text-emerald-600 uppercase tracking-wide">FCM OK</div>
+                                      </div>
+                                      <div className="rounded-lg bg-white border border-rose-200 px-2 py-2">
+                                        <div className="text-lg font-bold text-rose-700 tabular-nums">{testResult.fcmFailed}</div>
+                                        <div className="text-[10px] text-rose-600 uppercase tracking-wide">Failed</div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="rounded-md bg-rose-50 border border-rose-200 px-2.5 py-2 text-[11px] text-rose-700">
+                                      FIREBASE_SERVICE_ACCOUNT env var is not set on the server. Push notifications cannot be sent until it's configured in Vercel.
+                                    </div>
+                                  )}
+                                  {testResult.tokenCount === 0 && (
+                                    <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] text-amber-800 leading-relaxed">
+                                      <strong>No devices registered.</strong> Open the Concordia app on your phone, sign in, and wait 30 seconds. Then tap "Re-register token" above, followed by "Send test push" again.
+                                    </div>
+                                  )}
+                                  {testResult.errors && testResult.errors.length > 0 && (
+                                    <div className="rounded-md bg-rose-50 border border-rose-200 p-2.5 space-y-1.5">
+                                      <p className="text-[11px] font-semibold text-rose-900">FCM errors:</p>
+                                      {testResult.errors.map((err: any, i: number) => (
+                                        <div key={i} className="text-[10px] text-rose-700 font-mono break-all">
+                                          <span className="text-rose-500">{err.tokenPreview}:</span> {err.error}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {testResult.fcmSuccess > 0 && (
+                                    <div className="rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-[11px] text-emerald-800 leading-relaxed">
+                                      <strong>FCM accepted the push.</strong> If your phone still doesn't show the notification within 30 seconds, the issue is on the device side — see the Realme / Chinese OEM setup steps below. The most common cause is that the app's "Auto-start" permission is off (Realme requires this manually).
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Device info + Realme / Chinese OEM setup guidance.
+                                Reads window.concordiaNative.deviceInfo (injected
+                                by the Flutter shell in v3.9.0+) and shows
+                                OEM-specific steps for enabling background
+                                delivery. This is the #1 fix for Realme phones. */}
+                            {(() => {
+                              const di = typeof window !== 'undefined' ? (window as any).concordiaNative?.deviceInfo : null;
+                              if (!di) return null;
+                              const isRealme = di.oemFamily === 'realme' || di.oemFamily === 'oppo' || di.oemFamily === 'oneplus';
+                              const isXiaomi = di.oemFamily === 'xiaomi';
+                              const isHuawei = di.oemFamily === 'huawei';
+                              const isVivo = di.oemFamily === 'vivo';
+                              const needsAutoStart = di.needsAutoStart;
+                              if (!needsAutoStart) return null;
+                              return (
+                                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-3">
+                                  <div className="flex items-center gap-2">
+                                    <ShieldAlert className="h-4 w-4 text-amber-700" />
+                                    <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                                      {isRealme ? 'Realme' : isXiaomi ? 'Xiaomi / Redmi' : isHuawei ? 'Huawei / Honor' : isVivo ? 'Vivo' : 'Chinese OEM'} Setup Required
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-amber-900 leading-relaxed">
+                                    <strong>Detected: {di.manufacturer} {di.model}</strong> (Android {di.androidVersion}). Your device manufacturer uses aggressive battery management that kills background apps — even with all standard permissions granted. You MUST enable the following proprietary settings for WhatsApp-style always-on notifications:
+                                  </p>
+                                  <ol className="text-[11px] text-amber-900 leading-relaxed space-y-1.5 list-decimal list-inside">
+                                    {isRealme && (
+                                      <>
+                                        <li><strong>Settings → App management → Auto-start</strong> → find "Concordia College" → toggle it <strong>ON</strong>.</li>
+                                        <li><strong>Settings → App management → Concordia College → Battery</strong> → select "Allow background activity" (NOT "Optimize" or "Restrict").</li>
+                                        <li><strong>Settings → App management → Concordia College → Notifications</strong> → ensure "Concordia Notifications" channel is set to <strong>High importance</strong> with sound. Also enable "Allow notifications while screen off".</li>
+                                        <li>Recents screen: pull down on the Concordia app card → tap the <strong>🔒 lock icon</strong> to pin/lock it (prevents Realme from killing it).</li>
+                                      </>
+                                    )}
+                                    {isXiaomi && (
+                                      <>
+                                        <li><strong>Security app → Permissions → Autostart</strong> → find "Concordia College" → toggle it <strong>ON</strong>.</li>
+                                        <li><strong>Settings → Apps → Concordia College → Battery saver</strong> → select "No restrictions".</li>
+                                        <li>Recents: long-press the Concordia card → tap the <strong>🔒 lock</strong> icon.</li>
+                                      </>
+                                    )}
+                                    {isHuawei && (
+                                      <>
+                                        <li><strong>Phone Manager → Startup management</strong> → find "Concordia College" → toggle it <strong>ON</strong>.</li>
+                                        <li><strong>Settings → Apps → Concordia College → Battery</strong> → "App launch" → enable "Auto-launch", "Secondary launch", "Run in background".</li>
+                                      </>
+                                    )}
+                                    {isVivo && (
+                                      <>
+                                        <li><strong>i Manager → App manager → Auto-start manager</strong> → find "Concordia College" → toggle it <strong>ON</strong>.</li>
+                                        <li><strong>Settings → Battery → Background power consumption</strong> → find "Concordia College" → set to "Allow background".</li>
+                                      </>
+                                    )}
+                                    {!isRealme && !isXiaomi && !isHuawei && !isVivo && (
+                                      <li>Open your phone's <strong>Security</strong> or <strong>Phone Manager</strong> app → find <strong>Auto-start</strong> or <strong>Startup management</strong> → enable Concordia College.</li>
+                                    )}
+                                  </ol>
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <span className="text-[10px] text-amber-700">Battery optimization:</span>
+                                    {di.isIgnoringBatteryOptimizations ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700"><CheckCircle className="h-3 w-3" /> Whitelisted</span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700"><XCircle className="h-3 w-3" /> Not whitelisted</span>
+                                    )}
+                                    <span className="text-[10px] text-amber-700">· Keep-alive service:</span>
+                                    {di.keepAliveRunning ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700"><CheckCircle className="h-3 w-3" /> Running</span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700"><XCircle className="h-3 w-3" /> Stopped</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
                             {/* Help text */}
                             <div className="rounded-lg bg-[#FFF4ED] border border-[#F26522]/20 p-3 space-y-2">
                               <p className="text-[11px] text-[#D4541E] leading-relaxed">
@@ -1234,6 +1397,9 @@ export function RolePortal() {
                               </p>
                               <p className="text-[11px] text-[#D4541E] leading-relaxed">
                                 <strong>If FCM push is DISABLED:</strong> The <code className="font-mono bg-white/50 px-1 rounded">FIREBASE_SERVICE_ACCOUNT</code> env var is missing or invalid on Vercel. Download the firebase-adminsdk JSON from Firebase Console → Project Settings → Service Accounts → Generate new private key, then set the entire JSON as the env var value in Vercel.
+                              </p>
+                              <p className="text-[11px] text-[#D4541E] leading-relaxed">
+                                <strong>v3.9.0 improvements:</strong> The app now creates the notification channel BEFORE Firebase init (so it always exists), starts a foreground keep-alive service (prevents Realme/Xiaomi from killing the app — same as WhatsApp), and re-registers the token every time you resume the app. Make sure you've updated to v3.9.0 or later.
                               </p>
                             </div>
                           </>

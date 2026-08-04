@@ -176,7 +176,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '3.8.0';
+      const LATEST_APP_VERSION = '3.9.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -328,23 +328,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     }
 
     // Send a TEST push notification to the logged-in user's devices.
-    // Useful for verifying the FCM pipeline end-to-end after setup.
+    // Returns DETAILED diagnostic info (token count, FCM success/failure,
+    // per-token error messages) so the user can pinpoint exactly where the
+    // delivery chain breaks.
     if (method === 'POST' && path === 'notifications/test') {
       const user = await requireAuth(req);
-      const { sendPushToUser, fcmEnabled } = await import('./fcm');
-      if (!fcmEnabled()) {
-        return NextResponse.json({
-          success: false,
-          error: 'FIREBASE_SERVICE_ACCOUNT env var is not set on the server. Ask the admin to add it in Vercel.',
-        }, { status: 503 });
-      }
-      const result = await sendPushToUser(
-        user.id,
-        'general',
-        '🔔 Concordia notifications are working!',
-        `Hi ${user.name?.split(' ')[0] || 'there'} — this is a test push notification. You'll receive real ones when announcements, exams, marks, attendance, or fees are updated.`,
-        { route: 'notifications' },
-      );
+      const { sendTestPushToUser } = await import('./fcm');
+      const result = await sendTestPushToUser(user.id);
       return NextResponse.json({ success: true, ...result });
     }
 

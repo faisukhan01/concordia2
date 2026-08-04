@@ -25,8 +25,8 @@ import { BrandLogo } from '@/components/brand-logo';
 // Always points to the LATEST GitHub release — no version baked into the URL.
 const APK_DOWNLOAD_URL =
   'https://github.com/faisukhan01/concordia2/releases/latest/download/concordia-college.apk';
-const APK_VERSION = 'v3.8.0';
-const APK_UPDATED = 'August 4, 2025';
+const APK_VERSION = 'v3.9.0';
+const APK_UPDATED = 'August 5, 2025';
 const APK_SIZE = '45 MB';
 const GITHUB_RELEASES = 'https://github.com/faisukhan01/concordia2/releases';
 

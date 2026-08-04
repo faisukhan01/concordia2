@@ -542,7 +542,16 @@ export const api = {
   markAllNotificationsRead: () =>
     request<{ success: boolean }>('notifications/read-all', { method: 'POST' }),
   sendTestNotification: () =>
-    request<{ success: boolean; notificationId: string; pushed: number }>('notifications/test', { method: 'POST' }),
+    request<{
+      success: boolean;
+      notificationId: string;
+      tokenCount: number;
+      tokenPreviews: string[];
+      fcmSuccess: number;
+      fcmFailed: number;
+      errors: Array<{ tokenPreview: string; error: string }>;
+      fcmEnabled: boolean;
+    }>('notifications/test', { method: 'POST' }),
   broadcastAppUpdate: (version?: string) =>
     request<{ success: boolean; recipients: number; pushed: number; fcmConfigured: boolean }>('notifications/broadcast-app-update', { method: 'POST', body: JSON.stringify({ version }) }),
   checkAppVersion: (current: string) =>

@@ -1,27 +1,24 @@
-// Concordia College — Push Notification Service
+// Concordia College — Push Notification Service (v3.9.0)
 //
 // Handles:
-//   1. Firebase initialization
-//   2. Requesting notification permission (Android 13+)
-//   3. Getting the FCM device token
-//   4. Creating the notification channel (Android)
-//   5. Listening for incoming push messages (foreground + background)
-//   6. Showing a local notification banner when a push arrives
-//   7. Forwarding the token + tap events to the WebView via JavaScript bridge
-//
-// The token is passed to the web app via `window.concordiaNative.registerToken(token)`,
-// which the web app's api.ts calls to POST /api/device-tokens.
+//   1. Creating the Android notification channel (FIRST — before Firebase)
+//   2. Starting the foreground keep-alive service (Realme/Chinese OEM fix)
+//   3. Firebase initialization
+//   4. Requesting notification permission (Android 13+)
+//   5. Getting the FCM device token
+//   6. Listening for incoming push messages (foreground + background)
+//   7. Showing a local notification banner when a push arrives
+//   8. Forwarding the token + tap events to the WebView via JavaScript bridge
 //
 // ─────────────────────────────────────────────────────────────────────────
-// HYBRID FCM PAYLOAD (WhatsApp-style) — v3.8.0
+// HYBRID FCM PAYLOAD (WhatsApp-style) — v3.8.0+
 // ─────────────────────────────────────────────────────────────────────────
 // The server sends BOTH a `notification` field AND a `data` field.
 //
 // BACKGROUND / TERMINATED (app closed):
 //   The Android OS ITSELF displays the notification via the system tray using
-//   the channel specified in `android.notification.channel_id` (which we
-//   create at app startup with sound + high importance). NO Dart code runs.
-//   This is the RELIABLE delivery path — it works even when the app is
+//   the channel specified in `android.notification.channel_id`. NO Dart code
+//   runs. This is the RELIABLE delivery path — it works even when the app is
 //   force-killed, because the OS (not the app) is responsible for showing
 //   the notification. This is exactly how WhatsApp/Telegram deliver messages.
 //
@@ -30,33 +27,29 @@
 //   app is in the foreground — so we show a local notification ourselves via
 //   flutter_local_notifications, with sound + vibration + heads-up banner.
 //
-// WHY NOT data-only (v3.6.1's approach)?
-//   Data-only required the app's background isolate to spin up so Dart could
-//   call `flutterLocalNotifications.show()`. On real Android devices —
-//   especially Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo) — the OS aggressively
-//   KILLS background isolates. The isolate never spun up, the local
-//   notification was never shown, and the user saw NOTHING. The hybrid
-//   approach delegates display to the OS, which always works.
+// ─────────────────────────────────────────────────────────────────────────
+// v3.9.0 CHANGES (Realme / Chinese OEM reliability):
+// ─────────────────────────────────────────────────────────────────────────
+//   1. CHANNEL CREATED FIRST — before Firebase.initializeApp(). If Firebase
+//      init hangs or fails (network issue, misconfigured google-services.json),
+//      the channel STILL gets created. Without the channel, the OS silently
+//      DROPS all background FCM notifications. This was a critical bug: if
+//      the app was killed during splash while Firebase was still initializing,
+//      the channel never existed, and NO notifications were ever shown.
 //
-// CHANNEL IMMUTABILITY:
-//   Android does NOT let apps change a channel's settings after creation.
-//   v3.7.0 used `concordia_notifications_v3`. v3.8.0 introduces `_v4` —
-//   a FRESH channel ID that forces Android to create a new channel with the
-//   correct sound + high importance. The old v1/v2/v3 channels are deleted at
-//   startup so they disappear from Settings.
+//   2. FOREGROUND SERVICE — we start ConcordiaKeepAliveService (a native
+//      Android foreground service) immediately after channel creation. This
+//      keeps the app process alive so Chinese OEMs (Realme, Xiaomi, Huawei,
+//      Oppo, Vivo, OnePlus) can't freeze/kill it. This is the SAME mechanism
+//      WhatsApp/Telegram use for reliable push delivery on those devices.
 //
-// BATTERY OPTIMIZATION (Chinese OEMs):
-//   v3.8.0 also prompts the user to whitelist the app from battery
-//   optimization. Without this, Xiaomi/Huawei/Oppo/Vivo aggressively kill the
-//   app in the background and even the OS-tray notification path can be
-//   delayed or dropped. This is the single most important setting for
-//   WhatsApp-style always-on delivery on those devices.
+//   3. DEVICE DETECTION — we expose device manufacturer info (Realme, Xiaomi,
+//      etc.) to the web app via a MethodChannel so it can show OEM-specific
+//      setup guidance (e.g., "enable Auto-start" on Realme).
 //
-// The background handler (`_firebaseMessagingBackgroundHandler`) is still
-// registered as a fallback — if the OS does spin up the isolate (e.g. on
-// stock Android with no battery optimization), it will ALSO show a local
-// notification. This is harmless (Android dedupes by notification ID) and
-// ensures the notification is shown even if the system-tray path fails.
+//   4. RESILIENT INIT — each step is in its own try/catch so a failure in
+//      one step doesn't block the others. The channel is created even if
+//      Firebase fails entirely.
 // ─────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
@@ -88,16 +81,12 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final flutterLocalNotifications = FlutterLocalNotificationsPlugin();
 
     // CRITICAL: Initialize the plugin in the background isolate too.
-    // Without this, `show()` may silently fail in the background isolate.
     const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
     await flutterLocalNotifications.initialize(
       const InitializationSettings(android: androidInit),
     );
 
     // Delete OLD channels (v1, v2, v3) so they disappear from Android settings.
-    // Android does NOT let apps change a channel's settings after creation,
-    // so the only fix for a channel created with broken sound by an older app
-    // version is to use a NEW channel ID (v4) and delete the old ones.
     final bgAndroidPlugin = flutterLocalNotifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
@@ -119,13 +108,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       ),
     );
 
-    // SHOW the local notification as a fallback. With the hybrid payload,
-    // the Android OS already shows a system-tray notification when the app
-    // is in the background/terminated. But on some devices (or if the
-    // system-tray path fails), the background isolate ALSO runs — so we show
-    // a local notification here too. Android dedupes by notification ID, and
-    // since we use a unique timestamp ID, this just ensures the notification
-    // is always visible.
+    // SHOW the local notification as a fallback.
     await flutterLocalNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title,
@@ -163,29 +146,20 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   // The Android notification channel ID — MUST match the one we set in the
-  // FCM payload on the server (`android.notification.channel_id`) AND in the
-  // AndroidManifest.xml (`com.google.firebase.messaging.default_notification_channel_id`).
-  //
-  // v4 (v3.8.0): We switched from `concordia_notifications_v3` →
-  // `concordia_notifications_v4`. Android does NOT let apps change a channel's
-  // settings after creation, so each release that needs to correct sound
-  // settings uses a FRESH channel ID. The old v1/v2/v3 channels are deleted
-  // at startup so they disappear from Settings, and a new v4 channel is
-  // created with the correct sound + high importance.
+  // FCM payload on the server AND in the AndroidManifest.xml.
   static const String _channelId = 'concordia_notifications_v4';
   static const String _channelName = 'Concordia Notifications';
   static const String _channelDesc =
       'Announcements, exams, marks, attendance, and fee reminders from Concordia College.';
 
-  // A JS callback the web app can set to receive the token + tap events.
-  // We invoke it via the WebView's JavaScript channel.
+  // JS callback channels.
   static const MethodChannel _channel = MethodChannel('concordia/fcm');
-
-  // Dedicated channel for the battery-optimization request. We use a separate
-  // channel so the native MainActivity handler is cleanly scoped to just this
-  // one platform call (no risk of method-name collisions with the FCM bridge).
   static const MethodChannel _batteryChannel =
       MethodChannel('concordia/battery');
+  static const MethodChannel _keepAliveChannel =
+      MethodChannel('concordia/keepalive');
+  static const MethodChannel _deviceChannel =
+      MethodChannel('concordia/device');
 
   bool _initialized = false;
 
@@ -193,44 +167,47 @@ class NotificationService {
     if (_initialized) return;
     _initialized = true;
 
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 1: CREATE THE NOTIFICATION CHANNEL — FIRST, BEFORE ANYTHING ELSE.
+    // ═══════════════════════════════════════════════════════════════════
+    // This is the MOST CRITICAL step. If the channel doesn't exist when a
+    // background FCM push arrives, the Android OS SILENTLY DROPS the
+    // notification (it can't find the channel_id referenced in the FCM
+    // payload). By creating the channel BEFORE Firebase init, we guarantee
+    // it exists even if Firebase fails to initialize (network issue, missing
+    // config, etc.).
+    //
+    // We also DELETE the old v1/v2/v3 channels here (not just in the main
+    // init below) so they're cleaned up as early as possible.
     try {
-      // 1. Initialize Firebase
-      await Firebase.initializeApp();
+      final androidPlugin = _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
+      // Delete old channels (no-op if they don't exist).
+      await androidPlugin?.deleteNotificationChannel('concordia_notifications');
+      await androidPlugin?.deleteNotificationChannel('concordia_notifications_v2');
+      await androidPlugin?.deleteNotificationChannel('concordia_notifications_v3');
+      // Create the fresh v4 channel with sound + vibration + high importance.
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _channelId,
+          _channelName,
+          description: _channelDesc,
+          importance: Importance.high,
+          playSound: true,
+          enableVibration: true,
+          showBadge: true,
+        ),
+      );
+      debugPrint('[NotificationService] ✓ v4 notification channel created (early)');
+    } catch (e) {
+      debugPrint('[NotificationService] channel setup failed: $e');
+    }
 
-      // 2. Create the Android notification channel (required for Android 8+).
-      //    Without this, notifications are silently dropped on Android 8+.
-      //    We use Importance.high so the notification makes a sound + appears as a heads-up banner.
-      //    We DELETE the old v1/v2/v3 channels so they don't confuse the user
-      //    in Android settings (they just disappear from the list), AND so
-      //    we bypass Android's channel immutability restriction (if v3 was
-      //    created by an older app version with broken sound, we can't fix
-      //    it — we can only use a new v4 channel ID).
-      try {
-        final androidPlugin = _localNotifications
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>();
-        // Delete old v1/v2/v3 channels (no-op if they don't exist).
-        await androidPlugin?.deleteNotificationChannel('concordia_notifications');
-        await androidPlugin?.deleteNotificationChannel('concordia_notifications_v2');
-        await androidPlugin?.deleteNotificationChannel('concordia_notifications_v3');
-        // Create the fresh v4 channel with sound + vibration.
-        await androidPlugin?.createNotificationChannel(
-          const AndroidNotificationChannel(
-            _channelId,
-            _channelName,
-            description: _channelDesc,
-            importance: Importance.high,
-            playSound: true,
-            enableVibration: true,
-            showBadge: true,
-          ),
-        );
-      } catch (e) {
-        debugPrint('[NotificationService] channel setup failed: $e');
-      }
-
-      // 3. Initialize the local notifications plugin (for foreground banners).
-      //    Use ic_notification (the white bell silhouette) for the status bar icon.
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 2: INITIALIZE LOCAL NOTIFICATIONS PLUGIN (for foreground banners).
+    // ═══════════════════════════════════════════════════════════════════
+    try {
       const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
       const iosInit = DarwinInitializationSettings(
         requestAlertPermission: true,
@@ -241,12 +218,72 @@ class NotificationService {
         const InitializationSettings(android: androidInit, iOS: iosInit),
         onDidReceiveNotificationResponse: _onNotificationTapped,
       );
+    } catch (e) {
+      debugPrint('[NotificationService] local notif init failed: $e');
+    }
 
-      // 4. Register the background handler.
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 3: START THE FOREGROUND KEEP-ALIVE SERVICE.
+    // ═══════════════════════════════════════════════════════════════════
+    // This is the #1 fix for Realme / Chinese OEMs. The foreground service
+    // keeps the app process alive so the OEM can't freeze/kill it. Without
+    // this, Realme UI aggressively kills the app in the background and even
+    // the OS-tray FCM notification path can be delayed or dropped.
+    //
+    // The service shows a low-priority persistent notification ("Concordia
+    // notifications are active") that does NOT make a sound. This is the
+    // same mechanism WhatsApp/Telegram use.
+    try {
+      await _keepAliveChannel.invokeMethod<bool>('start');
+      debugPrint('[NotificationService] ✓ foreground keep-alive service started');
+    } catch (e) {
+      debugPrint('[NotificationService] keep-alive service failed to start: $e');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 4: DETECT DEVICE MANUFACTURER (for Realme/Xiaomi guidance).
+    // ═══════════════════════════════════════════════════════════════════
+    try {
+      final info = await _deviceChannel.invokeMethod<Map>('getDeviceInfo');
+      if (info != null) {
+        final oem = info['oemFamily'] as String? ?? 'other';
+        final needsAutoStart = info['needsAutoStart'] == true;
+        debugPrint('[NotificationService] device: ${info['manufacturer']} ${info['model']} (oem=$oem, needsAutoStart=$needsAutoStart)');
+        if (needsAutoStart) {
+          debugPrint('[NotificationService] ⚠ Chinese OEM detected ($oem). The user MUST enable Auto-start in settings for reliable background delivery.');
+        }
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] device detection failed: $e');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 5: INITIALIZE FIREBASE (in its own try/catch — must NOT block
+    // the channel creation above if it fails).
+    // ═══════════════════════════════════════════════════════════════════
+    try {
+      await Firebase.initializeApp();
+      debugPrint('[NotificationService] ✓ Firebase initialized');
+    } catch (e) {
+      debugPrint('[NotificationService] Firebase init failed: $e — channel is still active, but FCM token + push will not work until Firebase is configured.');
+      // Even if Firebase fails, we've already created the channel + started
+      // the keep-alive service. The app still works; just no push notifications.
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 6: REGISTER THE BACKGROUND HANDLER.
+    // ═══════════════════════════════════════════════════════════════════
+    try {
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      debugPrint('[NotificationService] background handler registration failed: $e');
+    }
 
-      // 5. Request permission (Android 13+ shows a prompt; older versions auto-grant).
-      //    CRITICAL: On Android 13+, if the user denies this, NO notifications will show.
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 7: REQUEST PERMISSIONS (Android 13+ POST_NOTIFICATIONS + FCM).
+    // ═══════════════════════════════════════════════════════════════════
+    try {
       final settings = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
@@ -259,66 +296,76 @@ class NotificationService {
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
         debugPrint('[NotificationService] WARNING: User denied FCM notification permission. Pushes will NOT show.');
       }
+    } catch (e) {
+      debugPrint('[NotificationService] FCM permission request failed: $e');
+    }
 
-      // 5b. ALSO request permission via the local notifications plugin.
-      //     On Android 13+, this explicitly triggers the POST_NOTIFICATIONS dialog.
-      //     Some devices grant FCM permission but NOT local notification permission,
-      //     which means foreground banners + sounds won't show. This covers that gap.
-      try {
-        final androidPlugin = _localNotifications
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>();
-        final granted = await androidPlugin?.requestNotificationsPermission();
-        if (granted != true) {
-          debugPrint('[NotificationService] WARNING: User denied local notification permission.');
-        }
-      } catch (e) {
-        debugPrint('[NotificationService] local notif permission request failed: $e');
+    // Also request via the local notifications plugin (Android 13+ dialog).
+    try {
+      final androidPlugin = _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
+      final granted = await androidPlugin?.requestNotificationsPermission();
+      if (granted != true) {
+        debugPrint('[NotificationService] WARNING: User denied local notification permission.');
       }
+    } catch (e) {
+      debugPrint('[NotificationService] local notif permission request failed: $e');
+    }
 
-      // 5c. CRITICAL — Request battery-optimization whitelist (WhatsApp-style).
-      //     On Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo, Realme, OnePlus) the OS
-      //     AGGRESSIVELY kills background apps to save battery. Even with a hybrid
-      //     FCM payload, the OS may delay or drop background notifications if the
-      //     app is battery-optimized. Asking the user to whitelist the app is the
-      //     single most impactful setting for reliable always-on delivery.
-      //     This is a no-op on stock Android (it auto-grants) and only prompts on
-      //     devices that actually restrict background execution.
-      await _requestIgnoreBatteryOptimizations();
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 8: REQUEST BATTERY-OPTIMIZATION WHITELIST (Chinese OEMs).
+    // ═══════════════════════════════════════════════════════════════════
+    await _requestIgnoreBatteryOptimizations();
 
-      // 6. Get the FCM token + register it. Also listen for token refresh.
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 9: GET THE FCM TOKEN + REGISTER IT.
+    // ═══════════════════════════════════════════════════════════════════
+    try {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         _sendTokenToWeb(token);
+        debugPrint('[NotificationService] ✓ FCM token obtained: ${token.substring(0, 20)}...');
+      } else {
+        debugPrint('[NotificationService] WARNING: FCM token is null — push will not work.');
       }
       FirebaseMessaging.instance.onTokenRefresh.listen(_sendTokenToWeb);
+    } catch (e) {
+      debugPrint('[NotificationService] getToken failed: $e');
+    }
 
-      // 7. Listen for foreground messages (app is open).
-      //    The OS does NOT show a banner automatically when the app is in the
-      //    foreground — we have to show it ourselves.
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 10: LISTEN FOR FOREGROUND MESSAGES.
+    // ═══════════════════════════════════════════════════════════════════
+    try {
       FirebaseMessaging.onMessage.listen(_onForegroundMessage);
+    } catch (e) {
+      debugPrint('[NotificationService] onMessage listener failed: $e');
+    }
 
-      // 8. Listen for when the user taps a notification that opened the app.
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 11: HANDLE NOTIFICATION TAPS (app opened from notification).
+    // ═══════════════════════════════════════════════════════════════════
+    try {
       final initialMessage =
           await FirebaseMessaging.instance.getInitialMessage();
       if (initialMessage != null) {
         _onNotificationTappedData(initialMessage.data);
       }
-
-      // 9. Listen for when a notification tap brings the app from background to foreground.
       FirebaseMessaging.onMessageOpenedApp.listen((message) {
         _onNotificationTappedData(message.data);
       });
-
-      // 10. Tell the web app that FCM is ready (so it can show the right UI).
-      try {
-        await _channel.invokeMethod('onFcmReady');
-      } catch (e) {
-        debugPrint('[NotificationService] onFcmReady failed: $e');
-      }
     } catch (e) {
-      // Fail silently — the app still works without notifications. We just log.
-      debugPrint('[NotificationService] init failed: $e');
+      debugPrint('[NotificationService] notification tap handler failed: $e');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 12: TELL THE WEB APP FCM IS READY.
+    // ═══════════════════════════════════════════════════════════════════
+    try {
+      await _channel.invokeMethod('onFcmReady');
+    } catch (e) {
+      debugPrint('[NotificationService] onFcmReady failed: $e');
     }
   }
 
@@ -333,39 +380,21 @@ class NotificationService {
   }
 
   /// Ask the OS to whitelist this app from battery optimization.
-  ///
-  /// On stock Android this is a no-op (the app is already allowed). On
-  /// aggressive OEMs (Xiaomi, Huawei, Oppo, Vivo, Realme, OnePlus), it pops
-  /// the system "Allow background activity" dialog. Without this, those OEMs
-  /// will freeze or kill the app in the background — and even though the FCM
-  /// hybrid payload is displayed by the OS, the delivery can be delayed by
-  /// minutes or dropped entirely during doze mode.
-  ///
-  /// We only prompt if the app is NOT already whitelisted (so we don't spam
-  /// the user with a dialog on every launch).
   Future<void> _requestIgnoreBatteryOptimizations() async {
     try {
-      // First check if we're already whitelisted (no point prompting twice).
       final already = await _batteryChannel.invokeMethod<bool>('isIgnoring');
       if (already == true) return;
-      // Not whitelisted — request it. This shows the system dialog.
       await _batteryChannel.invokeMethod<void>('requestIgnore');
     } catch (e) {
-      // Non-fatal — the app still works without the whitelist, just with
-      // degraded background delivery on aggressive OEMs.
       debugPrint('[NotificationService] battery-opt request failed: $e');
     }
   }
 
   /// Foreground message handler — shows a local notification banner.
-  /// This is called when a push arrives WHILE THE APP IS OPEN.
-  /// The OS does NOT auto-show a notification in this case — we MUST show it ourselves.
   void _onForegroundMessage(RemoteMessage message) {
     final notification = message.notification;
     final data = message.data;
 
-    // Read title/body from `data` first (data-only payload), then fall back
-    // to `notification` for backward compat with older app versions.
     final title = (data['title'] as String?)?.isNotEmpty == true
         ? data['title'] as String
         : (notification?.title ?? 'Concordia College');
@@ -373,9 +402,6 @@ class NotificationService {
         ? data['body'] as String
         : (notification?.body ?? '');
 
-    // Show a local notification (banner + sound + vibration).
-    // Use the channel we created above (with Importance.high) so it appears
-    // as a heads-up banner AND makes a sound.
     _localNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title,
@@ -391,7 +417,6 @@ class NotificationService {
           color: const Color(0xFFF26522),
           playSound: true,
           enableVibration: true,
-          // Heads-up notification (slides down from the top).
           fullScreenIntent: false,
           category: AndroidNotificationCategory.message,
           visibility: NotificationVisibility.public,
@@ -406,7 +431,7 @@ class NotificationService {
     );
   }
 
-  /// Called when the user taps a local notification (foreground banner tap).
+  /// Called when the user taps a local notification.
   void _onNotificationTapped(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null) return;
@@ -418,7 +443,7 @@ class NotificationService {
     }
   }
 
-  /// Forward the tap event (with route + params) to the web app.
+  /// Forward the tap event to the web app.
   void _onNotificationTappedData(Map<String, dynamic> data) {
     try {
       _channel.invokeMethod('onNotificationTap', {'data': data});
@@ -436,6 +461,46 @@ class NotificationService {
       }
     } catch (e) {
       debugPrint('[NotificationService] failed to unregister: $e');
+    }
+  }
+
+  /// Public method to re-register the token (called on app resume).
+  /// Re-fetches the token and pushes it to the web app in case the WebView
+  /// reloaded and lost the previous injection.
+  Future<void> reRegisterToken() async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        _sendTokenToWeb(token);
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] re-register failed: $e');
+    }
+  }
+
+  /// Returns the device manufacturer info (for Realme/Xiaomi guidance).
+  /// Called by the web app via the JS bridge.
+  Future<Map<String, dynamic>?> getDeviceInfo() async {
+    try {
+      final info = await _deviceChannel.invokeMethod<Map>('getDeviceInfo');
+      if (info != null) {
+        return Map<String, dynamic>.from(info);
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] getDeviceInfo failed: $e');
+    }
+    return null;
+  }
+
+  /// Opens the proprietary Auto-start settings screen (Realme/Xiaomi/Huawei).
+  /// Returns true if a settings screen was opened.
+  Future<bool> openAutoStartSettings() async {
+    try {
+      final result = await _deviceChannel.invokeMethod<bool>('openAutoStartSettings');
+      return result == true;
+    } catch (e) {
+      debugPrint('[NotificationService] openAutoStartSettings failed: $e');
+      return false;
     }
   }
 }
