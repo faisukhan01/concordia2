@@ -1,7 +1,28 @@
 import crypto from 'crypto';
 import { db, initDB } from './db';
 
-export const SESSION_TTL = 8 * 60 * 60 * 1000;
+// ─────────────────────────────────────────────────────────────────────────
+// SESSION LIFETIME — WhatsApp-style persistence
+// ─────────────────────────────────────────────────────────────────────────
+// Sessions live for 365 days and are renewed on a sliding window every time
+// the user makes an authenticated request (see requireAuth below). This means
+// an active user is NEVER logged out by the server, and a user who closes the
+// app and reopens it weeks later still has a valid session.
+//
+// This is critical for background FCM push notifications: the device token is
+// registered to the logged-in user, so the session MUST stay alive for pushes
+// to keep flowing. With the old 8-hour TTL, a user who logged in at 9 AM and
+// closed the app would be silently logged out by 5 PM — and any push sent
+// after that would target a user whose session was gone, breaking delivery.
+//
+// 365 days is the standard "remember me" lifetime used by WhatsApp, Telegram,
+// Gmail, etc. Users can still log out explicitly from the sidebar, which
+// clears both the client localStorage entry and the server session row.
+export const SESSION_TTL = 365 * 24 * 60 * 60 * 1000;
+// Sliding renewal window: if the session is within this much of expiring, we
+// extend it on the current request. 7 days means active users never see an
+// expiry prompt.
+const SESSION_RENEW_WINDOW = 7 * 24 * 60 * 60 * 1000;
 const loginAttempts = new Map<string, { count: number; lockedUntil: number; lastAttempt: number }>();
 const MAX_LOGIN_ATTEMPTS = 10;
 const LOCKOUT_DURATION = 2 * 60 * 1000;
@@ -39,9 +60,28 @@ export function nextId(prefix: string) {
 
 export async function createSession(user: any) {
   const token = 'concordia-' + crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  // v4.5.1: Clean up expired sessions for this user BEFORE creating a new one.
+  // Without this, the sessions table grows forever (every login adds a row,
+  // expired ones are never deleted) → the Settings page shows "10 active
+  // sessions" when only 1 is actually valid. We also cap at 5 most-recent
+  // sessions per user to keep the list manageable.
+  try {
+    await db.execute({
+      sql: 'DELETE FROM sessions WHERE userId = ? AND expiresAt < ?',
+      args: [user.id, now],
+    });
+    // Also cap the user's session history at 5 (keep most recent).
+    await db.execute({
+      sql: `DELETE FROM sessions WHERE userId = ? AND token NOT IN (
+        SELECT token FROM sessions WHERE userId = ? ORDER BY issuedAt DESC LIMIT 5
+      )`,
+      args: [user.id, user.id],
+    });
+  } catch {}
   await db.execute({
     sql: 'INSERT INTO sessions (token, userId, role, issuedAt, expiresAt) VALUES (?, ?, ?, ?, ?)',
-    args: [token, user.id, user.role, Date.now(), Date.now() + SESSION_TTL],
+    args: [token, user.id, user.role, now, now + SESSION_TTL],
   });
   return token;
 }
@@ -85,6 +125,25 @@ export async function requireAuth(req: Request): Promise<any> {
   if (Date.now() > session.expiresAt) {
     await db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [token] });
     throw { status: 401, error: 'Session expired' };
+  }
+  // ── Sliding renewal (WhatsApp-style "remember me") ──
+  // If the session is within the renewal window of expiring, extend its
+  // expiresAt by the full TTL. This means an active user NEVER gets logged
+  // out by the server — only inactive users (no request for 365 days) ever
+  // see a session-expired 401. This is what keeps background FCM pushes
+  // flowing reliably: the user's session stays alive as long as they open
+  // the app occasionally.
+  try {
+    const now = Date.now();
+    if (session.expiresAt - now < SESSION_RENEW_WINDOW) {
+      const newExpiry = now + SESSION_TTL;
+      await db.execute({
+        sql: 'UPDATE sessions SET expiresAt = ? WHERE token = ?',
+        args: [newExpiry, token],
+      });
+    }
+  } catch {
+    // non-fatal — renewal is best-effort
   }
   const userResult = await db.execute({
     sql: `SELECT u.*, i.name as instituteName, i.short as instituteShort, b.name as branchName

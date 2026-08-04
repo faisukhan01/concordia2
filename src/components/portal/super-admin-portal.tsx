@@ -102,44 +102,48 @@ const btnSecondary =
 
 const fmtMoney = (n: number) => `Rs ${(Number(n) || 0).toLocaleString('en-PK')}`;
 
-const fmtDate = (iso?: string) => {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return '—';
+// SQLite datetime('now') returns UTC as "YYYY-MM-DD HH:MM:SS" (no tz marker).
+// JS treats tz-less strings as LOCAL time → causes "5h ago" for UTC+5 users.
+// Normalize to ISO 8601 UTC before parsing.
+const parseUtc = (iso?: string): Date | null => {
+  if (!iso) return null;
+  let s = iso;
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = s.replace(' ', 'T') + 'Z';
   }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const fmtDate = (iso?: string) => {
+  const d = parseUtc(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const fmtDateTime = (iso?: string) => {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return '—';
-  }
+  const d = parseUtc(iso);
+  if (!d) return '—';
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 };
 
 const relativeTime = (iso?: string) => {
-  if (!iso) return '—';
-  const diff = Date.now() - new Date(iso).getTime();
+  const d = parseUtc(iso);
+  if (!d) return '—';
+  const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60000);
   if (m < 1) return 'just now';
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d}d ago`;
+  const days = Math.floor(h / 24);
+  if (days < 30) return `${days}d ago`;
   return fmtDate(iso);
 };
 
@@ -185,21 +189,19 @@ function StatCard({
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all group',
-        onClick ? 'hover:border-[#F26522] hover:shadow-sm cursor-pointer' : 'cursor-default',
+        'w-full text-left rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between',
+        onClick ? 'hover:border-[#F26522] hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer' : 'cursor-default hover:border-gray-300 hover:shadow-sm',
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {label}
-          </div>
-          <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+      <div className="flex items-start justify-between">
+        <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-[#F26522] group-hover:text-white transition-colors" />
         </div>
-        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
-          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
-        </div>
+      </div>
+      <div className="min-w-0 mt-1.5">
+        <div className="text-xl sm:text-2xl font-bold text-gray-900 truncate tabular-nums leading-tight">{value}</div>
+        <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-0.5 truncate">{label}</div>
+        {sub && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{sub}</div>}
       </div>
     </button>
   );
@@ -1987,7 +1989,7 @@ function SuperFees() {
       />
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-28" />
           ))}
@@ -1999,7 +2001,7 @@ function SuperFees() {
       ) : (
         <>
           {/* KPI strip */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <StatCard
               icon={DollarSign}
               label="Total Collected"

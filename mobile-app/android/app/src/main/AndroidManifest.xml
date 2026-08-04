@@ -4,6 +4,35 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Vibration feedback -->
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- POST_NOTIFICATIONS — required on Android 13+ (API 33+) to show any notification.
+         Without this, the OS silently drops ALL notifications, including FCM background pushes. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- WAKE_LOCK — keeps the CPU awake briefly while processing an incoming FCM push
+         so the notification isn't dropped when the device is dozing. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- RECEIVE_BOOT_COMPLETED — allows the app to re-register its FCM token after a phone reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- SCHEDULE_EXACT_ALARM — for precise notification scheduling (used by flutter_local_notifications). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- FOREGROUND_SERVICE + FOREGROUND_SERVICE_DATA_SYNC — required on Android 14+ (API 34+)
+         for the FCM background isolate to spin up and process data messages reliably.
+         Without this, background delivery can be throttled on Android 14+ devices. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!-- REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — lets the app prompt the user to whitelist
+         it from battery optimization. Critical on Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo,
+         Realme) which aggressively kill background apps. The user must grant this for true
+         WhatsApp-style always-on delivery. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- FOREGROUND_SERVICE_SPECIAL_USE — required on Android 14+ (API 34+) to run a
+         foreground service of type "specialUse". We use this for the keep-alive
+         service that prevents Chinese OEMs (Realme, Xiaomi, Huawei, Oppo, Vivo)
+         from killing the app in the background. This is the same mechanism
+         WhatsApp/Telegram use for reliable push delivery on those devices.
+         "specialUse" has no time limit (unlike "dataSync" which is capped at 6h). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"/>
 
     <application
         android:label="Concordia College"
@@ -32,6 +61,100 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- CRITICAL: Default notification channel for FCM background pushes.
+             When a push arrives and the app is CLOSED, the Android OS shows a
+             system notification automatically — but ONLY if it knows which channel
+             to use. Without this meta-data, background notifications are SILENTLY
+             DROPPED on Android 8+.
+
+             v4 (v3.8.0): Changed from `concordia_notifications_v3` →
+             `concordia_notifications_v4`. Android does NOT let apps change a
+             channel's settings after creation, so each release that needs to
+             correct sound settings uses a FRESH channel ID. The app deletes the
+             old v1/v2/v3 channels at startup so they disappear from Settings,
+             and creates a new v4 channel with sound + high importance. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="concordia_notifications_v4" />
+        <!-- Default notification icon for FCM background pushes.
+             MUST be a white-on-transparent drawable (NOT a colored mipmap).
+             Android 5+ silhouettes status bar icons to white, so a colored
+             mipmap like ic_launcher becomes an unreadable white blob. We use
+             ic_notification — a clean white bell silhouette vector drawable
+             that renders correctly in the status bar at small sizes. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <!-- Default notification color (the tint applied to the icon). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/concordia_orange" />
+
+        <!-- ════════════════════════════════════════════════════════════════
+             FOREGROUND SERVICE — KEEP-ALIVE (v3.9.0)
+             ════════════════════════════════════════════════════════════════
+             This service keeps the app process alive so that push notifications
+             are delivered reliably on Chinese OEM devices (Realme, Xiaomi,
+             Huawei, Oppo, Vivo, OnePlus). These OEMs aggressively freeze/kill
+             background apps — even with FCM's hybrid payload, notifications can
+             be delayed or dropped. A foreground service is exempt from these
+             killings. This is EXACTLY what WhatsApp, Telegram, Signal, and
+             Gmail do on Chinese OEMs.
+
+             foregroundServiceType="specialUse" — no time limit (unlike
+             "dataSync" which is capped at 6h on Android 14+). The sub-type
+             property explains the use case (required by Google Play policy,
+             though this app is sideloaded, not on Play Store).
+             ════════════════════════════════════════════════════════════════ -->
+        <service
+            android:name=".ConcordiaKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the app process alive so that real-time push notifications (announcements, exam alerts, fee reminders, attendance, marks) from Concordia College are delivered reliably on devices that aggressively kill background apps (Realme, Xiaomi, Huawei, Oppo, Vivo). This is the same mechanism messaging apps use for reliable message delivery." />
+        </service>
+
+        <!-- ════════════════════════════════════════════════════════════════
+             v4.5.0: JOB SERVICE — restarts the keep-alive service via
+             JobScheduler. This is a BELT-AND-SUSPENDERS fallback to the
+             AlarmManager restart. On some OEMs (Xiaomi, Huawei), AlarmManager
+             tasks are killed when the app is frozen — JobScheduler uses a
+             different execution path and survives longer.
+             ════════════════════════════════════════════════════════════════ -->
+        <service
+            android:name=".ConcordiaRestartJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- ════════════════════════════════════════════════════════════════
+             v4.3.0: BOOT RECEIVER — restarts the keep-alive service after
+             phone reboot or app update.
+
+             Without this, after a phone reboot the keep-alive service is
+             NOT running until the user manually opens the app. This means
+             FCM pushes would be unreliable (the app process isn't alive to
+             receive them) — the user would miss notifications.
+
+             This receiver listens for:
+               • BOOT_COMPLETED — phone just booted
+               • MY_PACKAGE_REPLACED — app was updated to a new version
+               • QUICKBOOT_POWERON — OEM-specific boot (Xiaomi/Huawei)
+
+             and immediately restarts the keep-alive service. This is the
+             SAME mechanism WhatsApp/Telegram/Signal use.
+             ════════════════════════════════════════════════════════════════ -->
+        <receiver
+            android:name=".ConcordiaBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
     <queries>
         <intent>

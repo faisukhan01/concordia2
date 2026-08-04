@@ -73,8 +73,8 @@ function PageHeader({
     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
       <div className="min-w-0">
         <div className="h-0.5 w-8 bg-[#F26522] mb-3" />
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{title}</h1>
-        {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}
+        <h1 className="text-2xl font-bold text-foreground tracking-tight">{title}</h1>
+        {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0 flex gap-2 flex-wrap">{action}</div>}
     </div>
@@ -100,19 +100,23 @@ function StatCard({
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'w-full text-left rounded-xl border border-gray-200 bg-white p-5 transition-all',
-        onClick ? 'hover:border-[#F26522] hover:shadow-sm cursor-pointer' : 'cursor-default',
+        'group relative w-full text-left rounded-2xl border border-border bg-card p-3 sm:p-4 transition-all min-h-[88px] sm:min-h-[104px] flex flex-col justify-between overflow-hidden',
+        onClick
+          ? 'hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer'
+          : 'cursor-default hover:border-border hover:shadow-sm',
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {label}
-          </div>
-          <div className="text-2xl font-bold text-gray-900 mt-1.5 truncate">{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+      {/* Subtle gradient accent on hover */}
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+      <div className="flex items-start justify-between relative">
+        <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-primary/10 grid place-items-center shrink-0 transition-transform group-hover:scale-110 group-hover:bg-primary/15">
+          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-primary" />
         </div>
-        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+      </div>
+      <div className="min-w-0 mt-1.5 relative">
+        <div className="text-xl sm:text-2xl font-bold text-foreground truncate tabular-nums leading-tight">{value}</div>
+        <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mt-0.5 truncate">{label}</div>
+        {sub && <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{sub}</div>}
       </div>
     </button>
   );
@@ -130,8 +134,8 @@ function SectionHeader({
   return (
     <div className="flex items-start justify-between gap-3 mb-4">
       <div className="min-w-0">
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        {desc && <p className="text-xs text-gray-500 mt-0.5">{desc}</p>}
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {desc && <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>}
       </div>
       {action}
     </div>
@@ -139,7 +143,7 @@ function SectionHeader({
 }
 
 function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('animate-pulse rounded-md bg-gray-100', className)} />;
+  return <div className={cn('animate-pulse rounded-md bg-muted', className)} />;
 }
 
 function EmptyState({
@@ -153,9 +157,9 @@ function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
-      <Icon className="h-5 w-5 text-gray-300 mb-2.5" />
-      <div className="text-sm text-gray-500">{title}</div>
-      {desc && <div className="text-xs text-gray-400 mt-1 max-w-sm">{desc}</div>}
+      <Icon className="h-5 w-5 text-muted-foreground/40 mb-2.5" />
+      <div className="text-sm text-muted-foreground">{title}</div>
+      {desc && <div className="text-xs text-muted-foreground/70 mt-1 max-w-sm">{desc}</div>}
     </div>
   );
 }
@@ -301,13 +305,13 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
 
       {/* ── Live KPIs — no fake data, all from API ── */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28" />
+            <Skeleton key={i} className="h-[88px] sm:h-[104px]" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard
             icon={GraduationCap}
             label="Total Students"
@@ -431,11 +435,11 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
 
       {/* ── Two-column: announcements + at-a-glance ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5">
+        <div className="lg:col-span-2 rounded-xl border border-border bg-card p-5">
           <SectionHeader
             title="Recent Announcements"
             desc="Latest college-wide notices"
-            action={<span className="text-[11px] text-gray-400">Last 5</span>}
+            action={<span className="text-[11px] text-muted-foreground/70">Last 5</span>}
           />
           {loading ? (
             <div className="space-y-2.5">
@@ -450,25 +454,25 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
               desc="Posts will appear here once the Academic Office publishes them."
             />
           ) : (
-            <ul className="divide-y divide-gray-100">
+            <ul className="divide-y divide-border">
               {announcements.map((a, i) => (
                 <li
                   key={a.id || i}
                   className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
                 >
-                  <Megaphone className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
+                  <Megaphone className="h-4 w-4 text-muted-foreground/70 mt-0.5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-gray-900 truncate">
+                      <span className="text-sm font-medium text-foreground truncate">
                         {a.title}
                       </span>
                       {a.targetRole && (
-                        <span className="text-[10px] uppercase tracking-wider text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 border border-border rounded px-1.5 py-0.5">
                           {a.targetRole}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 line-clamp-2 mt-0.5">{a.message}</p>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{a.message}</p>
                   </div>
                 </li>
               ))}
@@ -476,7 +480,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
           )}
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="rounded-xl border border-border bg-card p-5">
           <SectionHeader title="At a Glance" />
           {loading ? (
             <div className="space-y-3">
@@ -494,13 +498,13 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
               ].map((s) => (
                 <li
                   key={s.label}
-                  className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+                  className="flex items-center justify-between py-2 border-b border-border last:border-0"
                 >
                   <div className="flex items-center gap-2.5">
-                    <s.icon className="h-4 w-4 text-gray-400" />
-                    <span className="text-sm text-gray-600">{s.label}</span>
+                    <s.icon className="h-4 w-4 text-muted-foreground/70" />
+                    <span className="text-sm text-muted-foreground">{s.label}</span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{s.value}</span>
+                  <span className="text-sm font-semibold text-foreground">{s.value}</span>
                 </li>
               ))}
             </ul>
@@ -509,7 +513,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
       </div>
 
       {/* ── Admission Office Pulse — surfaces admissions work to the admin ── */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <SectionHeader
           title="Admission Office Pulse"
           desc="Live snapshot of enrollment + base-fee finalization"
@@ -531,34 +535,34 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <div className="rounded-lg border border-border bg-muted/50 p-4">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                 <GraduationCap className="h-3.5 w-3.5" /> Enrolled
               </div>
-              <div className="text-xl font-bold text-gray-900 mt-1.5">{students.length}</div>
-              <div className="text-[11px] text-gray-500 mt-0.5">{thisMonthCount} this month</div>
+              <div className="text-xl font-bold text-foreground mt-1.5">{students.length}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{thisMonthCount} this month</div>
             </div>
-            <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <div className="rounded-lg border border-border bg-muted/50 p-4">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                 <Lock className="h-3.5 w-3.5" /> Fee Locked
               </div>
-              <div className="text-xl font-bold text-gray-900 mt-1.5">{lockedBaseFee.length}</div>
-              <div className="text-[11px] text-gray-500 mt-0.5">
+              <div className="text-xl font-bold text-foreground mt-1.5">{lockedBaseFee.length}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
                 Rs {lockedTotal.toLocaleString()}
               </div>
             </div>
             <button
               type="button"
               onClick={() => setActiveModule('admissions:admissions-students')}
-              className="text-left rounded-lg border border-amber-200 bg-amber-50/50 p-4 hover:border-amber-300 hover:bg-amber-50 transition-colors cursor-pointer"
+              className="text-left rounded-lg border border-[#F26522]/30 bg-[#FFF4ED] p-4 hover:border-[#F26522] hover:bg-[#FFE5D8] hover:-translate-y-0.5 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-amber-700/80">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[#D4541E]">
                 <Clock className="h-3.5 w-3.5" /> Pending Lock
               </div>
-              <div className="text-xl font-bold text-amber-700 mt-1.5">
+              <div className="text-xl font-bold text-[#D4541E] mt-1.5 tabular-nums">
                 {pendingBaseFee.length}
               </div>
-              <div className="text-[11px] text-amber-700/70 mt-0.5">
+              <div className="text-[11px] text-[#D4541E]/70 mt-0.5">
                 {pendingBaseFee.length === 0 ? 'All finalized ✓' : 'Click to review →'}
               </div>
             </button>
@@ -578,12 +582,12 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
       </div>
 
       {/* ── Recent students table ── */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <SectionHeader
           title="Recent Students"
           desc="Latest enrolled students across the college"
           action={
-            <span className="text-[11px] text-gray-400">{students.length} total</span>
+            <span className="text-[11px] text-muted-foreground/70">{students.length} total</span>
           }
         />
         {loading ? (
@@ -601,23 +605,23 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
         ) : (
           <Table>
             <TableHeader>
-              <TableRow className="border-gray-200 hover:bg-transparent">
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 py-2.5 px-3">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70 py-2.5 px-3">
                   Roll No
                 </TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 py-2.5 px-3">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70 py-2.5 px-3">
                   Name
                 </TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 py-2.5 px-3">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70 py-2.5 px-3">
                   Class
                 </TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 py-2.5 px-3">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70 py-2.5 px-3">
                   Guardian
                 </TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 py-2.5 px-3 text-right">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70 py-2.5 px-3 text-right">
                   Base Fee
                 </TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 py-2.5 px-3 text-center">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70 py-2.5 px-3 text-center">
                   Fee Status
                 </TableHead>
               </TableRow>
@@ -626,30 +630,30 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
               {recentStudents.map((u) => {
                 const locked = isLocked(u);
                 return (
-                  <TableRow key={u.id} className="border-gray-100 hover:bg-gray-50">
-                    <TableCell className="py-3 px-3 text-sm text-gray-500 font-mono">
+                  <TableRow key={u.id} className="border-border hover:bg-[#FFF4ED]/60 transition-colors">
+                    <TableCell className="py-3 px-3 text-sm text-muted-foreground font-mono tabular-nums">
                       {u.rollNo || '—'}
                     </TableCell>
-                    <TableCell className="py-3 px-3 text-sm font-medium text-gray-900">
+                    <TableCell className="py-3 px-3 text-sm font-medium text-foreground">
                       {u.name}
                     </TableCell>
-                    <TableCell className="py-3 px-3 text-sm text-gray-700">
+                    <TableCell className="py-3 px-3 text-sm text-muted-foreground">
                       {u.class || '—'}
                       {u.section ? `-${u.section}` : ''}
                     </TableCell>
-                    <TableCell className="py-3 px-3 text-sm text-gray-500">
+                    <TableCell className="py-3 px-3 text-sm text-muted-foreground">
                       {u.fatherName || u.guardian || '—'}
                     </TableCell>
-                    <TableCell className="py-3 px-3 text-sm text-gray-700 text-right tabular-nums">
+                    <TableCell className="py-3 px-3 text-sm text-muted-foreground text-right tabular-nums">
                       {locked ? `Rs ${Number(u.baseFee || 0).toLocaleString()}` : '—'}
                     </TableCell>
                     <TableCell className="py-3 px-3 text-center">
                       {locked ? (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                        <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           <Lock className="h-3 w-3" /> Locked
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-amber-100 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                        <span className="inline-flex items-center gap-1 rounded-md border border-[#F26522]/30 bg-[#FFF4ED] px-2 py-0.5 text-[11px] font-medium text-[#D4541E]">
                           <Clock className="h-3 w-3" /> Pending
                         </span>
                       )}
@@ -673,8 +677,8 @@ function ComingSoon({ title }: { title: string }) {
       <div className="h-12 w-12 rounded-xl bg-[#FFF0E8] grid place-items-center mb-4">
         <Inbox className="h-6 w-6 text-[#F26522]" />
       </div>
-      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
-      <p className="text-sm text-gray-500 mt-1 max-w-sm">
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      <p className="text-sm text-muted-foreground mt-1 max-w-sm">
         This module is being prepared. Check back soon.
       </p>
     </div>

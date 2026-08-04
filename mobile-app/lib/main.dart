@@ -16,12 +16,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'app.dart';
+import 'notification_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // v4.5.0: Set the navigator key on NotificationService BEFORE init() so
+  // it can show the OEM settings dialog (Auto-start + battery optimization)
+  // after init completes. The key itself is declared in notification_service.dart
+  // and used by MaterialApp in app.dart.
+  NotificationService().setNavigatorKey(concordiaNavigatorKey);
+
+  // Initialize Firebase + FCM push notifications.
+  // Done early so the app can receive pushes as soon as possible.
+  await NotificationService().init();
+
   // Lock to portrait orientation
-  SystemChrome.setPreferredOrientations([
+  await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);

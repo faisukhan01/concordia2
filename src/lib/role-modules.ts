@@ -20,6 +20,8 @@ import {
   ClipboardList, FileText, Bell, CreditCard, Calendar, Award,
   UserPlus, UserCog, Receipt, CalendarDays, Megaphone, KeyRound,
   MessageCircle, FileSpreadsheet, Inbox, CheckCircle2,
+  LifeBuoy,
+  Download as DownloadIcon,
 } from 'lucide-react';
 
 export type RoleModule = {
@@ -80,7 +82,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'super-results', name: 'Results', icon: Award, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -125,7 +129,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'academic:report-cards', name: 'Result Cards', icon: Award, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -140,7 +146,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -156,7 +164,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'accountant-logins', name: 'Create Student Logins', icon: KeyRound, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -191,7 +201,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'accountant:accountant-challans', name: 'Fees & Installments', icon: Receipt, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -217,7 +229,9 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'teacher-timetable', name: 'My Timetable', icon: Calendar, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
     ]},
   ],
 
@@ -238,7 +252,10 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'student-announcements', name: 'Announcements', icon: Bell, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
+      { id: 'download-app', name: 'Update App', icon: DownloadIcon, color: SECONDARY },
     ]},
   ],
 
@@ -262,7 +279,10 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'student-announcements', name: 'Announcements', icon: Bell, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
+      { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
+      { id: 'help', name: 'Help & Support', icon: LifeBuoy, color: SECONDARY },
+      { id: 'download-app', name: 'Update App', icon: DownloadIcon, color: SECONDARY },
     ]},
   ],
 

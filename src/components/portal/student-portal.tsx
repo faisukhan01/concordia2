@@ -118,31 +118,42 @@ function PageHeader({
   );
 }
 
-/** Flat KPI card — white bg, gray border, small inline icon top-right. */
+/** Square KPI card — white bg, contextual icon chip, large value, label below.
+ *  v4.1.0: Added `accent` prop for contextual color-coding:
+ *    'emerald' (good), 'amber' (warning), 'red' (danger), 'sky' (info), 'primary' (default orange).
+ */
 function StatCard({
   icon: Icon,
   label,
   value,
   sub,
+  accent = 'primary',
 }: {
   icon: any;
   label: string;
   value: string | number;
   sub?: string;
+  accent?: 'emerald' | 'amber' | 'red' | 'sky' | 'primary';
 }) {
+  const accentMap = {
+    primary: { chip: 'bg-[#FFF4ED]', icon: 'text-[#F26522]', hoverChip: 'bg-[#F26522]', hoverIcon: 'text-white', border: 'hover:border-[#F26522]/30' },
+    emerald: { chip: 'bg-emerald-50', icon: 'text-emerald-600', hoverChip: 'bg-emerald-500', hoverIcon: 'text-white', border: 'hover:border-emerald-200' },
+    amber:   { chip: 'bg-amber-50',   icon: 'text-amber-600',   hoverChip: 'bg-amber-500',   hoverIcon: 'text-white', border: 'hover:border-amber-200' },
+    red:     { chip: 'bg-red-50',     icon: 'text-red-600',     hoverChip: 'bg-red-500',     hoverIcon: 'text-white', border: 'hover:border-red-200' },
+    sky:     { chip: 'bg-sky-50',     icon: 'text-sky-600',     hoverChip: 'bg-sky-500',     hoverIcon: 'text-white', border: 'hover:border-sky-200' },
+  };
+  const a = accentMap[accent];
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {label}
-          </div>
-          <div className="text-2xl font-bold text-[#1A1A1A] mt-1.5 truncate tabular-nums">
-            {value}
-          </div>
-          {sub && <div className="text-xs text-gray-500 mt-1 truncate">{sub}</div>}
+    <div className={cn('rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all hover:shadow-lg hover:-translate-y-1 active:scale-[0.98] group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between', a.border)}>
+      <div className="flex items-start justify-between">
+        <div className={cn('h-8 w-8 sm:h-9 sm:w-9 rounded-lg grid place-items-center shrink-0 transition-colors', a.chip, `group-hover:${a.hoverChip}`)}>
+          <Icon className={cn('h-4 w-4 sm:h-[18px] sm:w-[18px] transition-colors', a.icon, `group-hover:${a.hoverIcon}`)} />
         </div>
-        <Icon className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+      </div>
+      <div className="min-w-0 mt-1.5">
+        <div className="text-xl sm:text-2xl font-bold text-gray-900 truncate tabular-nums leading-tight">{value}</div>
+        <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-0.5 truncate">{label}</div>
+        {sub && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{sub}</div>}
       </div>
     </div>
   );
@@ -196,9 +207,9 @@ function SkeletonCards({ count = 3 }: { count?: number }) {
 
 function SkeletonStatGrid() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
       {Array.from({ length: 4 }).map((_, i) => (
-        <Skeleton key={i} className="h-28 w-full rounded-xl" />
+        <Skeleton key={i} className="h-[88px] sm:h-[104px] w-full rounded-xl" />
       ))}
     </div>
   );
@@ -595,39 +606,63 @@ function StudentDashboard({ user }: { user: any }) {
   };
 
   const quickLinks = [
-    { id: 'student-results', label: possessive(user, 'My Results', "Ward's Results"), icon: GraduationCap },
-    { id: 'student-report-card', label: 'Report Card', icon: Award },
-    { id: 'student-attendance', label: possessive(user, 'My Attendance', "Ward's Attendance"), icon: CalendarCheck },
-    { id: 'student-timetable', label: 'Timetable', icon: Calendar },
-    { id: 'student-datesheet', label: 'Date Sheets', icon: CalendarDays },
-    { id: 'student-announcements', label: 'Announcements', icon: Bell },
+    { id: 'student-results', label: possessive(user, 'My Results', "Ward's Results"), icon: GraduationCap, color: 'emerald' },
+    { id: 'student-report-card', label: 'Report Card', icon: Award, color: 'sky' },
+    { id: 'student-attendance', label: possessive(user, 'My Attendance', "Ward's Attendance"), icon: CalendarCheck, color: 'amber' },
+    { id: 'student-timetable', label: 'Timetable', icon: Calendar, color: 'violet' },
+    { id: 'student-datesheet', label: 'Date Sheets', icon: CalendarDays, color: 'violet' },
+    { id: 'student-announcements', label: 'Announcements', icon: Bell, color: 'primary' },
   ];
+
+  // v4.1.0: Module-specific icon colors for quick links.
+  const qlColorMap: Record<string, { chip: string; icon: string; hover: string }> = {
+    emerald: { chip: 'bg-emerald-50 border-emerald-100', icon: 'text-emerald-600', hover: 'group-hover:bg-emerald-100 group-hover:border-emerald-200' },
+    sky:     { chip: 'bg-sky-50 border-sky-100',         icon: 'text-sky-600',     hover: 'group-hover:bg-sky-100 group-hover:border-sky-200' },
+    amber:   { chip: 'bg-amber-50 border-amber-100',     icon: 'text-amber-600',   hover: 'group-hover:bg-amber-100 group-hover:border-amber-200' },
+    violet:  { chip: 'bg-violet-50 border-violet-100',   icon: 'text-violet-600',  hover: 'group-hover:bg-violet-100 group-hover:border-violet-200' },
+    primary: { chip: 'bg-[#FFF4ED] border-[#FDE8D5]',    icon: 'text-[#F26522]',   hover: 'group-hover:bg-[#FFF0E8] group-hover:border-[#F26522]/20' },
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in-0 duration-200">
-      {/* Welcome banner — flat, no gradient. Title changes for parent role. */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8">
-        <div className="h-0.5 w-8 bg-[#F26522] rounded-full mb-3" />
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-2xl sm:text-3xl font-bold text-[#1A1A1A] tracking-tight">
-              {isParent ? `Welcome to your ward's portal` : `Welcome back, ${firstName}`}
-            </h1>
-            <p className="text-sm text-gray-500 mt-1.5">
-              {user?.class ? `${wardPrefix}${user.class}` : `${wardPrefix}Student`}
-              {user?.section ? ` · Section ${user.section}` : ''}
-              {user?.rollNo ? ` · Roll No ${user.rollNo}` : ''}
-            </p>
+      {/* Welcome banner — v4.1.0: gradient left accent + avatar initial + attendance-based motivational badge. */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 relative overflow-hidden">
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#F26522] to-orange-300" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-gradient-to-br from-[#F26522] to-orange-400 grid place-items-center shrink-0 shadow-sm shadow-[#F26522]/20">
+              <span className="text-lg sm:text-xl font-bold text-white">{firstName.charAt(0).toUpperCase()}</span>
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-[#1A1A1A] tracking-tight">
+                {isParent ? `Welcome to your ward's portal` : `Welcome back, ${firstName}`}
+              </h1>
+              <p className="text-sm text-gray-500 mt-1">
+                {user?.class ? `${wardPrefix}${user.class}` : `${wardPrefix}Student`}
+                {user?.section ? ` · Section ${user.section}` : ''}
+                {user?.rollNo ? ` · Roll No ${user.rollNo}` : ''}
+              </p>
+            </div>
           </div>
-          <div className="text-xs text-gray-400 shrink-0">{todayStr}</div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="hidden sm:block text-xs text-gray-400">{todayStr}</div>
+            {attRate !== null && (
+              <div className={cn(
+                'text-[10px] sm:text-xs font-semibold px-2.5 py-1 rounded-full',
+                attRate >= 80 ? 'bg-emerald-50 text-emerald-700' : attRate >= 60 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700',
+              )}>
+                {attRate >= 80 ? '👍 Great attendance' : attRate >= 60 ? '⚡ Keep it up' : '📉 Needs improvement'}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Stat cards */}
+      {/* Stat cards — v4.1.0: contextual accent colors based on values. */}
       {loading ? (
         <SkeletonStatGrid />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard
             icon={CalendarCheck}
             label="Attendance Rate"
@@ -637,18 +672,21 @@ function StudentDashboard({ user }: { user: any }) {
                 ? `${att.present || 0} of ${att.total || 0} sessions present`
                 : 'No attendance recorded'
             }
+            accent={attRate !== null ? (attRate >= 80 ? 'emerald' : attRate >= 60 ? 'amber' : 'red') : 'primary'}
           />
           <StatCard
             icon={GraduationCap}
             label="Average Score"
             value={avgScore !== null ? `${avgScore}%` : '—'}
             sub={`${results.length} ${results.length === 1 ? 'result' : 'results'} recorded`}
+            accent={avgScore !== null ? (avgScore >= 70 ? 'emerald' : avgScore >= 50 ? 'amber' : 'red') : 'primary'}
           />
           <StatCard
             icon={Award}
             label="Report Cards"
             value={reportCardCount}
             sub={reportCardCount ? 'Published' : 'None published yet'}
+            accent="sky"
           />
           <StatCard
             icon={Bell}
@@ -803,18 +841,21 @@ function StudentDashboard({ user }: { user: any }) {
           desc="Jump straight to a section."
         />
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {quickLinks.map((q) => (
-            <button
-              key={q.id}
-              onClick={() => setActiveModule(q.id)}
-              className="group flex flex-col items-start gap-2 rounded-lg border border-gray-200 bg-white p-4 hover:border-[#F26522]/30 hover:bg-[#FFF0E8]/40 transition-colors text-left"
-            >
-              <div className="h-8 w-8 rounded-lg bg-gray-50 border border-gray-100 grid place-items-center group-hover:bg-white group-hover:border-[#F26522]/20 transition-colors">
-                <q.icon className="h-4 w-4 text-gray-500 group-hover:text-[#F26522] transition-colors" />
-              </div>
-              <span className="text-xs font-semibold text-[#1A1A1A] leading-tight">{q.label}</span>
-            </button>
-          ))}
+          {quickLinks.map((q) => {
+            const c = qlColorMap[q.color || 'primary'] || qlColorMap.primary;
+            return (
+              <button
+                key={q.id}
+                onClick={() => setActiveModule(q.id)}
+                className="group flex flex-col items-start gap-2 rounded-lg border border-gray-200 bg-white p-4 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.97] transition-all text-left"
+              >
+                <div className={cn('h-8 w-8 rounded-lg border grid place-items-center transition-colors', c.chip, c.hover)}>
+                  <q.icon className={cn('h-4 w-4 transition-colors', c.icon)} />
+                </div>
+                <span className="text-xs font-semibold text-[#1A1A1A] leading-tight">{q.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -2,40 +2,38 @@
 
 import { useSyncExternalStore, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Info, Lightbulb, X, ChevronRight, Target, BookOpen } from 'lucide-react';
+import { Lightbulb, X, ChevronRight, Target, BookOpen, Sparkles } from 'lucide-react';
 
 // Onboarding tips banner — shown at the top of the dashboard area for first-time users.
 // Dismissed state is persisted to localStorage so the banner never re-appears.
 // localStorage key is versioned (`_v1`) so future onboarding refreshes can reset it.
 //
-// Implementation note: we read dismissed-state via `useSyncExternalStore` rather than
-// the (anti-pattern) "read localStorage in useEffect + setState" combo. This is the
-// React-recommended way to subscribe a component to an external store, keeps SSR safe
-// (server snapshot defaults to dismissed=true → no flash on first paint), and avoids
-// the `react-hooks/set-state-in-effect` lint error.
+// v4.6.0: Completely redesigned — cleaner, more aesthetic, less cluttered.
+// Uses a subtle gradient, better spacing, and a cleaner action layout.
 
-const STORAGE_KEY = 'concordia_onboarding_dismissed_v1';
+const STORAGE_KEY = 'concordia_onboarding_dismissed_v2';
 const STORAGE_EVENT = 'concordia:onboarding-change';
 
-type TipDef = { id: string; icon: typeof Info; text: string };
+type TipDef = { id: string; icon: typeof Lightbulb; text: string; label: string };
 
 const TIPS: TipDef[] = [
   {
     id: 'sidebar',
     icon: Lightbulb,
+    label: 'Navigate',
     text: 'Click any module in the sidebar to jump straight to that feature.',
   },
   {
     id: 'cmdk',
     icon: Target,
-    text: 'Use Cmd+K (or Ctrl+K) to open the command palette and search anything.',
+    label: 'Search',
+    text: 'Press Ctrl+K to open the command palette and search anything instantly.',
   },
   {
     id: 'help',
     icon: BookOpen,
-    text: 'Hover over any field label to see help text.',
+    label: 'Learn',
+    text: 'Need help? Visit the Help & Support page for FAQs and guides.',
   },
 ];
 
@@ -52,13 +50,11 @@ function getSnapshot(): boolean {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === '1';
   } catch {
-    // localStorage may throw in private mode / sandboxed iframes — default to dismissed.
     return true;
   }
 }
 
 function getServerSnapshot(): boolean {
-  // Server render + first client render: assume dismissed to avoid SSR/CSR mismatch flash.
   return true;
 }
 
@@ -71,7 +67,7 @@ export function OnboardingTips() {
       window.localStorage.setItem(STORAGE_KEY, '1');
       window.dispatchEvent(new Event(STORAGE_EVENT));
     } catch {
-      // ignore — best-effort persistence
+      // ignore
     }
   };
 
@@ -81,7 +77,6 @@ export function OnboardingTips() {
 
   const tip = TIPS[index];
   const TipIcon = tip.icon;
-  const tipText = tip.text;
 
   return (
     <AnimatePresence>
@@ -89,56 +84,76 @@ export function OnboardingTips() {
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.25 }}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
         className="mb-4"
       >
-        <Card className="p-0 overflow-hidden border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/5">
-          <div className="flex items-center gap-3 p-3 sm:p-4">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 grid place-items-center shrink-0 shadow-sm">
-              <TipIcon className="h-5 w-5 text-white" />
+        <div className="relative overflow-hidden rounded-xl border border-orange-200/60 bg-white shadow-sm">
+          {/* Subtle gradient accent bar on the left */}
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#F26522] to-[#FF8A4C]" />
+
+          {/* Soft decorative gradient in the top-right */}
+          <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-orange-50/80 blur-2xl" aria-hidden />
+
+          <div className="relative flex items-center gap-3.5 py-3 pl-4 pr-3">
+            {/* Icon with gradient background */}
+            <div className="relative h-9 w-9 shrink-0">
+              <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-[#F26522] to-[#D4541E] shadow-sm" />
+              <TipIcon className="absolute inset-0 m-auto h-4 w-4 text-white" strokeWidth={2.2} />
             </div>
 
+            {/* Text content */}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                  Quick Tip
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#F26522]">
+                  {tip.label}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
-                  {index + 1} of {TIPS.length}
+                <span className="text-[10px] font-medium text-gray-300">·</span>
+                <span className="text-[10px] font-medium text-gray-400">
+                  {index + 1} / {TIPS.length}
                 </span>
               </div>
-              <p className="text-sm text-foreground mt-0.5 leading-snug">
-                {tipText}
+              <p className="text-[13px] text-gray-700 mt-0.5 leading-snug truncate">
+                {tip.text}
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+            {/* Actions — clean, minimal */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
                 onClick={nextTip}
+                className="hidden sm:flex items-center gap-1 h-7 px-2.5 text-[11px] font-semibold text-gray-500 hover:text-[#F26522] hover:bg-orange-50 rounded-md transition-colors"
               >
-                Next tip
-                <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
-              </Button>
-              <Button
-                size="sm"
-                className="h-8 bg-amber-500 hover:bg-amber-600 text-white"
+                Next
+                <ChevronRight className="h-3 w-3" />
+              </button>
+              <button
                 onClick={dismiss}
+                className="h-7 px-3 text-[11px] font-semibold text-white bg-[#F26522] hover:bg-[#D4541E] rounded-md transition-colors shadow-sm"
               >
                 Got it
-              </Button>
+              </button>
               <button
                 onClick={dismiss}
                 aria-label="Dismiss tip"
-                className="h-8 w-8 grid place-items-center rounded-md text-muted-foreground hover:bg-amber-500/10 hover:text-foreground transition"
+                className="h-7 w-7 grid place-items-center rounded-md text-gray-300 hover:text-gray-600 hover:bg-gray-50 transition-colors"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
-        </Card>
+
+          {/* Progress dots at the bottom */}
+          <div className="flex items-center gap-1 px-4 pb-2">
+            {TIPS.map((_, i) => (
+              <div
+                key={i}
+                className={`h-0.5 rounded-full transition-all duration-300 ${
+                  i === index ? 'w-6 bg-[#F26522]' : 'w-2 bg-gray-200'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
       </motion.div>
     </AnimatePresence>
   );

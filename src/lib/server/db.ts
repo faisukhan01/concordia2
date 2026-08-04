@@ -87,6 +87,24 @@ const SCHEMA_STATEMENTS: string[] = [
   // Test 1, Part 1". Each date sheet has multiple entries (subject+date+time).
   `CREATE TABLE IF NOT EXISTS date_sheets (id TEXT PRIMARY KEY, branchId TEXT NOT NULL, instituteId TEXT, examId TEXT NOT NULL, examName TEXT, part TEXT NOT NULL DEFAULT '1', createdBy TEXT, createdAt TEXT DEFAULT (datetime('now')))`,
   `CREATE TABLE IF NOT EXISTS date_sheet_entries (id TEXT PRIMARY KEY, dateSheetId TEXT NOT NULL, subject TEXT NOT NULL, examDate TEXT NOT NULL, examTime TEXT, roomName TEXT, createdAt TEXT DEFAULT (datetime('now')))`,
+
+  // ── Push Notifications (FCM) ──
+  // device_tokens: one user can have many devices (phone + tablet). Each
+  // device registers an FCM token on app startup. We send to ALL of them.
+  `CREATE TABLE IF NOT EXISTS device_tokens (id TEXT PRIMARY KEY, userId TEXT NOT NULL, role TEXT, token TEXT NOT NULL, platform TEXT DEFAULT 'android', createdAt TEXT DEFAULT (datetime('now')), lastSeen TEXT DEFAULT (datetime('now')))`,
+
+  // notifications: in-app notification log (also shown in the bell dropdown).
+  // One row per notification per user. The FCM push is fire-and-forget; this
+  // table is the persistent record so users see the bell badge + history.
+  `CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, data TEXT, read INTEGER NOT NULL DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')))`,
+
+  // ── Notification Preferences (v4.4.0) ──
+  // One row per user. Stores per-type mute toggles + sound + DND hours as
+  // JSON so we can evolve the schema without migrations. The frontend
+  // Settings page reads/writes this; the notification creation path checks
+  // it to skip muted types per user.
+  `CREATE TABLE IF NOT EXISTS notification_preferences (userId TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', updatedAt TEXT DEFAULT (datetime('now')))`,
+
   // NOTE: legacy tables (diary, sms_log, complaints, library_books,
   // transport_routes, course_materials, royalty_settings, royalty_invoices)
   // are intentionally NOT created here — they are unused by the Concordia
@@ -142,6 +160,11 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_teacher_salaries_teacherId ON teacher_salaries(teacherId)`,
   `CREATE INDEX IF NOT EXISTS idx_salary_payments_teacherId ON salary_payments(teacherId)`,
   `CREATE INDEX IF NOT EXISTS idx_events_branchId ON events(branchId)`,
+  `CREATE INDEX IF NOT EXISTS idx_device_tokens_userId ON device_tokens(userId)`,
+  `CREATE INDEX IF NOT EXISTS idx_device_tokens_token ON device_tokens(token)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_userId ON notifications(userId)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_userId_read ON notifications(userId, read)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_createdAt ON notifications(createdAt DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_manual_revenue_branchId ON manual_revenue(branchId)`,
 ];
 

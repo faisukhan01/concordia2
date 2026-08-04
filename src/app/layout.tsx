@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { ThemeProvider } from "@/components/theme-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,7 +19,20 @@ export const metadata: Metadata = {
   description: "Concordia College management portal for administration, staff, teachers, and students. Admissions, attendance, fees, academics, HR, finance, library, transport & more — all in one place.",
   keywords: ["Concordia College", "School Management", "Education Portal", "Admissions", "Attendance", "Fees", "Academics", "ERP"],
   authors: [{ name: "Concordia College" }],
+  manifest: "/manifest.json",
+  applicationName: "Concordia College",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Concordia College",
+  },
+  formatDetection: {
+    telephone: false,
+  },
   icons: {
+    // Browser-tab favicon: the orange "C" logo the user requested. PWA install
+    // icons are supplied separately by manifest.json (below), so keeping the
+    // tab icon as favicon.png here doesn't affect the installed-app icon.
     icon: [
       { url: "/favicon.png", type: "image/png" },
     ],
@@ -38,6 +52,14 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#F26522",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -48,8 +70,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        {children}
-        <Toaster />
+        <ThemeProvider>
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

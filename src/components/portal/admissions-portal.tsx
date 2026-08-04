@@ -298,18 +298,16 @@ function KpiCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-sm group">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {label}
-          </p>
-          <p className="text-2xl font-bold text-gray-900 mt-2 truncate">{value}</p>
-          {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 transition-all hover:shadow-md hover:border-gray-300 hover:-translate-y-0.5 active:scale-[0.98] group min-h-[88px] sm:min-h-[104px] flex flex-col justify-between">
+      <div className="flex items-start justify-between">
+        <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
+          <Icon className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-[#F26522] group-hover:text-white transition-colors" />
         </div>
-        <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] grid place-items-center shrink-0 group-hover:bg-[#F26522] transition-colors">
-          <Icon className="h-4 w-4 text-[#F26522] group-hover:text-white transition-colors" />
-        </div>
+      </div>
+      <div className="min-w-0 mt-1.5">
+        <div className="text-xl sm:text-2xl font-bold text-gray-900 truncate tabular-nums leading-tight">{value}</div>
+        <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-400 mt-0.5 truncate">{label}</div>
+        {hint && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{hint}</div>}
       </div>
     </div>
   );
@@ -514,9 +512,9 @@ function OverviewView({
 
       {/* KPI cards */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 rounded-xl" />
+            <Skeleton key={i} className="h-[88px] sm:h-[104px] rounded-xl" />
           ))}
         </div>
       ) : (
@@ -524,7 +522,7 @@ function OverviewView({
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+          className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4"
         >
           <KpiCard
             label="Enrolled Students"

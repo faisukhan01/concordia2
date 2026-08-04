@@ -61,13 +61,33 @@ async function backgroundRefresh<T>(path: string) {
   } catch {}
 }
 
-// Get the stored auth token (from zustand persist — uses sessionStorage for per-tab sessions)
+// Get the stored auth token from the zustand-persisted auth state.
+// IMPORTANT: we read from localStorage (NOT sessionStorage) so the session
+// survives WebView/app closes — this is what keeps the user logged in across
+// app restarts and is a prerequisite for reliable background FCM pushes
+// (the device token is registered to the logged-in user).
 function getToken(): string | null {
+  try {
+    const raw = localStorage.getItem('concordia-app');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed?.state?.token || null;
+    }
+  } catch {}
+  // Backward-compat fallback: some users may still have a sessionStorage entry
+  // from the old build. Read it once so they don't get logged out on first
+  // load of the new build, then it migrates to localStorage on next login.
   try {
     const raw = sessionStorage.getItem('concordia-app');
     if (raw) {
       const parsed = JSON.parse(raw);
-      return parsed?.state?.token || null;
+      const token = parsed?.state?.token || null;
+      if (token) {
+        // Migrate to localStorage so it persists going forward.
+        localStorage.setItem('concordia-app', raw);
+        sessionStorage.removeItem('concordia-app');
+      }
+      return token;
     }
   } catch {}
   return null;
@@ -119,13 +139,41 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
 export const api = {
   login: (email: string, password: string, name?: string) =>
     request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
-  // Client-side logout — clears the persisted zustand session (auth is stateless JWT,
-  // no server round-trip needed). After calling, redirect to '/' to reload the app.
+  // Client-side logout — clears the persisted zustand session from localStorage
+  // (and any legacy sessionStorage entry). Auth is stateless bearer-token, so no
+  // server round-trip is needed. After calling, the app reloads to '/'.
   logout: async () => {
+    try { localStorage.removeItem('concordia-app'); } catch {}
     try { sessionStorage.removeItem('concordia-app'); } catch {}
+    // Also clear the API cache so a subsequent login as a different user
+    // doesn't see stale cached data from the previous user.
+    invalidateCache();
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<any>('auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  // v4.5.1: Profile photo upload/remove.
+  uploadProfilePhoto: (photoUrl: string) =>
+    request<{ success: boolean; photoUrl: string }>('auth/profile-photo', { method: 'POST', body: JSON.stringify({ photoUrl }) }),
+  removeProfilePhoto: () =>
+    request<{ success: boolean }>('auth/profile-photo', { method: 'DELETE' }),
+  // v4.5.1: Report an issue to management.
+  reportIssue: (body: { subject: string; description: string; category?: string }) =>
+    request<{ success: boolean; issueId: string }>('help/report-issue', { method: 'POST', body: JSON.stringify(body) }),
+  // v4.4.0: Sign out of ALL devices — revokes every session + clears every
+  // FCM token for this user. The client must clear its stored token + redirect
+  // to /login afterwards.
+  logoutAllDevices: () =>
+    request<{ success: boolean; revokedSessions: boolean; clearedTokens: boolean }>('auth/logout-all', { method: 'POST' }),
+  // v4.4.0: Account & session info — last login, active sessions, active devices.
+  getSessionInfo: () =>
+    cachedGet<{
+      currentSession: { token: string; issuedAt: number; expiresAt: number } | null;
+      lastLogin: { token: string; issuedAt: number; expiresAt: number } | null;
+      activeSessions: number;
+      activeDevices: number;
+      sessions: Array<{ token: string; issuedAt: number; expiresAt: number }>;
+      devices: Array<{ id: string; platform: string; createdAt: string; lastSeen: string }>;
+    }>('auth/session-info'),
   // platform
   platformOverview: () => cachedGet<any>('platform/overview'),
   institutes: () => cachedGet<any[]>('institutes'),
@@ -361,8 +409,9 @@ export const api = {
   getTeacherAnalytics: () => cachedGet<any>('teacher/analytics'),
   // Student academic + fee analytics
   getStudentAnalytics: () => cachedGet<any>('student/analytics'),
-  // Notifications (top bar dropdown)
-  getNotifications: () => cachedGet<{ items: any[]; unread: number }>('notifications'),
+  // Notifications (top bar dropdown) — NOT cached so the user always sees fresh data.
+  getNotifications: (limit = 50) =>
+    request<{ items: any[]; unread: number }>(`notifications?limit=${limit}`),
   // Manual revenue management (Super Admin enters per institute, Institute Admin enters per branch)
   addRevenue: (body: { sourceType: string; sourceId: string; sourceName: string; amount: number; month: string; year: number; notes?: string }) =>
     request<any>('revenue', { method: 'POST', body: JSON.stringify(body) }),
@@ -515,6 +564,74 @@ export const api = {
     invalidateCache();
     return r;
   },
+
+  // ───────────────────────────────────────────────────────────
+  // Push Notifications (FCM) — device token registration + in-app bell
+  // ───────────────────────────────────────────────────────────
+  registerDeviceToken: (token: string, platform: string = 'android') =>
+    request<{ success: boolean }>('device-tokens', { method: 'POST', body: JSON.stringify({ token, platform }) }),
+  unregisterDeviceToken: (token: string) =>
+    request<{ success: boolean }>(`device-tokens?token=${encodeURIComponent(token)}`, { method: 'DELETE' }),
+  getUnreadCount: () =>
+    request<{ unread: number }>('notifications/unread-count'),
+  markNotificationRead: (id: string) =>
+    request<{ success: boolean }>(`notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () =>
+    request<{ success: boolean }>('notifications/read-all', { method: 'POST' }),
+  // v4.4.0: User notification preferences (per-type mute, sound, DND hours).
+  getNotificationPreferences: () =>
+    cachedGet<{
+      mutedTypes: string[];
+      soundEnabled: boolean;
+      dndEnabled: boolean;
+      dndStart: string;
+      dndEnd: string;
+    }>('notifications/preferences'),
+  saveNotificationPreferences: (body: {
+    mutedTypes: string[];
+    soundEnabled: boolean;
+    dndEnabled: boolean;
+    dndStart: string;
+    dndEnd: string;
+  }) => {
+    invalidateCache();
+    return request<{ success: boolean }>('notifications/preferences', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  sendTestNotification: () =>
+    request<{
+      success: boolean;
+      notificationId: string;
+      tokenCount: number;
+      tokenPreviews: string[];
+      fcmSuccess: number;
+      fcmFailed: number;
+      errors: Array<{ tokenPreview: string; error: string }>;
+      fcmEnabled: boolean;
+    }>('notifications/test', { method: 'POST' }),
+  broadcastAppUpdate: (version?: string) =>
+    request<{ success: boolean; recipients: number; pushed: number; fcmConfigured: boolean }>('notifications/broadcast-app-update', { method: 'POST', body: JSON.stringify({ version }) }),
+  checkAppVersion: (current: string) =>
+    request<{ latest: string; current: string | null; updateAvailable: boolean; downloadUrl: string; notificationCreated: boolean }>(`app/version-check?current=${encodeURIComponent(current)}`),
+  // v4.6.0: Silent update check — does NOT send a push notification.
+  // Returns whether an update is available so the web app can show a
+  // badge on the sidebar "Update App" button instead of spamming pushes.
+  getAppUpdateStatus: (current: string) =>
+    request<{ latest: string; current: string | null; updateAvailable: boolean; downloadUrl: string }>(`app/update-status?current=${encodeURIComponent(current)}`),
+  getFcmStatus: () =>
+    request<{
+      fcmEnabled: boolean;
+      envVarSet: boolean;
+      envVarLength: number;
+      parseError: string | null;
+      projectId: string | null;
+      clientEmail: string | null;
+      totalDeviceTokens: number;
+      tokensByRole: Array<{ role: string; count: number; users: number }>;
+      myDevices: Array<{ platform: string; tokenPreview: string | null; createdAt: string; lastSeen: string }>;
+    }>('notifications/fcm-status'),
 };
 
 // A single pre-mapped student row for the bulk importer.

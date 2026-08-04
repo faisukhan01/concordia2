@@ -128,6 +128,450 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true });
     }
 
+    // v4.5.1: Upload profile photo — accepts a base64 data URL and saves it
+    // to the user's `photoUrl` field. The data URL is stored directly (no
+    // external file storage needed). Validates size (max 2MB) and type.
+    if (method === 'POST' && path === 'auth/profile-photo') {
+      const user = await requireAuth(req);
+      const { photoUrl } = body || {};
+      if (!photoUrl || typeof photoUrl !== 'string') {
+        return NextResponse.json({ error: 'photoUrl required' }, { status: 400 });
+      }
+      // Validate it's a data URL with an image/ prefix.
+      if (!photoUrl.startsWith('data:image/')) {
+        return NextResponse.json({ error: 'Must be an image data URL' }, { status: 400 });
+      }
+      // Validate size (2MB = ~2.8M base64 chars).
+      if (photoUrl.length > 2_800_000) {
+        return NextResponse.json({ error: 'Image too large (max 2MB)' }, { status: 413 });
+      }
+      // Validate allowed types (JPEG, PNG, WebP).
+      const allowedTypes = ['data:image/jpeg', 'data:image/png', 'data:image/webp', 'data:image/jpg'];
+      if (!allowedTypes.some(t => photoUrl.startsWith(t))) {
+        return NextResponse.json({ error: 'Only JPEG, PNG, and WebP are supported' }, { status: 400 });
+      }
+      await db.execute({ sql: 'UPDATE users SET photoUrl = ? WHERE id = ?', args: [photoUrl, user.id] });
+      return NextResponse.json({ success: true, photoUrl });
+    }
+
+    // v4.5.1: Remove profile photo — sets photoUrl to NULL.
+    if (method === 'DELETE' && path === 'auth/profile-photo') {
+      const user = await requireAuth(req);
+      await db.execute({ sql: 'UPDATE users SET photoUrl = NULL WHERE id = ?', args: [user.id] });
+      return NextResponse.json({ success: true });
+    }
+
+    // v4.5.1: Report an Issue — creates a notification for all staff
+    // (super-admin, admin, admissions, accountant, academic) so the
+    // management team sees every issue reported by students/parents.
+    // The reporter also gets a confirmation notification.
+    if (method === 'POST' && path === 'help/report-issue') {
+      const user = await requireAuth(req);
+      const { subject, description, category } = body || {};
+      if (!subject || typeof subject !== 'string' || subject.trim().length < 3) {
+        return NextResponse.json({ error: 'Subject is required (min 3 characters)' }, { status: 400 });
+      }
+      if (!description || typeof description !== 'string' || description.trim().length < 10) {
+        return NextResponse.json({ error: 'Description is required (min 10 characters)' }, { status: 400 });
+      }
+      const cat = (category || 'general').slice(0, 30);
+      const issueId = `ISS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      // Notify all staff about the issue.
+      const { sendPushToStaff, sendPushToUser } = await import('./fcm');
+      const senderName = user.name || user.email || 'A user';
+      const senderRole = user.roleLabel || user.role || 'user';
+      const truncatedSubject = subject.trim().slice(0, 80);
+      const truncatedDesc = description.trim().slice(0, 200);
+      await sendPushToStaff(
+        'general',
+        `🎫 New issue reported: ${truncatedSubject}`,
+        `From ${senderName} (${senderRole}): ${truncatedDesc}`,
+        { route: 'help', issueId, category: cat },
+      ).catch(() => {});
+      // Send a confirmation to the reporter.
+      await sendPushToUser(
+        user.id,
+        'general',
+        '✓ Issue received',
+        `Your issue "${truncatedSubject}" has been reported. The management team will review it shortly. Reference: ${issueId}`,
+        { route: 'help', issueId },
+      ).catch(() => {});
+      return NextResponse.json({ success: true, issueId });
+    }
+
+    // v4.4.0: Sign out of ALL devices — revokes every session + deregisters
+    // every FCM device token for the user. The CURRENT session is also
+    // revoked, so the client must clear its local token + redirect to /login.
+    if (method === 'POST' && path === 'auth/logout-all') {
+      const user = await requireAuth(req);
+      await db.execute({ sql: 'DELETE FROM sessions WHERE userId = ?', args: [user.id] });
+      await db.execute({ sql: 'DELETE FROM device_tokens WHERE userId = ?', args: [user.id] });
+      return NextResponse.json({ success: true, revokedSessions: true, clearedTokens: true });
+    }
+
+    // v4.4.0: Account & session info — exposes last login (most recent
+    // session issuedAt for this user, EXCLUDING the current one), active
+    // device count, and a list of recent sessions for the Settings page.
+    // v4.5.1: Only count ACTIVE (non-expired) sessions.
+    if (method === 'GET' && path === 'auth/session-info') {
+      const user = await requireAuth(req);
+      const authHeader = req.headers.get('authorization') || '';
+      const currentToken = authHeader.substring(7);
+      const now = Date.now();
+      const sessR = await db.execute({
+        sql: 'SELECT token, issuedAt, expiresAt FROM sessions WHERE userId = ? AND expiresAt > ? ORDER BY issuedAt DESC LIMIT 10',
+        args: [user.id, now],
+      });
+      const devR = await db.execute({
+        sql: 'SELECT id, platform, createdAt, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
+        args: [user.id],
+      });
+      const otherSessions = sessR.rows.filter((r: any) => r.token !== currentToken);
+      const lastLogin = otherSessions[0] as any || null;
+      return NextResponse.json({
+        currentSession: sessR.rows.find((r: any) => r.token === currentToken) || null,
+        lastLogin,
+        activeSessions: sessR.rows.length,
+        activeDevices: devR.rows.length,
+        sessions: sessR.rows,
+        devices: devR.rows,
+      });
+    }
+
+    // v4.4.0: Get the user's notification preferences (per-type mute,
+    // sound toggle, DND hours). Defaults to all-enabled when no row exists.
+    if (method === 'GET' && path === 'notifications/preferences') {
+      const user = await requireAuth(req);
+      const r = await db.execute({
+        sql: 'SELECT prefs FROM notification_preferences WHERE userId = ?',
+        args: [user.id],
+      });
+      let prefs: any = {};
+      if (r.rows.length > 0) {
+        try { prefs = JSON.parse((r.rows[0] as any).prefs || '{}'); } catch {}
+      }
+      // Sensible defaults — everything on, no DND.
+      const defaults = {
+        mutedTypes: [] as string[],
+        soundEnabled: true,
+        dndEnabled: false,
+        dndStart: '22:00',
+        dndEnd: '07:00',
+      };
+      return NextResponse.json({ ...defaults, ...prefs });
+    }
+
+    // v4.4.0: Save the user's notification preferences.
+    if (method === 'POST' && path === 'notifications/preferences') {
+      const user = await requireAuth(req);
+      const { mutedTypes, soundEnabled, dndEnabled, dndStart, dndEnd } = body || {};
+      const prefs = JSON.stringify({
+        mutedTypes: Array.isArray(mutedTypes) ? mutedTypes.slice(0, 30) : [],
+        soundEnabled: soundEnabled !== false,
+        dndEnabled: dndEnabled === true,
+        dndStart: typeof dndStart === 'string' ? dndStart : '22:00',
+        dndEnd: typeof dndEnd === 'string' ? dndEnd : '07:00',
+      });
+      await db.execute({
+        sql: 'INSERT INTO notification_preferences (userId, prefs, updatedAt) VALUES (?, ?, datetime(\'now\')) ON CONFLICT(userId) DO UPDATE SET prefs = excluded.prefs, updatedAt = datetime(\'now\')',
+        args: [user.id, prefs],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // ===================== PUSH NOTIFICATIONS (FCM) =====================
+    // Register / refresh a device token for the logged-in user.
+    // Called by the Flutter app on every startup (after FCM gives it a token).
+    if (method === 'POST' && path === 'device-tokens') {
+      const user = await requireAuth(req);
+      const { token, platform } = body || {};
+      if (!token) return NextResponse.json({ error: 'token required' }, { status: 400 });
+      // Upsert: if this token already exists for this user, just update lastSeen.
+      const existing = await db.execute({
+        sql: 'SELECT id FROM device_tokens WHERE userId = ? AND token = ?',
+        args: [user.id, token],
+      });
+      if (existing.rows.length > 0) {
+        await db.execute({
+          sql: 'UPDATE device_tokens SET lastSeen = datetime(\'now\'), role = ? WHERE userId = ? AND token = ?',
+          args: [user.role, user.id, token],
+        });
+      } else {
+        const id = nextId('DT');
+        await db.execute({
+          sql: `INSERT INTO device_tokens (id, userId, role, token, platform, createdAt, lastSeen)
+                VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+          args: [id, user.id, user.role, token, platform || 'android'],
+        });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // Unregister a device token (called on sign-out so we don't push to a
+    // device that no longer belongs to this user).
+    if (method === 'DELETE' && path === 'device-tokens') {
+      const user = await requireAuth(req);
+      const token = query.token;
+      if (!token) return NextResponse.json({ error: 'token query param required' }, { status: 400 });
+      await db.execute({
+        sql: 'DELETE FROM device_tokens WHERE userId = ? AND token = ?',
+        args: [user.id, token],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Device token registration STATUS ──────────────────────────────
+    // v4.0.0: Returns whether the current user has any FCM device tokens
+    // registered. The web app calls this after login to verify the token
+    // was successfully registered. If not, it re-triggers the token pull
+    // from Flutter + re-registers. This is the self-healing mechanism that
+    // catches the race condition where Flutter delivered the token before
+    // the web app was ready to register it.
+    if (method === 'GET' && path === 'device-tokens/status') {
+      const user = await requireAuth(req);
+      const r = await db.execute({
+        sql: 'SELECT token, platform, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
+        args: [user.id],
+      });
+      const tokens = r.rows as any[];
+      return NextResponse.json({
+        hasToken: tokens.length > 0,
+        tokenCount: tokens.length,
+        platform: tokens[0]?.platform || null,
+        lastSeen: tokens[0]?.lastSeen || null,
+        tokenPreviews: tokens.map((t) =>
+          t.token && t.token.length > 24
+            ? `${t.token.slice(0, 12)}…${t.token.slice(-8)}`
+            : (t.token ? `${t.token.slice(0, 8)}…` : null),
+        ),
+      });
+    }
+
+    // ── App version check. The mobile app calls this on startup with its
+    //    current version. If outdated, the server auto-creates an app-update
+    //    notification for this user (de-duped: at most once per 24h per user).
+    //    This guarantees every user who opens an outdated app gets the
+    //    "Update your Concordia app" notification — no manual admin action needed.
+    if (method === 'GET' && path === 'app/version-check') {
+      const user = await requireAuth(req);
+      const LATEST_APP_VERSION = '4.6.0';
+      const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
+      const current = (query.current || '').trim();
+
+      // Simple semver compare (major.minor.patch).
+      const cmp = (a: string, b: string): number => {
+        const pa = (a || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        const pb = (b || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        for (let i = 0; i < 3; i++) {
+          if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+          if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+        }
+        return 0;
+      };
+      const updateAvailable = !!current && cmp(current, LATEST_APP_VERSION) < 0;
+
+      // De-dup: only create an app-update notification if there isn't already
+      // one for this user in the last 24 hours (avoids spamming on every launch).
+      let notificationCreated = false;
+      if (updateAvailable) {
+        const recent = await db.execute({
+          sql: `SELECT id FROM notifications
+                WHERE userId = ? AND type = 'app-update'
+                AND createdAt > datetime('now', '-1 day')
+                LIMIT 1`,
+          args: [user.id],
+        });
+        if (recent.rows.length === 0) {
+          const { sendPushToUser } = await import('./fcm');
+          await sendPushToUser(
+            user.id,
+            'app-update',
+            'Update your Concordia app',
+            `A new version (${LATEST_APP_VERSION}) is available. Tap to download the latest APK.`,
+            { route: 'app-update', url: DOWNLOAD_URL, version: LATEST_APP_VERSION },
+          );
+          notificationCreated = true;
+        }
+      }
+
+      return NextResponse.json({
+        latest: LATEST_APP_VERSION,
+        current: current || null,
+        updateAvailable,
+        downloadUrl: DOWNLOAD_URL,
+        notificationCreated,
+      });
+    }
+
+    // ── v4.6.0: SILENT update check — same logic as above but does NOT
+    //    create a push notification. The web app calls this on mount +
+    //    every 10 min to show a badge on the sidebar "Update App" button.
+    //    This replaces the annoying "update your app" push notifications.
+    if (method === 'GET' && path === 'app/update-status') {
+      const user = await requireAuth(req);
+      const LATEST_APP_VERSION = '4.6.0';
+      const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
+      const current = (query.current || '').trim();
+
+      const cmp = (a: string, b: string): number => {
+        const pa = (a || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        const pb = (b || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        for (let i = 0; i < 3; i++) {
+          if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+          if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+        }
+        return 0;
+      };
+      const updateAvailable = !!current && cmp(current, LATEST_APP_VERSION) < 0;
+
+      return NextResponse.json({
+        latest: LATEST_APP_VERSION,
+        current: current || null,
+        updateAvailable,
+        downloadUrl: DOWNLOAD_URL,
+      });
+    }
+
+    // ── FCM diagnostic endpoint. Lets the admin verify the FCM pipeline status
+    //    from inside the web app: shows whether the service account env var is
+    //    set + valid, the project ID, and the count of registered device tokens
+    //    (so you can see if the mobile app is actually registering its token).
+    //    Admin/super-admin only — exposes server-internal config info.
+    if (method === 'GET' && path === 'notifications/fcm-status') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      const { fcmEnabled } = await import('./fcm');
+      const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+      let projectId: string | null = null;
+      let clientEmail: string | null = null;
+      let parseError: string | null = null;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          projectId = parsed.project_id || null;
+          clientEmail = parsed.client_email || null;
+        } catch (e: any) {
+          parseError = e?.message || 'Invalid JSON';
+        }
+      }
+      // Count registered tokens (by role, for visibility into who has devices registered).
+      const tokensByRole = await db.execute({
+        sql: `SELECT role, COUNT(*) as count, COUNT(DISTINCT userId) as users
+              FROM device_tokens
+              WHERE lastSeen > datetime('now', '-30 days')
+              GROUP BY role
+              ORDER BY count DESC`,
+      });
+      const totalTokens = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM device_tokens',
+      });
+      const myTokens = await db.execute({
+        sql: 'SELECT token, platform, createdAt, lastSeen FROM device_tokens WHERE userId = ? ORDER BY lastSeen DESC',
+        args: [user.id],
+      });
+      return NextResponse.json({
+        fcmEnabled: fcmEnabled(),
+        envVarSet: !!raw,
+        envVarLength: raw ? raw.length : 0,
+        parseError,
+        projectId,
+        clientEmail,
+        totalDeviceTokens: totalTokens.rows[0]?.count || 0,
+        tokensByRole: tokensByRole.rows,
+        myDevices: myTokens.rows.map((row: any) => ({
+          platform: row.platform,
+          tokenPreview: row.token ? `${String(row.token).slice(0, 12)}…${String(row.token).slice(-8)}` : null,
+          createdAt: row.createdAt,
+          lastSeen: row.lastSeen,
+        })),
+      });
+    }
+
+    // Get notifications for the logged-in user (newest first).
+    if (method === 'GET' && path === 'notifications') {
+      const user = await requireAuth(req);
+      const limit = Math.min(parseInt(query.limit || '50', 10) || 50, 200);
+      const r = await db.execute({
+        sql: 'SELECT id, type, title, body, data, read, createdAt FROM notifications WHERE userId = ? ORDER BY createdAt DESC LIMIT ?',
+        args: [user.id, limit],
+      });
+      const unreadR = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND read = 0',
+        args: [user.id],
+      });
+      const unread = (unreadR.rows[0] as any)?.count || 0;
+      return NextResponse.json({ items: r.rows, unread });
+    }
+
+    // Get only the unread count (cheap call for the bell badge polling).
+    if (method === 'GET' && path === 'notifications/unread-count') {
+      const user = await requireAuth(req);
+      const r = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND read = 0',
+        args: [user.id],
+      });
+      return NextResponse.json({ unread: (r.rows[0] as any)?.count || 0 });
+    }
+
+    // Mark a single notification as read.
+    if (method === 'POST' && pathSegments[0] === 'notifications' && pathSegments[2] === 'read' && pathSegments.length === 3) {
+      const user = await requireAuth(req);
+      const id = pathSegments[1];
+      await db.execute({
+        sql: 'UPDATE notifications SET read = 1 WHERE id = ? AND userId = ?',
+        args: [id, user.id],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Mark ALL of the user's notifications as read.
+    if (method === 'POST' && path === 'notifications/read-all') {
+      const user = await requireAuth(req);
+      await db.execute({
+        sql: 'UPDATE notifications SET read = 1 WHERE userId = ?',
+        args: [user.id],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Send a TEST push notification to the logged-in user's devices.
+    // Returns DETAILED diagnostic info (token count, FCM success/failure,
+    // per-token error messages) so the user can pinpoint exactly where the
+    // delivery chain breaks.
+    if (method === 'POST' && path === 'notifications/test') {
+      const user = await requireAuth(req);
+      const { sendTestPushToUser } = await import('./fcm');
+      const result = await sendTestPushToUser(user.id);
+      return NextResponse.json({ success: true, ...result });
+    }
+
+    // ── Broadcast "Update your app" notification to ALL active users.
+    // Admin-triggered: sends an app-update push + in-app row to every user
+    // across every role. The notification's data.route = 'app-update' so the
+    // client opens the download page when tapped.
+    if (method === 'POST' && path === 'notifications/broadcast-app-update') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      const { sendPushToAll, fcmEnabled } = await import('./fcm');
+      const version = (body?.version as string) || '';
+      const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
+      const title = 'Update your Concordia app';
+      const body_text = version
+        ? `A new version (${version}) of the Concordia app is available. Tap to update now.`
+        : 'A new version of the Concordia app is available. Tap to update now.';
+      const result = await sendPushToAll('app-update', title, body_text, {
+        route: 'app-update',
+        url: DOWNLOAD_URL,
+        version,
+      });
+      return NextResponse.json({
+        success: true,
+        recipients: result.recipients,
+        pushed: result.sent,
+        fcmConfigured: fcmEnabled(),
+      });
+    }
+
     // ===================== INSTITUTES (Super Admin) =====================
     if (method === 'GET' && path === 'institutes') {
       const user = await requireAuth(req);
@@ -1280,6 +1724,34 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         args: [id, user.id, user.role, title, message, targetRole || null, targetScope || 'all',
           targetIds ? JSON.stringify(targetIds) : null, user.instituteId || null, user.branchId || null, classId || null],
       });
+
+      // ── Fire push notification to the target audience ──
+      // v4.1.0: For institute-wide announcements (targetScope='all'), we now
+      // use sendPushToAll() which queries EVERY active user across ALL roles
+      // (super-admin, institute-admin, admin, branch-manager, admissions,
+      // accountant, academic, teacher, student). Previously we only looped
+      // through 6 roles and MISSED super-admin/institute-admin/branch-manager
+      // — which is why the user (admin) never received announcement pushes.
+      try {
+        const { sendPushToRole, sendPushToAll, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          const senderName = user.name || 'Concordia';
+          const body_text = message.length > 100 ? message.slice(0, 100) + '…' : message;
+          const data = { route: 'announcements', announcementId: id };
+          if (targetRole) {
+            // v4.3.0: Targeted at a specific role (e.g. "students only").
+            // ONLY notify that role — no staff spam. The user explicitly asked
+            // that notifications go ONLY to those they're relevant to.
+            await sendPushToRole(targetRole, 'announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
+          } else {
+            // Broadcast to EVERY active user — no one is left out.
+            await sendPushToAll('announcement', `📢 ${title}`, `${senderName}: ${body_text}`, data);
+          }
+        }
+      } catch (e) {
+        console.error('[announcements] push notification failed:', e);
+      }
+
       return NextResponse.json({ id, success: true }, { status: 201 });
     }
 
@@ -1894,6 +2366,27 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           sql: 'UPDATE attendance SET records = ?, teacherId = ? WHERE id = ?',
           args: [JSON.stringify(records), user.id, existingId],
         });
+        // v4.3.0: ONLY notify the students whose attendance was marked
+        // (present / absent / late). No staff spam — the user explicitly
+        // asked that notifications go ONLY to those they're relevant to.
+        // v4.2.0: Also notify PRESENT students (not just absent/late).
+        try {
+          const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+          if (fcmEnabled()) {
+            const present = records.filter((r: any) => r.status === 'present' || r.status === 'Present').map((r: any) => r.studentId).filter(Boolean);
+            const absent = records.filter((r: any) => r.status === 'absent' || r.status === 'Absent').map((r: any) => r.studentId).filter(Boolean);
+            const late = records.filter((r: any) => r.status === 'late' || r.status === 'Late').map((r: any) => r.studentId).filter(Boolean);
+            if (present.length > 0) {
+              await sendPushToUsers(present, 'attendance', `✅ Attendance marked`, `You were marked PRESENT on ${date}.`, { route: 'attendance', date });
+            }
+            if (absent.length > 0) {
+              await sendPushToUsers(absent, 'attendance', `📋 Attendance marked`, `You were marked ABSENT on ${date}.`, { route: 'attendance', date });
+            }
+            if (late.length > 0) {
+              await sendPushToUsers(late, 'attendance', `📋 Attendance marked`, `You were marked LATE on ${date}.`, { route: 'attendance', date });
+            }
+          }
+        } catch (e) { console.error('[attendance] push failed:', e); }
         return NextResponse.json({ id: existingId, success: true, updated: true });
       }
 
@@ -1902,6 +2395,27 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO attendance (id, branchId, classId, date, teacherId, records) VALUES (?, ?, ?, ?, ?, ?)',
         args: [id, user.branchId, classId || null, date, user.id, JSON.stringify(records)],
       });
+      // v4.3.0: ONLY notify the students whose attendance was marked
+      // (present / absent / late). No staff spam — the user explicitly
+      // asked that notifications go ONLY to those they're relevant to.
+      // v4.2.0: Also notify PRESENT students (not just absent/late).
+      try {
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          const present = records.filter((r: any) => r.status === 'present' || r.status === 'Present').map((r: any) => r.studentId).filter(Boolean);
+          const absent = records.filter((r: any) => r.status === 'absent' || r.status === 'Absent').map((r: any) => r.studentId).filter(Boolean);
+          const late = records.filter((r: any) => r.status === 'late' || r.status === 'Late').map((r: any) => r.studentId).filter(Boolean);
+          if (present.length > 0) {
+            await sendPushToUsers(present, 'attendance', `✅ Attendance marked`, `You were marked PRESENT on ${date}.`, { route: 'attendance', date });
+          }
+          if (absent.length > 0) {
+            await sendPushToUsers(absent, 'attendance', `📋 Attendance marked`, `You were marked ABSENT on ${date}.`, { route: 'attendance', date });
+          }
+          if (late.length > 0) {
+            await sendPushToUsers(late, 'attendance', `📋 Attendance marked`, `You were marked LATE on ${date}.`, { route: 'attendance', date });
+          }
+        }
+      } catch (e) { console.error('[attendance] push failed:', e); }
       return NextResponse.json({ id, success: true }, { status: 201 });
     }
 
@@ -1947,6 +2461,29 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO results (id, branchId, exam, courseId, teacherId, totalMarks, date, records) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         args: [id, user.branchId, exam, courseId || null, user.id, totalMarks || 100, date || new Date().toISOString().slice(0, 10), JSON.stringify(records)],
       });
+
+      // v4.3.0: ONLY push to each student whose marks were just recorded.
+      // No staff summary spam — the user explicitly asked that notifications
+      // go ONLY to those they're relevant to.
+      try {
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled() && Array.isArray(records)) {
+          const max = totalMarks || 100;
+          for (const rec of records) {
+            if (!rec.studentId) continue;
+            const marks = Number(rec.marks) || 0;
+            const pct = max > 0 ? Math.round((marks / max) * 100) : 0;
+            await sendPushToUsers(
+              [rec.studentId],
+              'marks',
+              `📝 Marks uploaded — ${exam}`,
+              `You scored ${marks}/${max} (${pct}%). Tap to view details.`,
+              { route: 'results', exam, resultId: id },
+            );
+          }
+        }
+      } catch (e) { console.error('[results] push failed:', e); }
+
       return NextResponse.json({ id, success: true }, { status: 201 });
     }
 
@@ -2019,6 +2556,18 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: 'INSERT INTO exams (id, branchId, instituteId, name, type, createdBy) VALUES (?, ?, ?, ?, ?, ?)',
         args: [id, brId, user.instituteId || null, cleanName, type || 'Monthly Test', user.id],
       });
+
+      // v4.3.0: Notify all students + teachers that a new exam was scheduled.
+      // (Exams affect everyone, so sendPushToRole is correct here.)
+      // Removed sendPushToStaff — staff spam was the user's complaint.
+      try {
+        const { sendPushToRole, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          await sendPushToRole('student', 'exam', `📅 New exam: ${cleanName}`, `An exam "${cleanName}" (${type || 'Monthly Test'}) has been scheduled. Check the date sheet for details.`, { route: 'exams', examId: id });
+          await sendPushToRole('teacher', 'exam', `📅 New exam: ${cleanName}`, `An exam "${cleanName}" (${type || 'Monthly Test'}) has been scheduled. Prepare your students.`, { route: 'exams', examId: id });
+        }
+      } catch (e) { console.error('[exams] push failed:', e); }
+
       return NextResponse.json({ id, success: true, name: cleanName, type: type || 'Monthly Test' }, { status: 201 });
     }
 
@@ -2104,6 +2653,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (!month || !year) return NextResponse.json({ error: 'month and year required' }, { status: 400 });
       const students = await db.execute({ sql: 'SELECT id, name, class, branchId, instituteId FROM users WHERE branchId = ? AND role = ?', args: [brId, 'student'] });
       if (students.rows.length === 0) return NextResponse.json({ success: true, generated: 0, message: 'No students found' });
+      const newInvoiceStudentIds: string[] = [];
       let generated = 0;
       for (const student of students.rows as any[]) {
         const existing = await db.execute({ sql: 'SELECT id FROM fee_invoices WHERE studentId = ? AND month = ? AND year = ?', args: [student.id, month, year] });
@@ -2123,7 +2673,25 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           args: [id, student.id, student.name, student.class || '', brId, student.instituteId, month, year, amount, 'Tuition', 'Unpaid', challanNo],
         });
         generated++;
+        newInvoiceStudentIds.push(student.id);
       }
+
+      // v4.3.0: ONLY notify the students who got a new invoice. No staff
+      // spam — the user explicitly asked that fee notifications go ONLY to
+      // the specific student they're related to.
+      try {
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled() && newInvoiceStudentIds.length > 0) {
+          await sendPushToUsers(
+            newInvoiceStudentIds,
+            'fee-due',
+            `💰 Fee invoice generated`,
+            `Your ${month} ${year} fee invoice has been generated. Please submit your payment.`,
+            { route: 'fees', month: String(month), year: String(year) },
+          );
+        }
+      } catch (e) { console.error('[fee-invoices/generate] push failed:', e); }
+
       return NextResponse.json({ success: true, generated, message: `${generated} invoices generated for ${month} ${year}` });
     }
 
@@ -2134,11 +2702,29 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const { paidAmount, paymentMethod } = body || {};
       const inv = await db.execute({ sql: 'SELECT * FROM fee_invoices WHERE id = ?', args: [id] });
       if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
-      const amount = paidAmount || (inv.rows[0] as any).amount;
+      const invoice = inv.rows[0] as any;
+      const amount = paidAmount || invoice.amount;
       await db.execute({
         sql: 'UPDATE fee_invoices SET status = ?, paidDate = ?, paidAmount = ?, paymentMethod = ? WHERE id = ?',
         args: ['Paid', new Date().toISOString().slice(0, 10), amount, paymentMethod || 'Cash', id],
       });
+
+      // v4.3.0: ONLY notify the student whose fee was marked paid. No staff
+      // spam — the user explicitly asked that fee-paid notifications go ONLY
+      // to the specific student they're related to.
+      try {
+        const { sendPushToUser, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled() && invoice.studentId) {
+          await sendPushToUser(
+            invoice.studentId,
+            'fee-paid',
+            `✅ Fee payment received`,
+            `Rs ${Number(amount).toLocaleString()} for ${invoice.month} ${invoice.year} has been marked Paid. Thank you!`,
+            { route: 'fees', invoiceId: id },
+          );
+        }
+      } catch (e) { console.error('[fee-invoices/pay] push failed:', e); }
+
       return NextResponse.json({ success: true, status: 'Paid' });
     }
 
@@ -3367,6 +3953,17 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           });
         }
       }
+
+      // ── Notify all students in the branch that the date sheet is out ──
+      try {
+        const { sendPushToRole, fcmEnabled } = await import('./fcm');
+        if (fcmEnabled()) {
+          const examLabel = examName || 'exam';
+          await sendPushToRole('student', 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The date sheet for "${examLabel}" (Part ${prt}) has been published. Check the Exams section for subject-wise dates.`, { route: 'date-sheets', examId, sheetId });
+          await sendPushToRole('teacher', 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The date sheet for "${examLabel}" (Part ${prt}) is now available.`, { route: 'date-sheets', examId, sheetId });
+        }
+      } catch (e) { console.error('[date-sheets] push failed:', e); }
+
       return NextResponse.json({ id: sheetId, examId, part: prt, success: true }, { status: 201 });
     }
 

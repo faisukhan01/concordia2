@@ -33,6 +33,10 @@ export type AuthUser = {
   class?: string;
   section?: string;
   rollNo?: string;
+  // v4.5.2: Profile photo (data URL from Settings → Profile Photo upload).
+  photoUrl?: string | null;
+  // v4.5.2: Last-seen timestamp for "online/away" indicator in profile dropdown.
+  lastLoginAt?: number | null;
 } | null;
 
 type AppState = {
@@ -46,6 +50,10 @@ type AppState = {
   pendingExamName: string | null;
   // Per-view drill/navigation state (see NavState). Mirrored to the URL.
   nav: NavState;
+  // v4.6.0: App update availability — set by the update-checker hook.
+  // When true, the sidebar "Update App" button shows a badge + bold styling.
+  appUpdateAvailable: boolean;
+  latestAppVersion: string | null;
   setView: (v: View) => void;
   setUser: (u: AuthUser) => void;
   setToken: (t: string | null) => void;
@@ -53,28 +61,44 @@ type AppState = {
   setPendingExamName: (n: string | null) => void;
   setNav: (key: string, value: unknown | ((prev: unknown) => unknown)) => void;
   setNavAll: (nav: NavState) => void;
+  setAppUpdateAvailable: (available: boolean, version?: string | null) => void;
   logout: () => void;
 };
 
-// Use sessionStorage so each browser tab has its own independent session.
-// This prevents the "multiple tab" issue where signing in as a different user
-// in one tab would overwrite the session in other tabs.
-const sessionStorageAdapter = {
+// ─────────────────────────────────────────────────────────────────────────
+// PERSISTENCE: localStorage (NOT sessionStorage)
+// ─────────────────────────────────────────────────────────────────────────
+// WhatsApp-style session persistence: the user stays logged in across app
+// restarts, phone reboots, and WebView process kills. sessionStorage is wiped
+// the moment the WebView closes — which is exactly why the mobile app was
+// logging users out whenever they closed the app, and why background FCM
+// pushes had no live session to target.
+//
+// localStorage survives until the user explicitly logs out (or clears app
+// data), which is the correct behavior for a college portal. This is also a
+// prerequisite for reliable background notifications: the FCM device-token is
+// registered to the logged-in user, so the session must persist for pushes to
+// keep flowing to the right account.
+//
+// Multi-tab note: in a browser, two tabs share the same localStorage entry.
+// This is fine for this app (single-institution, single-session). The mobile
+// app has exactly one WebView so there's no multi-tab concern there at all.
+const localStorageAdapter = {
   getItem: (name: string) => {
     try {
-      return sessionStorage.getItem(name);
+      return localStorage.getItem(name);
     } catch {
       return null;
     }
   },
   setItem: (name: string, value: string) => {
     try {
-      sessionStorage.setItem(name, value);
+      localStorage.setItem(name, value);
     } catch {}
   },
   removeItem: (name: string) => {
     try {
-      sessionStorage.removeItem(name);
+      localStorage.removeItem(name);
     } catch {}
   },
 };
@@ -88,6 +112,8 @@ export const useApp = create<AppState>()(
       activeModule: 'dashboard',
       pendingExamName: null,
       nav: {},
+      appUpdateAvailable: false,
+      latestAppVersion: null,
       setView: (v) => set({ view: v }),
       setUser: (u) => set({ user: u, activeModule: 'dashboard' }),
       setToken: (t) => set({ token: t }),
@@ -99,11 +125,12 @@ export const useApp = create<AppState>()(
         return { nav: { ...s.nav, [key]: next } };
       }),
       setNavAll: (nav) => set({ nav: nav || {} }),
-      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, nav: {} }),
+      setAppUpdateAvailable: (available, version = null) => set({ appUpdateAvailable: available, latestAppVersion: version }),
+      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, nav: {}, appUpdateAvailable: false, latestAppVersion: null }),
     }),
     {
       name: 'concordia-app',
-      storage: createJSONStorage(() => sessionStorageAdapter),
+      storage: createJSONStorage(() => localStorageAdapter),
     }
   )
 );
