@@ -14,6 +14,7 @@ import {
   PanelLeftClose, PanelLeft, Shield,
   CheckCircle2, AlertCircle, Receipt, Award, CalendarCheck, X,
   ChevronDown, Sparkles,
+  Volume2, VolumeX,
 } from 'lucide-react';
 
 import { SuperAdminPortal } from './super-admin-portal';
@@ -200,6 +201,24 @@ export function RolePortal() {
   const [notifUnread, setNotifUnread] = useState(0);
   const [notifLoading, setNotifLoading] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+  // Filter tab for the notifications panel: 'all' shows everything, 'unread'
+  // shows only unread items. Persisted in localStorage so the user's choice
+  // survives reloads (matches WhatsApp/Gmail behavior).
+  const [notifFilter, setNotifFilter] = useState<'all' | 'unread'>(() => {
+    try {
+      const v = localStorage.getItem('concordia:notif-filter');
+      return v === 'unread' ? 'unread' : 'all';
+    } catch { return 'all'; }
+  });
+  // In-app notification sound toggle. When enabled, the web app plays a short
+  // tone when a new foreground notification arrives (the native app handles
+  // its own sound via the FCM channel; this is for browser/PWA users).
+  // Persisted in localStorage so it survives reloads.
+  const [notifSoundOn, setNotifSoundOn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('concordia:notif-sound') !== 'off';
+    } catch { return true; }
+  });
 
   const fetchNotifs = useCallback(async () => {
     setNotifLoading(true);
@@ -261,6 +280,10 @@ export function RolePortal() {
             title: n.title || 'Concordia College',
             description: n.body || '',
           });
+          // Play a subtle in-app chime for browser/PWA users when a new
+          // notification arrives. The native mobile app handles its own sound
+          // via the FCM channel, so we only play in the browser.
+          playNotifSound();
         }
         if (newOnes.length > 0) {
           // Persist the seen set (cap at 200 entries to avoid unbounded growth).
@@ -429,6 +452,100 @@ export function RolePortal() {
       setBroadcasting(false);
     }
   };
+
+  // ── Notification sound player ──
+  // Plays a short, pleasant two-tone chime using the Web Audio API. No audio
+  // file needed — synthesized on the fly. Only plays in the browser (the
+  // native mobile app handles its own sound via the FCM v4 channel). Respects
+  // the user's notifSoundOn toggle (persisted in localStorage).
+  //
+  // IMPORTANT: reads the sound preference directly from localStorage (not the
+  // React state) so the value is always current — the notification poller
+  // effect captures this function once on mount, so reading state would give
+  // a stale value after the user toggles. localStorage is the source of truth.
+  const playNotifSound = () => {
+    if (typeof window === 'undefined') return;
+    // Don't play if the user is on the native app — it has its own sound.
+    if ((window as any).concordiaNative?.isNativeApp) return;
+    // Read the live preference from localStorage to avoid stale-closure bugs.
+    let soundOn = true;
+    try { soundOn = localStorage.getItem('concordia:notif-sound') !== 'off'; } catch {}
+    if (!soundOn) return;
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      // Two-note ascending chime (E5 → A5) — gentle and recognizable.
+      const notes = [
+        { freq: 659.25, start: 0,    dur: 0.12 }, // E5
+        { freq: 880.00, start: 0.10, dur: 0.18 }, // A5
+      ];
+      for (const n of notes) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = n.freq;
+        // Envelope: quick attack, gentle decay, no click.
+        gain.gain.setValueAtTime(0, now + n.start);
+        gain.gain.linearRampToValueAtTime(0.18, now + n.start + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + n.start);
+        osc.stop(now + n.start + n.dur + 0.02);
+      }
+      // Close the context after the sound finishes to free resources.
+      setTimeout(() => { try { ctx.close(); } catch {} }, 500);
+    } catch {
+      // AudioContext may be blocked before user interaction — silent fail.
+    }
+  };
+
+  // Toggle the in-app notification sound on/off. Persisted to localStorage.
+  const toggleNotifSound = () => {
+    const next = !notifSoundOn;
+    setNotifSoundOn(next);
+    try { localStorage.setItem('concordia:notif-sound', next ? 'on' : 'off'); } catch {}
+    // When enabling, play a sample chime immediately so the user knows what
+    // it sounds like. We synthesize the tone directly here (not via
+    // playNotifSound, which checks localStorage — already updated above, so
+    // it would work too, but this avoids any timing ambiguity).
+    if (next) {
+      try {
+        const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const now = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = 880; // A5
+          gain.gain.setValueAtTime(0, now);
+          gain.gain.linearRampToValueAtTime(0.18, now + 0.012);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.22);
+          setTimeout(() => { try { ctx.close(); } catch {} }, 400);
+        }
+      } catch {}
+    }
+    toast({
+      title: next ? 'Notification sound on' : 'Notification sound off',
+      description: next ? 'You will hear a chime when new notifications arrive.' : 'Notifications will be silent in the browser.',
+    });
+  };
+
+  // Switch the notifications panel filter tab. Persisted to localStorage.
+  const switchNotifFilter = (filter: 'all' | 'unread') => {
+    setNotifFilter(filter);
+    try { localStorage.setItem('concordia:notif-filter', filter); } catch {}
+  };
+
+  // Derived: the filtered list shown in the panel based on the active tab.
+  const filteredNotifItems = notifFilter === 'unread'
+    ? notifItems.filter((n) => !n?.read)
+    : notifItems;
 
   // FCM diagnostics — admin/super-admin only. Opens a modal showing the live
   // server-side FCM config status + how many device tokens are registered.
@@ -701,13 +818,62 @@ export function RolePortal() {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => setNotifOpen(false)}
-                      aria-label="Close notifications"
-                      className="h-8 w-8 grid place-items-center rounded-md text-muted-foreground hover:bg-accent transition"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {/* Sound toggle — persisted in localStorage. Only affects
+                          the in-app browser chime (the native app uses FCM channel sound). */}
+                      <button
+                        onClick={toggleNotifSound}
+                        aria-label={notifSoundOn ? 'Mute notification sound' : 'Unmute notification sound'}
+                        title={notifSoundOn ? 'Mute notification sound' : 'Unmute notification sound'}
+                        className={cn(
+                          'h-8 w-8 grid place-items-center rounded-md transition',
+                          notifSoundOn
+                            ? 'text-primary hover:bg-accent'
+                            : 'text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground'
+                        )}
+                      >
+                        {notifSoundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                      </button>
+                      <button
+                        onClick={() => setNotifOpen(false)}
+                        aria-label="Close notifications"
+                        className="h-8 w-8 grid place-items-center rounded-md text-muted-foreground hover:bg-accent transition"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filter tabs — All / Unread */}
+                  <div className="flex items-center gap-1 px-2 py-2 border-b border-border shrink-0 bg-muted/20">
+                    {(['all', 'unread'] as const).map((tab) => {
+                      const active = notifFilter === tab;
+                      const count = tab === 'all' ? notifItems.length : notifItems.filter((n) => !n?.read).length;
+                      return (
+                        <button
+                          key={tab}
+                          onClick={() => switchNotifFilter(tab)}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition',
+                            active
+                              ? 'bg-card text-primary shadow-sm border border-border'
+                              : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                          )}
+                        >
+                          <span className="capitalize">{tab}</span>
+                          {count > 0 && (
+                            <span className={cn(
+                              'inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-semibold leading-none',
+                              active
+                                ? (tab === 'unread' ? 'bg-rose-500 text-white' : 'bg-primary/15 text-primary')
+                                : 'bg-muted text-muted-foreground'
+                            )}>
+                              {count > 99 ? '99+' : count}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Body */}
@@ -725,17 +891,23 @@ export function RolePortal() {
                           </div>
                         ))}
                       </div>
-                    ) : notifItems.length === 0 ? (
+                    ) : filteredNotifItems.length === 0 ? (
                       <div className="px-4 py-10 text-center">
                         <div className="mx-auto h-12 w-12 rounded-full bg-muted grid place-items-center mb-3">
                           <Bell className="h-5 w-5 text-muted-foreground" />
                         </div>
-                        <div className="text-sm font-medium text-primary">No notifications</div>
-                        <div className="text-xs text-muted-foreground mt-1">You&rsquo;re all caught up.</div>
+                        <div className="text-sm font-medium text-primary">
+                          {notifFilter === 'unread' ? 'No unread notifications' : 'No notifications'}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {notifFilter === 'unread'
+                            ? 'You&rsquo;re all caught up. Switch to "All" to see history.'
+                            : 'You&rsquo;re all caught up.'}
+                        </div>
                       </div>
                     ) : (
                       <ul className="p-2 space-y-1">
-                        {notifItems.map((n) => {
+                        {filteredNotifItems.map((n) => {
                           const { Icon, text, bg } = notifMeta(n?.type);
                           return (
                             <li key={n?.id ?? Math.random()}>
