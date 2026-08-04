@@ -61,13 +61,33 @@ async function backgroundRefresh<T>(path: string) {
   } catch {}
 }
 
-// Get the stored auth token (from zustand persist — uses sessionStorage for per-tab sessions)
+// Get the stored auth token from the zustand-persisted auth state.
+// IMPORTANT: we read from localStorage (NOT sessionStorage) so the session
+// survives WebView/app closes — this is what keeps the user logged in across
+// app restarts and is a prerequisite for reliable background FCM pushes
+// (the device token is registered to the logged-in user).
 function getToken(): string | null {
+  try {
+    const raw = localStorage.getItem('concordia-app');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed?.state?.token || null;
+    }
+  } catch {}
+  // Backward-compat fallback: some users may still have a sessionStorage entry
+  // from the old build. Read it once so they don't get logged out on first
+  // load of the new build, then it migrates to localStorage on next login.
   try {
     const raw = sessionStorage.getItem('concordia-app');
     if (raw) {
       const parsed = JSON.parse(raw);
-      return parsed?.state?.token || null;
+      const token = parsed?.state?.token || null;
+      if (token) {
+        // Migrate to localStorage so it persists going forward.
+        localStorage.setItem('concordia-app', raw);
+        sessionStorage.removeItem('concordia-app');
+      }
+      return token;
     }
   } catch {}
   return null;
@@ -119,10 +139,15 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
 export const api = {
   login: (email: string, password: string, name?: string) =>
     request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
-  // Client-side logout — clears the persisted zustand session (auth is stateless JWT,
-  // no server round-trip needed). After calling, redirect to '/' to reload the app.
+  // Client-side logout — clears the persisted zustand session from localStorage
+  // (and any legacy sessionStorage entry). Auth is stateless bearer-token, so no
+  // server round-trip is needed. After calling, the app reloads to '/'.
   logout: async () => {
+    try { localStorage.removeItem('concordia-app'); } catch {}
     try { sessionStorage.removeItem('concordia-app'); } catch {}
+    // Also clear the API cache so a subsequent login as a different user
+    // doesn't see stale cached data from the previous user.
+    invalidateCache();
   },
   changePassword: (currentPassword: string, newPassword: string) =>
     request<any>('auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),

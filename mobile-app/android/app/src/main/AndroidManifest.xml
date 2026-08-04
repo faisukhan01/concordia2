@@ -15,6 +15,16 @@
     <!-- SCHEDULE_EXACT_ALARM — for precise notification scheduling (used by flutter_local_notifications). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- FOREGROUND_SERVICE + FOREGROUND_SERVICE_DATA_SYNC — required on Android 14+ (API 34+)
+         for the FCM background isolate to spin up and process data messages reliably.
+         Without this, background delivery can be throttled on Android 14+ devices. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!-- REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — lets the app prompt the user to whitelist
+         it from battery optimization. Critical on Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo)
+         which aggressively kill background apps. The user must grant this for true
+         WhatsApp-style always-on delivery. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <application
         android:label="Concordia College"
@@ -49,16 +59,15 @@
              to use. Without this meta-data, background notifications are SILENTLY
              DROPPED on Android 8+.
 
-             v3 (v3.7.0): Changed from `concordia_notifications_v2` →
-             `concordia_notifications_v3` because Android does NOT let apps change
-             a channel's settings after creation. If the user did an in-place
-             upgrade (didn't uninstall v3.6.0/v3.6.1 first), the v2 channel may
-             have been created with broken sound settings, and the new
-             `playSound: true` was SILENTLY IGNORED. A fresh channel ID forces
-             creation of a new channel with the correct sound + high importance. -->
+             v4 (v3.8.0): Changed from `concordia_notifications_v3` →
+             `concordia_notifications_v4`. Android does NOT let apps change a
+             channel's settings after creation, so each release that needs to
+             correct sound settings uses a FRESH channel ID. The app deletes the
+             old v1/v2/v3 channels at startup so they disappear from Settings,
+             and creates a new v4 channel with sound + high importance. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="concordia_notifications_v3" />
+            android:value="concordia_notifications_v4" />
         <!-- Default notification icon for FCM background pushes.
              MUST be a white-on-transparent drawable (NOT a colored mipmap).
              Android 5+ silhouettes status bar icons to white, so a colored

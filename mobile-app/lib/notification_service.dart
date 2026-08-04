@@ -13,7 +13,7 @@
 // which the web app's api.ts calls to POST /api/device-tokens.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// HYBRID FCM PAYLOAD (WhatsApp-style) — v3.7.0
+// HYBRID FCM PAYLOAD (WhatsApp-style) — v3.8.0
 // ─────────────────────────────────────────────────────────────────────────
 // The server sends BOTH a `notification` field AND a `data` field.
 //
@@ -40,11 +40,17 @@
 //
 // CHANNEL IMMUTABILITY:
 //   Android does NOT let apps change a channel's settings after creation.
-//   v3.6.0/v3.6.1 used `concordia_notifications_v2`. If a user did an in-place
-//   upgrade (didn't uninstall first), that channel may have been created with
-//   broken sound settings, and v3.6.1's `playSound: true` was SILENTLY
-//   IGNORED. v3.7.0 uses a FRESH channel ID `concordia_notifications_v3` to
-//   force creation of a new channel with correct sound + high importance.
+//   v3.7.0 used `concordia_notifications_v3`. v3.8.0 introduces `_v4` —
+//   a FRESH channel ID that forces Android to create a new channel with the
+//   correct sound + high importance. The old v1/v2/v3 channels are deleted at
+//   startup so they disappear from Settings.
+//
+// BATTERY OPTIMIZATION (Chinese OEMs):
+//   v3.8.0 also prompts the user to whitelist the app from battery
+//   optimization. Without this, Xiaomi/Huawei/Oppo/Vivo aggressively kill the
+//   app in the background and even the OS-tray notification path can be
+//   delayed or dropped. This is the single most important setting for
+//   WhatsApp-style always-on delivery on those devices.
 //
 // The background handler (`_firebaseMessagingBackgroundHandler`) is still
 // registered as a fallback — if the OS does spin up the isolate (e.g. on
@@ -88,20 +94,21 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       const InitializationSettings(android: androidInit),
     );
 
-    // Delete OLD channels (v1, v2) so they disappear from Android settings.
+    // Delete OLD channels (v1, v2, v3) so they disappear from Android settings.
     // Android does NOT let apps change a channel's settings after creation,
-    // so if v2 was created by an older app version with broken sound, the
-    // only fix is to use a NEW channel ID (v3) and delete the old ones.
+    // so the only fix for a channel created with broken sound by an older app
+    // version is to use a NEW channel ID (v4) and delete the old ones.
     final bgAndroidPlugin = flutterLocalNotifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
     await bgAndroidPlugin?.deleteNotificationChannel('concordia_notifications');
     await bgAndroidPlugin?.deleteNotificationChannel('concordia_notifications_v2');
+    await bgAndroidPlugin?.deleteNotificationChannel('concordia_notifications_v3');
 
-    // Create the FRESH v3 channel (sound + vibration + high importance).
+    // Create the FRESH v4 channel (sound + vibration + high importance).
     await bgAndroidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'concordia_notifications_v3',
+        'concordia_notifications_v4',
         'Concordia Notifications',
         description:
             'Announcements, exams, marks, attendance, and fee reminders from Concordia College.',
@@ -125,7 +132,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       body,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          'concordia_notifications_v3',
+          'concordia_notifications_v4',
           'Concordia Notifications',
           channelDescription:
               'Announcements, exams, marks, attendance, and fee reminders from Concordia College.',
@@ -159,14 +166,13 @@ class NotificationService {
   // FCM payload on the server (`android.notification.channel_id`) AND in the
   // AndroidManifest.xml (`com.google.firebase.messaging.default_notification_channel_id`).
   //
-  // v3 (v3.7.0): We switched from `concordia_notifications_v2` →
-  // `concordia_notifications_v3` because Android does NOT let apps change a
-  // channel's settings after creation. If a user did an in-place upgrade
-  // (didn't uninstall v3.6.0/v3.6.1 first), the v2 channel may have been
-  // created with broken sound settings, and `playSound: true` was SILENTLY
-  // IGNORED. A fresh channel ID forces creation of a new channel with correct
-  // sound + high importance.
-  static const String _channelId = 'concordia_notifications_v3';
+  // v4 (v3.8.0): We switched from `concordia_notifications_v3` →
+  // `concordia_notifications_v4`. Android does NOT let apps change a channel's
+  // settings after creation, so each release that needs to correct sound
+  // settings uses a FRESH channel ID. The old v1/v2/v3 channels are deleted
+  // at startup so they disappear from Settings, and a new v4 channel is
+  // created with the correct sound + high importance.
+  static const String _channelId = 'concordia_notifications_v4';
   static const String _channelName = 'Concordia Notifications';
   static const String _channelDesc =
       'Announcements, exams, marks, attendance, and fee reminders from Concordia College.';
@@ -174,6 +180,12 @@ class NotificationService {
   // A JS callback the web app can set to receive the token + tap events.
   // We invoke it via the WebView's JavaScript channel.
   static const MethodChannel _channel = MethodChannel('concordia/fcm');
+
+  // Dedicated channel for the battery-optimization request. We use a separate
+  // channel so the native MainActivity handler is cleanly scoped to just this
+  // one platform call (no risk of method-name collisions with the FCM bridge).
+  static const MethodChannel _batteryChannel =
+      MethodChannel('concordia/battery');
 
   bool _initialized = false;
 
@@ -188,19 +200,20 @@ class NotificationService {
       // 2. Create the Android notification channel (required for Android 8+).
       //    Without this, notifications are silently dropped on Android 8+.
       //    We use Importance.high so the notification makes a sound + appears as a heads-up banner.
-      //    We DELETE the old v1 + v2 channels so they don't confuse the user
+      //    We DELETE the old v1/v2/v3 channels so they don't confuse the user
       //    in Android settings (they just disappear from the list), AND so
-      //    we bypass Android's channel immutability restriction (if v2 was
+      //    we bypass Android's channel immutability restriction (if v3 was
       //    created by an older app version with broken sound, we can't fix
-      //    it — we can only use a new v3 channel ID).
+      //    it — we can only use a new v4 channel ID).
       try {
         final androidPlugin = _localNotifications
             .resolvePlatformSpecificImplementation<
                 AndroidFlutterLocalNotificationsPlugin>();
-        // Delete old v1 + v2 channels (no-op if they don't exist).
+        // Delete old v1/v2/v3 channels (no-op if they don't exist).
         await androidPlugin?.deleteNotificationChannel('concordia_notifications');
         await androidPlugin?.deleteNotificationChannel('concordia_notifications_v2');
-        // Create the fresh v3 channel with sound + vibration.
+        await androidPlugin?.deleteNotificationChannel('concordia_notifications_v3');
+        // Create the fresh v4 channel with sound + vibration.
         await androidPlugin?.createNotificationChannel(
           const AndroidNotificationChannel(
             _channelId,
@@ -263,6 +276,16 @@ class NotificationService {
         debugPrint('[NotificationService] local notif permission request failed: $e');
       }
 
+      // 5c. CRITICAL — Request battery-optimization whitelist (WhatsApp-style).
+      //     On Chinese OEMs (Xiaomi, Huawei, Oppo, Vivo, Realme, OnePlus) the OS
+      //     AGGRESSIVELY kills background apps to save battery. Even with a hybrid
+      //     FCM payload, the OS may delay or drop background notifications if the
+      //     app is battery-optimized. Asking the user to whitelist the app is the
+      //     single most impactful setting for reliable always-on delivery.
+      //     This is a no-op on stock Android (it auto-grants) and only prompts on
+      //     devices that actually restrict background execution.
+      await _requestIgnoreBatteryOptimizations();
+
       // 6. Get the FCM token + register it. Also listen for token refresh.
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
@@ -306,6 +329,31 @@ class NotificationService {
       _channel.invokeMethod('onToken', {'token': token});
     } catch (e) {
       debugPrint('[NotificationService] failed to send token to web: $e');
+    }
+  }
+
+  /// Ask the OS to whitelist this app from battery optimization.
+  ///
+  /// On stock Android this is a no-op (the app is already allowed). On
+  /// aggressive OEMs (Xiaomi, Huawei, Oppo, Vivo, Realme, OnePlus), it pops
+  /// the system "Allow background activity" dialog. Without this, those OEMs
+  /// will freeze or kill the app in the background — and even though the FCM
+  /// hybrid payload is displayed by the OS, the delivery can be delayed by
+  /// minutes or dropped entirely during doze mode.
+  ///
+  /// We only prompt if the app is NOT already whitelisted (so we don't spam
+  /// the user with a dialog on every launch).
+  Future<void> _requestIgnoreBatteryOptimizations() async {
+    try {
+      // First check if we're already whitelisted (no point prompting twice).
+      final already = await _batteryChannel.invokeMethod<bool>('isIgnoring');
+      if (already == true) return;
+      // Not whitelisted — request it. This shows the system dialog.
+      await _batteryChannel.invokeMethod<void>('requestIgnore');
+    } catch (e) {
+      // Non-fatal — the app still works without the whitelist, just with
+      // degraded background delivery on aggressive OEMs.
+      debugPrint('[NotificationService] battery-opt request failed: $e');
     }
   }
 

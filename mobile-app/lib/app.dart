@@ -213,7 +213,7 @@ class _SplashToWebViewState extends State<SplashToWebView> {
             _runJs('''
               window.concordiaNative = window.concordiaNative || {};
               window.concordiaNative.isNativeApp = true;
-              window.concordiaNative.appVersion = "3.7.0";
+              window.concordiaNative.appVersion = "3.8.0";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});

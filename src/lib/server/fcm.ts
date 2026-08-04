@@ -181,12 +181,11 @@ async function sendToTokens(
   //
   // CHANNEL IMMUTABILITY:
   //   Android does NOT let apps change a channel's settings after creation.
-  //   v3.6.0/v3.6.1 used `concordia_notifications_v2` — if a user did an
-  //   in-place upgrade (didn't uninstall first), that channel may have been
-  //   created with broken sound settings, and v3.6.1's `playSound: true`
-  //   was SILENTLY IGNORED. v3.7.0 uses a FRESH channel ID
-  //   `concordia_notifications_v3` to force creation of a new channel with
-  //   correct sound + high importance.
+  //   v3.6.0/v3.6.1 used `concordia_notifications_v2`, v3.7.0 used `_v3`.
+  //   v3.8.0 introduces `_v4`. Each release that needs to correct channel
+  //   sound settings uses a FRESH channel ID to force Android to create a
+  //   new channel with the correct sound + high importance — the old channel
+  //   is deleted by the app at startup so it disappears from Settings.
   // ─────────────────────────────────────────────────────────────────────
   const fullData: Record<string, string> = {
     title,
@@ -207,7 +206,7 @@ async function sendToTokens(
         // MUST match the channel created at app startup + the manifest's
         // default_notification_channel_id. This is the channel that
         // determines sound, vibration, importance, and heads-up banner.
-        channel_id: 'concordia_notifications_v3',
+        channel_id: 'concordia_notifications_v4',
         // Use the default notification sound (the device's stock sound).
         sound: 'default',
         // Default vibration pattern.
@@ -221,10 +220,6 @@ async function sendToTokens(
         notification_priority: 'PRIORITY_HIGH',
         // Increment the badge count (launcher icon badge on supported launchers).
         notification_count: 1,
-        // Tag allows grouping/Replacing — using 'concordia' so multiple
-        // notifications stack rather than replace each other.
-        // (Omitting tag = each push gets its own notification row.)
-        // tag: 'concordia',
         // The status bar icon — must be a white-on-transparent drawable.
         icon: '@drawable/ic_notification',
         // Tint applied to the icon (Concordia orange).
