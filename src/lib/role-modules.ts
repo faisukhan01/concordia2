@@ -181,6 +181,15 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'academic-exams', name: 'Exams & Date Sheets', icon: FileText, color: PRIMARY },
       { id: 'report-cards', name: 'Result Cards', icon: Award, color: PRIMARY },
     ]},
+    // Student Records — the Academic Office can now enroll students with full
+    // details and manage their fees, exactly like Admissions + Accountant.
+    // These namespaced IDs (role:moduleId) are delegated by AcademicPortal to
+    // the dedicated Admissions / Accountant views (no logic duplicated).
+    { group: 'Student Records', items: [
+      { id: 'admissions:admissions-new', name: 'Add Student', icon: UserPlus, color: PRIMARY },
+      { id: 'admissions:admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
+      { id: 'accountant:accountant-challans', name: 'Fees & Installments', icon: Receipt, color: SECONDARY },
+    ]},
     { group: 'Account', flat: true, items: [
       { id: 'settings', name: 'Settings', icon: Settings, color: SECONDARY },
     ]},

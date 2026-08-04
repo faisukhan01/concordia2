@@ -17,20 +17,65 @@
 // ─────────────────────────────────────────────────────────────
 
 import { motion } from 'framer-motion';
-import { ChevronRight, GraduationCap, Layers, Users, BookOpen, FlaskConical, Calculator, FileText } from 'lucide-react';
+import { ChevronRight, GraduationCap, Layers, Users, BookOpen, FlaskConical, Calculator, FileText, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // The canonical 6-department catalog for Concordia College.
+// NOTE: these are the STORED (canonical) values used across the DB and API.
+// The human-friendly labels shown in the UI live in DEPT_LABELS below — use
+// deptLabel(canonical) whenever rendering a program to the user.
 export const DEPARTMENTS = [
   'FSC Pre Med',
   'FSC Pre Eng',
   'ICS Phy',
   'ICS Stats',
-  'FA',
   'FA IT',
+  'I.Com',
 ] as const;
 
 export type Department = typeof DEPARTMENTS[number];
+
+// ── Display labels ──
+// Canonical value → the exact label the college wants shown everywhere.
+// Keeping canonical values stable (e.g. 'FSC Pre Med') means existing student
+// records don't need re-migrating — only the presentation changes.
+export const DEPT_LABELS: Record<string, string> = {
+  'FSC Pre Med': 'Fsc(Pre-Medical)',
+  'FSC Pre Eng': 'Fsc(Pre-Engineering)',
+  'ICS Phy': 'Ics(Physics)',
+  'ICS Stats': 'Ics(Stats)',
+  'FA IT': 'FA(IT)',
+  'I.Com': 'I.Com',
+};
+
+/** Returns the human-friendly program label for a canonical value (falls back to the raw value). */
+export function deptLabel(canonical?: string | null): string {
+  if (!canonical) return '';
+  return DEPT_LABELS[canonical] || canonical;
+}
+
+// ── Program auto-detection (for Excel import) ──
+// Maps the free-text program strings found in college spreadsheets
+// (e.g. "Fsc (Med)", "ICS", "FA", "FSC", "ICOM") to a canonical program.
+// Decisions locked with the college:
+//   • sheet "FA" (general)  → FA IT
+//   • sheet "ICOM" / "*Com" → I.Com
+//   • plain "FSC" (no Med/Eng) → FSC Pre Med (best-guess, editable in preview)
+//   • plain "ICS" (no Stat)    → ICS Phy     (best-guess, editable in preview)
+// Returns '' when nothing matches, so the row is flagged for manual review.
+export function detectProgram(raw?: string | null): string {
+  if (raw == null) return '';
+  const s = String(raw).toLowerCase().replace(/[^a-z]/g, '');
+  if (!s) return '';
+  if (s.includes('med')) return 'FSC Pre Med';
+  if (s.includes('eng')) return 'FSC Pre Eng';
+  if (s.includes('icom')) return 'I.Com';
+  if (s.includes('ics')) return s.includes('stat') ? 'ICS Stats' : 'ICS Phy';
+  if (s.includes('fsc')) return 'FSC Pre Med';
+  if (s.includes('fait') || s === 'fa' || s.includes('fa')) return 'FA IT';
+  if (s.includes('com')) return 'I.Com';
+  return '';
+}
 
 // Department metadata for card display.
 const DEPT_META: Record<string, { icon: LucideIcon; desc: string; gradient: string }> = {
@@ -38,8 +83,8 @@ const DEPT_META: Record<string, { icon: LucideIcon; desc: string; gradient: stri
   'FSC Pre Eng': { icon: Calculator, desc: 'Pre-Engineering (Math, Physics, Chemistry)', gradient: 'from-sky-500/20 to-sky-600/10' },
   'ICS Phy': { icon: Layers, desc: 'Computer Science with Physics', gradient: 'from-violet-500/20 to-violet-600/10' },
   'ICS Stats': { icon: Layers, desc: 'Computer Science with Statistics', gradient: 'from-amber-500/20 to-amber-600/10' },
-  'FA': { icon: BookOpen, desc: 'Faculty of Arts (General)', gradient: 'from-emerald-500/20 to-emerald-600/10' },
   'FA IT': { icon: FileText, desc: 'Faculty of Arts with IT', gradient: 'from-teal-500/20 to-teal-600/10' },
+  'I.Com': { icon: Wallet, desc: 'Commerce (Accounting, Economics, Business)', gradient: 'from-emerald-500/20 to-emerald-600/10' },
 };
 
 // ── Breadcrumb ──
@@ -52,7 +97,7 @@ export function HierarchyBreadcrumb(props: {
 }) {
   const { dept, part, cls, section, onClear } = props;
   const crumbs: { label: string; onClick?: () => void }[] = [];
-  if (dept) crumbs.push({ label: dept });
+  if (dept) crumbs.push({ label: deptLabel(dept) });
   if (part) crumbs.push({ label: `Part ${part}` });
   if (cls) crumbs.push({ label: cls });
   if (section) crumbs.push({ label: `Section ${section}` });
@@ -108,7 +153,7 @@ export function DeptCardGrid(props: {
                 </span>
               )}
             </div>
-            <h3 className="text-base font-bold text-foreground mb-1">{dept}</h3>
+            <h3 className="text-base font-bold text-foreground mb-1">{deptLabel(dept)}</h3>
             <p className="text-xs text-muted-foreground line-clamp-2">{meta?.desc || ''}</p>
             <div className="mt-3 flex items-center gap-1 text-xs font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity">
               Open
@@ -224,7 +269,7 @@ export function ClassCardGrid(props: {
                 </span>
               )}
             </div>
-            <h3 className="text-sm font-bold text-foreground">{name}</h3>
+            <h3 className="text-sm font-bold text-foreground">{deptLabel(name)}</h3>
             <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
               {secCount > 1 && <span>Sections: {sections.map(s => s.section).join(', ')}</span>}
               {studentCount > 0 && (
@@ -252,10 +297,15 @@ export function SectionCardGrid(props: {
   getStudentCount?: (clsId: string) => number;
 }) {
   const { sections, onSelect, getStudentCount } = props;
-  if (sections.length <= 1) return null;
+  if (sections.length === 0) return null;
+  // Always list every section (even a single one) so the exact section names
+  // and count are visible after opening a class. Sorted A→Z.
+  const sorted = [...sections].sort((a, b) =>
+    (a.section || '').localeCompare(b.section || ''),
+  );
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-      {sections.map((s, i) => {
+      {sorted.map((s, i) => {
         const count = getStudentCount ? getStudentCount(s.id) || 0 : 0;
         return (
           <motion.button

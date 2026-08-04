@@ -19,7 +19,11 @@ export const metadata: Metadata = {
   keywords: ["Concordia College", "School Management", "Education Portal", "Admissions", "Attendance", "Fees", "Academics", "ERP"],
   authors: [{ name: "Concordia College" }],
   icons: {
-    icon: "/concordia-logo.png",
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
   },
   openGraph: {
     title: "Concordia College — Management Portal",

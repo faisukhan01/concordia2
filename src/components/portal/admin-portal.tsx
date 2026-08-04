@@ -53,7 +53,7 @@ import { AccountantPortal } from './accountant-portal';
 import { AcademicPortal } from './academic-portal';
 import { useApp } from '@/lib/store';
 import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
-import { DEPARTMENTS } from './shared/concordia-hierarchy';
+import { DEPARTMENTS, deptLabel } from './shared/concordia-hierarchy';
 import { motion } from 'framer-motion';
 
 type Props = { activeModule: string; user: any };
@@ -253,7 +253,7 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
       const p = (s.program || '').trim();
       if (map[p] != null) map[p] += 1;
     }
-    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+    return DEPARTMENTS.map((d) => ({ label: deptLabel(d), value: map[d] }));
   }, [students]);
 
   // Monthly fee collection — last 6 months from paid invoices

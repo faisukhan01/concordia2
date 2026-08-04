@@ -153,6 +153,9 @@ const MIGRATION_STATEMENTS: string[] = [
   `ALTER TABLE users ADD COLUMN part TEXT DEFAULT '1'`,
   `ALTER TABLE classes ADD COLUMN program TEXT`,
   `ALTER TABLE classes ADD COLUMN part TEXT DEFAULT '1'`,
+  // Extra student fields captured by the Excel bulk-import (Father CNIC + Gender).
+  `ALTER TABLE users ADD COLUMN fatherCnic TEXT`,
+  `ALTER TABLE users ADD COLUMN gender TEXT`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===
@@ -165,7 +168,8 @@ const DATA_MIGRATION_STATEMENTS: string[] = [
     WHEN name LIKE '%ICS%Stat%' THEN 'ICS Stats'
     WHEN name LIKE '%ICS%' THEN 'ICS Phy'
     WHEN name LIKE '%FA%IT%' THEN 'FA IT'
-    WHEN name LIKE '%FA%' THEN 'FA'
+    WHEN name LIKE '%I.Com%' OR name LIKE '%ICom%' OR name LIKE '%Commerce%' THEN 'I.Com'
+    WHEN name LIKE '%FA%' THEN 'I.Com'
     ELSE program
   END WHERE program IS NULL OR program = ''`,
   // Backfill classes.part from class name patterns (e.g. "ICS-1-A" → part 1)
@@ -179,15 +183,22 @@ const DATA_MIGRATION_STATEMENTS: string[] = [
     SELECT COALESCE(c.part, '1') FROM classes c
     WHERE c.name = users.class AND c.branchId = users.branchId
   ) WHERE (part IS NULL OR part = '') AND role = 'student'`,
-  // Migrate legacy program names on students to the new 6-dept catalog
+  // Migrate legacy program names on students to the new 6-dept catalog.
+  // NOTE: 'FA' (Faculty of Arts General) was retired and replaced by 'I.Com'.
+  // Legacy Commerce-ish programs now map straight to 'I.Com'.
   `UPDATE users SET program = CASE
     WHEN program = 'F.Sc Pre-Medical' THEN 'FSC Pre Med'
     WHEN program = 'F.Sc Pre-Engineering' THEN 'FSC Pre Eng'
     WHEN program = 'ICS' THEN 'ICS Phy'
-    WHEN program = 'F.A General Science' THEN 'FA'
-    WHEN program IN ('I.Com', 'ADP', 'BS Commerce') THEN 'FA'
+    WHEN program IN ('F.A General Science', 'ADP', 'BS Commerce', 'I.Com') THEN 'I.Com'
     ELSE program
   END WHERE program IS NOT NULL AND program != ''`,
+  // Retire 'FA' → 'I.Com' on any already-migrated students.
+  `UPDATE users SET program = 'I.Com' WHERE program = 'FA'`,
+  // Retire 'FA' → 'I.Com' on classes too (and keep the class name in sync so
+  // the flattened Program→Part→Section drill-down groups them correctly).
+  `UPDATE classes SET program = 'I.Com' WHERE program = 'FA'`,
+  `UPDATE classes SET name = 'I.Com' WHERE name = 'FA'`,
 ];
 
 // === One-time cleanup statements — drop unused legacy tables ===

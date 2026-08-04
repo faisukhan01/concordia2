@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
-import { useApp } from '@/lib/store';
+import { useApp, useNavState } from '@/lib/store';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -98,6 +98,7 @@ import {
   SectionCardGrid,
   HierarchyBreadcrumb,
   DEPARTMENTS,
+  deptLabel,
 } from './shared/concordia-hierarchy';
 import {
   SimpleBarChart,
@@ -496,7 +497,7 @@ function OverviewView({
       if (map.has(p)) map.set(p, (map.get(p) || 0) + 1);
     }
     return DEPARTMENTS.map((dept) => ({
-      label: dept,
+      label: deptLabel(dept),
       value: map.get(dept) || 0,
     }));
   }, [students]);
@@ -1341,7 +1342,7 @@ function NewEnrollmentView({
                 <SelectContent>
                   {PROGRAMS.map((p) => (
                     <SelectItem key={p} value={p}>
-                      {p}
+                      {deptLabel(p)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1587,7 +1588,7 @@ export function StudentRecordsView({
   onLocalUpsert: (s: any) => void;
 }) {
   const [search, setSearch] = useState('');
-  const [drill, setDrill] = useState<Drill>({ dept: null, part: '1', cls: null, section: null });
+  const [drill, setDrill] = useNavState<Drill>('admissions-students', { dept: null, part: '1', cls: null, section: null });
   const [editing, setEditing] = useState<any | null>(null);
   const [docStudent, setDocStudent] = useState<any | null>(null);
 
@@ -1669,22 +1670,16 @@ export function StudentRecordsView({
     setDrill({ dept, part: '1', cls: null, section: null });
 
   const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
-    // If the class has multiple sections, clear the section selection so the
-    // SectionCardGrid shows; otherwise pre-fill section with the single
-    // section so the table renders immediately.
-    const secs = classes.filter((c) => c.name === cls.name);
-    if (secs.length > 1) {
-      setDrill({ ...drill, cls, section: null });
-    } else {
-      setDrill({ ...drill, cls, section: cls });
-    }
+    // Always open the section step so the exact section name(s) and count are
+    // shown — even when the class has a single section.
+    setDrill({ ...drill, cls, section: null });
   };
 
   const handleSelectSection = (section: {
     id: string;
     name: string;
     section: string;
-  }) => setDrill({ ...drill, section });
+  }) => setDrill({ ...drill, cls: section, section });
 
   const handleClearHierarchy = () =>
     setDrill({ dept: null, part: '1', cls: null, section: null });
@@ -1790,8 +1785,11 @@ export function StudentRecordsView({
             />
           )}
         </motion.div>
-      ) : !drill.cls ? (
-        // ── Level 2: Part toggle + class cards ──
+      ) : !drill.section ? (
+        // ── Level 2 (merged): Part toggle + section cards, shown directly ──
+        // In the flatten model the Program IS the class, so we skip the
+        // redundant class-card step: after Department + Part we list the
+        // program's sections right here (with their exact names + counts).
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1805,9 +1803,11 @@ export function StudentRecordsView({
           />
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {deptLabel(drill.dept)} · Part {drill.part} — {classesInDept.length} Section{classesInDept.length === 1 ? '' : 's'}
+              </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.
+                Pick Part 1 / Part 2, then choose a section to view its students.
               </p>
             </div>
             <PartToggle value={drill.part} onChange={(p) =>
@@ -1815,8 +1815,8 @@ export function StudentRecordsView({
             } />
           </div>
           {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Array.from({ length: 3 }).map((_, i) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-28 rounded-xl" />
               ))}
             </div>
@@ -1824,59 +1824,20 @@ export function StudentRecordsView({
             <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
               <FolderOpen className="h-8 w-8 mx-auto mb-2 text-gray-300" />
               <p className="text-sm font-medium text-gray-900">
-                No classes found for {drill.dept} · Part {drill.part}
+                No sections yet for {deptLabel(drill.dept)} · Part {drill.part}
               </p>
               <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
-                The Academic Office needs to create classes with program={drill.dept} and
-                part={drill.part}. Meanwhile, you can still search students by name or CNIC
-                above.
+                The Academic Office adds sections from Classes &amp; Teachers. You can still
+                search students by name or CNIC above.
               </p>
             </div>
           ) : (
-            <ClassCardGrid
-              classes={classesInDept}
-              onSelect={handleSelectClass}
+            <SectionCardGrid
+              sections={classesInDept}
+              onSelect={handleSelectSection}
               getStudentCount={getStudentCountForClass}
             />
           )}
-        </motion.div>
-      ) : hasMultipleSections && !drill.section ? (
-        // ── Level 3a: Section cards (only when multiple sections exist) ──
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          className="space-y-4"
-        >
-          <HierarchyBreadcrumb
-            dept={drill.dept}
-            part={drill.part}
-            cls={drill.cls.name}
-            onClear={handleClearHierarchy}
-          />
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">
-                {drill.cls.name} — Select Section
-              </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                This class has multiple sections. Pick one to view its students.
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-              onClick={() => setDrill((d) => ({ ...d, cls: null, section: null }))}
-            >
-              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to classes
-            </Button>
-          </div>
-          <SectionCardGrid
-            sections={sectionsOfClass}
-            onSelect={handleSelectSection}
-            getStudentCount={getStudentCountForClass}
-          />
         </motion.div>
       ) : (
         // ── Level 4: Student table ──
@@ -1908,15 +1869,11 @@ export function StudentRecordsView({
                 size="sm"
                 className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                 onClick={() =>
-                  setDrill((d) => ({
-                    ...d,
-                    cls: hasMultipleSections ? d.cls : null,
-                    section: null,
-                  }))
+                  setDrill((d) => ({ ...d, cls: null, section: null }))
                 }
               >
                 <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-                {hasMultipleSections ? 'Back to sections' : 'Back to classes'}
+                Back to sections
               </Button>
             </div>
             <StudentTable
@@ -2555,7 +2512,7 @@ function EditStudentSheet({
               <SelectContent>
                 {PROGRAMS.map((p) => (
                   <SelectItem key={p} value={p}>
-                    {p}
+                    {deptLabel(p)}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -29,7 +29,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { useApp } from '@/lib/store';
+import { useApp, useNavState } from '@/lib/store';
 import {
   DEPARTMENTS,
   DeptCardGrid,
@@ -37,6 +37,7 @@ import {
   ClassCardGrid,
   SectionCardGrid,
   HierarchyBreadcrumb,
+  deptLabel,
 } from '@/components/portal/shared/concordia-hierarchy';
 import {
   SimpleBarChart,
@@ -650,7 +651,7 @@ function OverviewView({
       const p = (s.program || '').trim();
       if (map[p] != null) map[p] += 1;
     }
-    return DEPARTMENTS.map((d) => ({ label: d, value: map[d] }));
+    return DEPARTMENTS.map((d) => ({ label: deptLabel(d), value: map[d] }));
   }, [students]);
 
   return (
@@ -984,7 +985,7 @@ function FeeInstallmentsView({
   };
 
   const [search, setSearch] = useState('');
-  const [drill, setDrill] = useState<FeeDrill>({
+  const [drill, setDrill] = useNavState<FeeDrill>('accountant-challans', {
     dept: null,
     part: '1',
     cls: null,
@@ -1303,8 +1304,7 @@ function FeeInstallmentsView({
     setDrill({ dept, part: '1', cls: null, section: null });
   const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
     const secs = classes.filter((c) => c.name === cls.name);
-    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
-    else setDrill({ ...drill, cls, section: cls });
+    setDrill({ ...drill, cls, section: null });
   };
   const handleSelectSection = (section: { id: string; name: string; section: string }) =>
     setDrill({ ...drill, section });
@@ -1861,7 +1861,7 @@ function FeeInstallmentsView({
             />
           )}
         </motion.div>
-      ) : hasMultipleSections && !drill.section ? (
+      ) : !drill.section ? (
         // ── L3: Section cards (only when multiple sections exist) ──
         <motion.div
           initial={{ opacity: 0, y: 6 }}
@@ -1931,13 +1931,13 @@ function FeeInstallmentsView({
               onClick={() =>
                 setDrill((d) => ({
                   ...d,
-                  cls: hasMultipleSections ? d.cls : null,
+                  cls: d.cls,
                   section: null,
                 }))
               }
             >
               <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-              {hasMultipleSections ? 'Back to sections' : 'Back to classes'}
+              Back to sections
             </Button>
           </div>
           {renderStudentPickerAndDetail()}
@@ -2003,7 +2003,7 @@ function MiscChargesView({
   const [bulkSaving, setBulkSaving] = useState(false);
 
   // ── Hierarchy drill state ──
-  const [drill, setDrill] = useState<MiscDrill>({
+  const [drill, setDrill] = useNavState<MiscDrill>('accountant-misc', {
     dept: null,
     part: '1',
     cls: null,
@@ -2240,8 +2240,7 @@ function MiscChargesView({
     setDrill({ dept, part: '1', cls: null, section: null });
   const handleSelectClass = (cls: { id: string; name: string; section: string }) => {
     const secs = classes.filter((c) => c.name === cls.name);
-    if (secs.length > 1) setDrill({ ...drill, cls, section: null });
-    else setDrill({ ...drill, cls, section: cls });
+    setDrill({ ...drill, cls, section: null });
   };
   const handleSelectSection = (section: { id: string; name: string; section: string }) =>
     setDrill({ ...drill, section });
@@ -2388,7 +2387,7 @@ function MiscChargesView({
                 <SelectItem value="All">All Departments</SelectItem>
                 {DEPARTMENTS.map((d) => (
                   <SelectItem key={d} value={d}>
-                    {d}
+                    {deptLabel(d)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -2436,7 +2435,7 @@ function MiscChargesView({
             <span className="font-semibold">Part {bulkPart}</span>
             {bulkDept !== 'All' ? (
               <>
-                {' '}· <span className="font-semibold">{bulkDept}</span>
+                {' '}· <span className="font-semibold">{deptLabel(bulkDept)}</span>
               </>
             ) : null}
             .
@@ -2573,7 +2572,7 @@ function MiscChargesView({
             />
           )}
         </motion.div>
-      ) : hasMultipleSections && !drill.section ? (
+      ) : !drill.section ? (
         // ── L3: Section cards (only when multiple sections exist) ──
         <motion.div
           initial={{ opacity: 0, y: 6 }}
@@ -2642,13 +2641,13 @@ function MiscChargesView({
               onClick={() =>
                 setDrill((d) => ({
                   ...d,
-                  cls: hasMultipleSections ? d.cls : null,
+                  cls: d.cls,
                   section: null,
                 }))
               }
             >
               <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-              {hasMultipleSections ? 'Back to sections' : 'Back to classes'}
+              Back to sections
             </Button>
           </div>
           {renderChargesList(

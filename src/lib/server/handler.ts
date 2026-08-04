@@ -367,6 +367,103 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ user: { id, name, rollNo, email, role }, defaultPassword: password }, { status: 201 });
     }
 
+    // ── Bulk student import (Excel) — Academic / Admissions / Admin ──
+    // Accepts pre-parsed, pre-mapped rows from the client's import preview.
+    // For each row: generates a roll number (CC-YY-####) + password, dedupes
+    // against existing students, auto-creates the (program, part, section)
+    // class row so the student shows up in the drill-downs, and (optionally)
+    // sets a locked base fee. Returns a created/skipped/errors summary.
+    if (method === 'POST' && path === 'students/import') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const rows: any[] = Array.isArray(body?.students) ? body.students : [];
+      if (rows.length === 0) return NextResponse.json({ error: 'No students to import' }, { status: 400 });
+      const instId = user.instituteId;
+      const brId = body?.branchId || user.branchId;
+      if (!brId) return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
+
+      // 1) Roll-number generator — continue the CC-YY-#### sequence for this branch.
+      const yy = new Date().getFullYear().toString().slice(-2);
+      const prefix = `CC-${yy}-`;
+      const existingRolls = await db.execute({ sql: 'SELECT rollNo FROM users WHERE branchId = ? AND rollNo LIKE ?', args: [brId, prefix + '%'] });
+      let seq = 0;
+      for (const r of existingRolls.rows as any[]) {
+        const m = String(r.rollNo || '').match(/(\d+)\s*$/);
+        if (m) seq = Math.max(seq, parseInt(m[1], 10));
+      }
+
+      // 2) Dedupe sets (by CNIC digits, and by name|father) for this branch.
+      const existingStudents = await db.execute({ sql: "SELECT name, fatherName, cnic FROM users WHERE branchId = ? AND role = 'student'", args: [brId] });
+      const cnicSet = new Set<string>();
+      const nameFatherSet = new Set<string>();
+      for (const r of existingStudents.rows as any[]) {
+        const cd = String(r.cnic || '').replace(/\D/g, '');
+        if (cd) cnicSet.add(cd);
+        nameFatherSet.add(`${String(r.name || '').toLowerCase().trim()}|${String(r.fatherName || '').toLowerCase().trim()}`);
+      }
+
+      // 3) Ensure a class row exists for each (program, part, section).
+      const classCache = new Set<string>();
+      const ensureClass = async (program: string, part: string, section: string) => {
+        if (!program) return;
+        const key = `${program}||${part}||${section}`;
+        if (classCache.has(key)) return;
+        const ex = await db.execute({ sql: "SELECT id FROM classes WHERE branchId = ? AND name = ? AND section = ? AND COALESCE(part,'1') = ?", args: [brId, program, section, part] });
+        if (ex.rows.length === 0) {
+          await db.execute({ sql: 'INSERT INTO classes (id, branchId, name, section, program, part) VALUES (?, ?, ?, ?, ?, ?)', args: [nextId('CLS'), brId, program, section, program, part] });
+        }
+        classCache.add(key);
+      };
+
+      const created: any[] = [];
+      const skipped: any[] = [];
+      const errors: any[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i] || {};
+        const name = String(row.name || '').trim();
+        if (!name) { skipped.push({ index: i, reason: 'No name' }); continue; }
+        const program = String(row.program || '').trim();
+        const part = row.part === '2' ? '2' : '1';
+        const section = (String(row.section || 'A').trim().toUpperCase() || 'A');
+        const fatherName = String(row.fatherName || '').trim() || null;
+        const cnicDigits = String(row.cnic || '').replace(/\D/g, '');
+        const nf = `${name.toLowerCase()}|${String(fatherName || '').toLowerCase()}`;
+        if ((cnicDigits && cnicSet.has(cnicDigits)) || nameFatherSet.has(nf)) {
+          skipped.push({ index: i, name, reason: 'Duplicate' });
+          continue;
+        }
+        try {
+          await ensureClass(program, part, section);
+          seq += 1;
+          const rollNo = (row.rollNo && String(row.rollNo).trim()) || `${prefix}${String(seq).padStart(4, '0')}`;
+          const password = rollNo; // student must change on first login
+          const id = nextId('U');
+          const baseFee = row.baseFee != null && row.baseFee !== '' && !Number.isNaN(Number(row.baseFee)) ? Number(row.baseFee) : null;
+          await db.execute({
+            sql: `INSERT INTO users (id, name, email, rollNo, password, role, status, title, mustChangePassword, blocked, instituteId, branchId, class, section, part, guardianPhone, fatherName, cnic, fatherCnic, gender, address, prevResult, program, baseFee, baseFeeLocked, createdById)
+                  VALUES (?, ?, ?, ?, ?, 'student', 'Active', 'Student', 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [id, name, null, rollNo, password, instId, brId, program || null, section, part,
+              String(row.phone || '').trim() || null, fatherName, String(row.cnic || '').trim() || null,
+              String(row.fatherCnic || '').trim() || null, String(row.gender || '').trim() || null,
+              String(row.address || '').trim() || null, String(row.prevResult || '').trim() || null,
+              program || null, baseFee, baseFee != null ? 1 : 0, user.id],
+          });
+          if (cnicDigits) cnicSet.add(cnicDigits);
+          nameFatherSet.add(nf);
+          await db.execute({ sql: 'UPDATE branches SET students = students + 1 WHERE id = ?', args: [brId] });
+          created.push({ id, name, rollNo, program: program || null });
+        } catch (e: any) {
+          errors.push({ index: i, name, error: e?.message || 'insert failed' });
+        }
+      }
+
+      return NextResponse.json(
+        { created: created.length, skipped: skipped.length, errors: errors.length, createdRows: created, skippedRows: skipped, errorRows: errors },
+        { status: 201 },
+      );
+    }
+
     if (method === 'PATCH' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments.length === 3) {
       const user = await requireAuth(req);
       const id = pathSegments[2];
@@ -633,9 +730,11 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       ];
 
       // Default programs — Concordia's 6-department HSSC catalog.
-      // (Updated per user spec: FSC Pre Med, FSC Pre Eng, ICS Phy, ICS Stats, FA, FA IT)
+      // (Updated per user spec: FSC Pre Med, FSC Pre Eng, ICS Phy, ICS Stats, FA IT, I.Com.
+      //  'FA' was retired and replaced by 'I.Com'.) These are canonical values;
+      //  the UI renders them via deptLabel() (Fsc(Pre-Medical), I.Com, etc.).
       const defaultPrograms = [
-        'FSC Pre Med', 'FSC Pre Eng', 'ICS Phy', 'ICS Stats', 'FA', 'FA IT',
+        'FSC Pre Med', 'FSC Pre Eng', 'ICS Phy', 'ICS Stats', 'FA IT', 'I.Com',
       ];
 
       let classes: string[] = [];
