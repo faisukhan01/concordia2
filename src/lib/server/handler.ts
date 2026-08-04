@@ -354,7 +354,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    "Update your Concordia app" notification — no manual admin action needed.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.5.1';
+      const LATEST_APP_VERSION = '4.6.0';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -400,6 +400,35 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         updateAvailable,
         downloadUrl: DOWNLOAD_URL,
         notificationCreated,
+      });
+    }
+
+    // ── v4.6.0: SILENT update check — same logic as above but does NOT
+    //    create a push notification. The web app calls this on mount +
+    //    every 10 min to show a badge on the sidebar "Update App" button.
+    //    This replaces the annoying "update your app" push notifications.
+    if (method === 'GET' && path === 'app/update-status') {
+      const user = await requireAuth(req);
+      const LATEST_APP_VERSION = '4.6.0';
+      const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
+      const current = (query.current || '').trim();
+
+      const cmp = (a: string, b: string): number => {
+        const pa = (a || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        const pb = (b || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0);
+        for (let i = 0; i < 3; i++) {
+          if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+          if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+        }
+        return 0;
+      };
+      const updateAvailable = !!current && cmp(current, LATEST_APP_VERSION) < 0;
+
+      return NextResponse.json({
+        latest: LATEST_APP_VERSION,
+        current: current || null,
+        updateAvailable,
+        downloadUrl: DOWNLOAD_URL,
       });
     }
 

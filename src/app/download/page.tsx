@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useSyncExternalStore, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -23,12 +23,12 @@ import { BrandLogo } from '@/components/brand-logo';
 
 // ───────────────────────── Config ─────────────────────────
 // Always points to the LATEST GitHub release — no version baked into the URL.
+// This URL automatically serves the most recent release's APK asset.
 const APK_DOWNLOAD_URL =
   'https://github.com/faisukhan01/concordia2/releases/latest/download/concordia-college.apk';
-const APK_VERSION = 'v4.5.1';
-const APK_UPDATED = 'August 5, 2025';
-const APK_SIZE = '45 MB';
 const GITHUB_RELEASES = 'https://github.com/faisukhan01/concordia2/releases';
+// Fallback version shown if the GitHub API fetch fails (e.g. rate-limited).
+const APK_VERSION_FALLBACK = 'v4.6.0';
 
 // ───────────────────────── Data ─────────────────────────
 
@@ -43,6 +43,68 @@ const highlights = [
 
 // ───────────────────────── Component ─────────────────────────
 
+// Hook: fetch the latest release info from GitHub API.
+// Returns { version, publishedAt, sizeMb } or null while loading.
+function useLatestRelease() {
+  const [info, setInfo] = useState<{
+    version: string;
+    publishedAt: string | null;
+    sizeMb: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('https://api.github.com/repos/faisukhan01/concordia2/releases/latest')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || !data) return;
+        const tagName: string = data.tag_name || '';
+        // Find the APK asset
+        const apkAsset = (data.assets || []).find(
+          (a: any) => a.name === 'concordia-college.apk'
+        );
+        const sizeBytes: number | undefined = apkAsset?.size;
+        const sizeMb = sizeBytes
+          ? `${Math.round(sizeBytes / (1024 * 1024))} MB`
+          : null;
+        const publishedAt: string | null = data.published_at || data.created_at || null;
+        setInfo({
+          version: tagName || APK_VERSION_FALLBACK,
+          publishedAt,
+          sizeMb,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setInfo({
+          version: APK_VERSION_FALLBACK,
+          publishedAt: null,
+          sizeMb: null,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return info;
+}
+
+// Format an ISO date string as "Month D, Year".
+function formatReleaseDate(iso: string | null): string | null {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return null;
+  }
+}
+
 export default function DownloadPage() {
   const isAndroid = useSyncExternalStore(
     () => () => {},
@@ -55,6 +117,11 @@ export default function DownloadPage() {
     () => false,
   );
   const reduce = useReducedMotion();
+  const releaseInfo = useLatestRelease();
+
+  const apkVersion = releaseInfo?.version || APK_VERSION_FALLBACK;
+  const apkUpdated = formatReleaseDate(releaseInfo?.publishedAt || null) || 'Latest release';
+  const apkSize = releaseInfo?.sizeMb || '~45 MB';
 
   const buttonLabel = mounted && isAndroid ? 'Update App' : 'Download for Android';
 
@@ -105,7 +172,7 @@ export default function DownloadPage() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-[#F26522]" />
               </span>
               <span className="text-xs font-semibold uppercase tracking-wide text-[#D4541E]">
-                Latest Build · {APK_VERSION}
+                Latest Build · {apkVersion}
               </span>
             </div>
           </motion.div>
@@ -220,8 +287,8 @@ export default function DownloadPage() {
 
                   {/* Meta chips */}
                   <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                    <Chip>{APK_VERSION}</Chip>
-                    <Chip>{APK_SIZE}</Chip>
+                    <Chip>{apkVersion}</Chip>
+                    <Chip>{apkSize}</Chip>
                     <Chip icon={Smartphone}>Android 5.0+</Chip>
                     <Chip icon={ShieldCheck}>Verified</Chip>
                   </div>
@@ -371,7 +438,7 @@ export default function DownloadPage() {
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </a>
             <p className="mt-3 text-xs text-gray-400">
-              Direct download from GitHub Releases · Always the latest version · {APK_SIZE}
+              Direct download from GitHub Releases · Always the latest version · {apkSize}
             </p>
           </div>
         </div>
@@ -387,7 +454,7 @@ export default function DownloadPage() {
               <BrandLogo size="sm" />
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF0E8] px-2.5 py-1 text-[11px] font-semibold text-[#D4541E]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#F26522]" />
-                {APK_VERSION}
+                {apkVersion}
               </span>
             </div>
             <div className="flex items-center gap-5 text-sm text-gray-500">
@@ -410,7 +477,7 @@ export default function DownloadPage() {
           </div>
           <div className="mt-5 pt-5 border-t border-gray-100 text-center">
             <p className="text-xs text-gray-400">
-              &copy; {new Date().getFullYear()} Concordia College · {APK_VERSION} · Updated {APK_UPDATED} · Android 5.0+
+              &copy; {new Date().getFullYear()} Concordia College · {apkVersion} · Updated {apkUpdated} · Android 5.0+
             </p>
           </div>
         </div>

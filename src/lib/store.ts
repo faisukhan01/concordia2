@@ -27,6 +27,10 @@ export type AuthUser = {
   class?: string;
   section?: string;
   rollNo?: string;
+  // v4.5.2: Profile photo (data URL from Settings → Profile Photo upload).
+  photoUrl?: string | null;
+  // v4.5.2: Last-seen timestamp for "online/away" indicator in profile dropdown.
+  lastLoginAt?: number | null;
 } | null;
 
 type AppState = {
@@ -38,11 +42,16 @@ type AppState = {
   // the exam name here so the Date Sheet page can pre-fill it. Cleared on
   // consumption / navigation.
   pendingExamName: string | null;
+  // v4.6.0: App update availability — set by the update-checker hook.
+  // When true, the sidebar "Update App" button shows a badge + bold styling.
+  appUpdateAvailable: boolean;
+  latestAppVersion: string | null;
   setView: (v: View) => void;
   setUser: (u: AuthUser) => void;
   setToken: (t: string | null) => void;
   setActiveModule: (m: string) => void;
   setPendingExamName: (n: string | null) => void;
+  setAppUpdateAvailable: (available: boolean, version?: string | null) => void;
   logout: () => void;
 };
 
@@ -92,12 +101,15 @@ export const useApp = create<AppState>()(
       token: null,
       activeModule: 'dashboard',
       pendingExamName: null,
+      appUpdateAvailable: false,
+      latestAppVersion: null,
       setView: (v) => set({ view: v }),
       setUser: (u) => set({ user: u, activeModule: 'dashboard' }),
       setToken: (t) => set({ token: t }),
       setActiveModule: (m) => set({ activeModule: m }),
       setPendingExamName: (n) => set({ pendingExamName: n }),
-      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null }),
+      setAppUpdateAvailable: (available, version = null) => set({ appUpdateAvailable: available, latestAppVersion: version }),
+      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, appUpdateAvailable: false, latestAppVersion: null }),
     }),
     {
       name: 'concordia-app',

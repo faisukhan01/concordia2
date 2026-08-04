@@ -28,8 +28,28 @@ import {
   Bell, BellOff, Volume2, VolumeX, Moon, Clock, Smartphone, Monitor,
   LogOut, Info, Building2, Calendar, Fingerprint, Wifi, Activity,
   ChevronRight, Save, AlertTriangle, BookOpen, Heart, Camera,
+  Send, ShieldAlert, XCircle,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+
+// v4.6.0: HealthCheck — a small status row used in the Notification Health card.
+function HealthCheck({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-background p-2.5">
+      <div className={`h-6 w-6 rounded-full grid place-items-center shrink-0 ${ok ? 'bg-emerald-100' : 'bg-amber-100'}`}>
+        {ok ? (
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+        ) : (
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] font-medium truncate">{label}</div>
+        {detail && <div className="text-[10px] text-muted-foreground truncate">{detail}</div>}
+      </div>
+    </div>
+  );
+}
 
 // ───────────────────────── Notification type metadata ─────────────────────────
 // Maps the internal notification type to a human label, icon, and description
@@ -143,12 +163,24 @@ export function SettingsPage({ user }: { user: any }) {
   const [nativeInfo, setNativeInfo] = useState<{ isNative: boolean; appVersion: string | null }>({
     isNative: false, appVersion: null,
   });
+  // v4.6.0: Bridge diagnostics for the Notification Health card.
+  const [bridgeDiag, setBridgeDiag] = useState<any>(null);
+  const [testNotifLoading, setTestNotifLoading] = useState(false);
+  const appUpdateAvailable = useApp((s: any) => s.appUpdateAvailable);
+  const latestVersion = useApp((s: any) => s.latestAppVersion);
 
   useEffect(() => {
+    const diag = getFcmBridgeDiagnostics() as any;
     setNativeInfo({
       isNative: isNativeApp(),
-      appVersion: (getFcmBridgeDiagnostics() as any)?.appVersion || null,
+      appVersion: diag?.appVersion || null,
     });
+    setBridgeDiag(diag);
+    // Refresh diagnostics every 5 seconds (in case the FCM token arrives late).
+    const interval = setInterval(() => {
+      setBridgeDiag(getFcmBridgeDiagnostics());
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // ─── Load preferences + session info on mount ───
@@ -370,7 +402,7 @@ export function SettingsPage({ user }: { user: any }) {
     .toUpperCase();
 
   // ─── App version for "About" section ───
-  const appVersion = nativeInfo.appVersion || '4.5.1';
+  const appVersion = nativeInfo.appVersion || '4.6.0';
 
   return (
     <div className="space-y-6 max-w-4xl pb-12">
@@ -674,6 +706,94 @@ export function SettingsPage({ user }: { user: any }) {
               </Button>
             </div>
           </>
+        )}
+      </Card>
+
+      {/* ─── v4.6.0: Notification Health & Test ─── */}
+      <Card className="p-6">
+        <h3 className="font-bold text-base mb-1 flex items-center gap-2">
+          <Smartphone className="h-4 w-4 text-primary" /> Notification Health
+        </h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Verify your device is ready to receive notifications — even when the app is closed.
+        </p>
+
+        {/* Health checks grid */}
+        <div className="grid sm:grid-cols-2 gap-2.5 mb-4">
+          <HealthCheck
+            label="FCM token registered"
+            ok={!!bridgeDiag?.hasFcmToken}
+            detail={bridgeDiag?.hasFcmToken ? `${bridgeDiag.fcmTokenPreview || 'Token set'}` : 'Not registered yet'}
+          />
+          <HealthCheck
+            label="Native bridge connected"
+            ok={!!bridgeDiag?.isNativeApp}
+            detail={bridgeDiag?.isNativeApp ? 'Flutter WebView active' : 'Running in browser'}
+          />
+          <HealthCheck
+            label="FCM bridge ready"
+            ok={!!bridgeDiag?.fcmReady}
+            detail={bridgeDiag?.fcmReady ? 'Background handler active' : 'Waiting for init…'}
+          />
+          <HealthCheck
+            label="App version"
+            ok={!!appVersion && appVersion !== '4.5.1'}
+            detail={`v${appVersion}${appUpdateAvailable ? ` · Update available (v${latestVersion})` : ' · Latest'}`}
+          />
+        </div>
+
+        {/* Test button */}
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 p-3.5">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Send a test notification</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Checks if your device can receive push notifications right now.
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={async () => {
+              try {
+                setTestNotifLoading(true);
+                const res = await api.testNotifications();
+                if (res.fcmSuccess > 0) {
+                  toast({ title: '✓ Test sent', description: `Delivered to ${res.fcmSuccess} device(s). Check your notifications.` });
+                } else {
+                  toast({ title: 'Test sent', description: 'No devices received the push. Make sure the app is open and FCM is configured.', variant: 'destructive' });
+                }
+              } catch (e: any) {
+                toast({ title: 'Failed', description: e?.message || 'Could not send test.', variant: 'destructive' });
+              } finally {
+                setTestNotifLoading(false);
+              }
+            }}
+            disabled={testNotifLoading}
+            className="shrink-0"
+          >
+            {testNotifLoading ? (
+              <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Sending…</>
+            ) : (
+              <><Send className="h-3.5 w-3.5 mr-1.5" /> Test now</>
+            )}
+          </Button>
+        </div>
+
+        {/* OEM guidance */}
+        {nativeInfo.isNative && (
+          <div className="mt-3 rounded-xl bg-amber-50/60 border border-amber-200/60 p-3.5">
+            <div className="flex items-start gap-2.5">
+              <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="min-w-0 text-[12px] text-amber-800">
+                <strong>Not receiving notifications when the app is closed?</strong>
+                <br />
+                On Realme/Xiaomi/Oppo devices, you must enable <strong>Auto-start</strong> +
+                <strong> Battery Whitelist</strong> for Concordia College in your phone's Settings.
+                The app prompts you to do this on first launch — if you dismissed it, reinstall
+                or update to see the prompt again.
+              </div>
+            </div>
+          </div>
         )}
       </Card>
 
