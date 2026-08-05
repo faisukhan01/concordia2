@@ -108,6 +108,9 @@ export function buildUserProfile(u: any) {
     subjects: u.subjects ? JSON.parse(u.subjects) : [],
     classes: u.classes ? JSON.parse(u.classes) : [],
     baseFee: u.baseFee ?? null, baseFeeLocked: u.baseFeeLocked === 1,
+    baseFeePaid: u.baseFeePaid === 1,
+    fatherCnic: u.fatherCnic || null,
+    gender: u.gender || null,
     campus,
   };
 }

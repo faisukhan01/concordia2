@@ -889,7 +889,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'PATCH' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments.length === 3) {
       const user = await requireAuth(req);
       const id = pathSegments[2];
-      const { name, email, password, blocked, classId, addCourseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, class: cls, section, part, subjects, classes, rollNo } = body || {};
+      const { name, email, password, blocked, classId, addCourseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, baseFeePaid, fatherCnic, gender, class: cls, section, part, subjects, classes, rollNo } = body || {};
       const r = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
       if (r.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
       const target = r.rows[0] as any;
@@ -943,6 +943,9 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (photoUrl !== undefined) await db.execute({ sql: 'UPDATE users SET photoUrl = ? WHERE id = ?', args: [photoUrl || null, target.id] });
       if (baseFee !== undefined) await db.execute({ sql: 'UPDATE users SET baseFee = ? WHERE id = ?', args: [baseFee != null ? Number(baseFee) : null, target.id] });
       if (baseFeeLocked !== undefined) await db.execute({ sql: 'UPDATE users SET baseFeeLocked = ? WHERE id = ?', args: [baseFeeLocked ? 1 : 0, target.id] });
+      if (baseFeePaid !== undefined) await db.execute({ sql: 'UPDATE users SET baseFeePaid = ? WHERE id = ?', args: [baseFeePaid ? 1 : 0, target.id] });
+      if (fatherCnic !== undefined) await db.execute({ sql: 'UPDATE users SET fatherCnic = ? WHERE id = ?', args: [fatherCnic || null, target.id] });
+      if (gender !== undefined) await db.execute({ sql: 'UPDATE users SET gender = ? WHERE id = ?', args: [gender || null, target.id] });
       if (cls !== undefined) await db.execute({ sql: 'UPDATE users SET class = ? WHERE id = ?', args: [cls || null, target.id] });
       if (section !== undefined) await db.execute({ sql: 'UPDATE users SET section = ? WHERE id = ?', args: [section || null, target.id] });
       if (part !== undefined) await db.execute({ sql: 'UPDATE users SET part = ? WHERE id = ?', args: [part === '2' ? '2' : '1', target.id] });

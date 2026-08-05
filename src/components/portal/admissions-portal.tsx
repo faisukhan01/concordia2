@@ -122,6 +122,19 @@ const monthName = (d: Date) =>
 const genTempPassword = () =>
   'tmp-' + Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
 
+// A default login password the Accountant/Academic hands out; student changes it.
+const genStudentPassword = () =>
+  'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
+
+// Whether a student already has a REAL login (not the tmp- placeholder created
+// by admissions / Excel import). Matches the accountant portal's hasRealLogin.
+const studentHasLogin = (s: any): boolean => {
+  if (!s) return false;
+  if (s.email && !String(s.email).includes('@pending.')) return true;
+  if (s.password && !String(s.password).startsWith('tmp-')) return true;
+  return false;
+};
+
 const fmtDate = (d?: string | Date | null): string => {
   if (!d) return '—';
   try {
@@ -2372,6 +2385,130 @@ function DocumentManagerDialog({
 // ---------------------------------------------------------------------------
 // 4. EditStudentSheet — unchanged from prior implementation.
 // ---------------------------------------------------------------------------
+// ── Fees & Login panel ──
+// Shown on the student detail sheet. The Accountant / Academic Office mark the
+// fee Paid and then provide the login (enter the college roll number → a default
+// password is generated). Admin / Admission see status only (read-only).
+function StudentFeeLoginPanel({
+  student,
+  user,
+  onUpdated,
+}: {
+  student: any;
+  user: any;
+  onUpdated: (u: any) => void;
+}) {
+  const role = user?.role;
+  const canAct = role === 'accountant' || role === 'academic';
+  const [feePaid, setFeePaid] = useState<boolean>(!!student.baseFeePaid);
+  const [hasLogin, setHasLogin] = useState<boolean>(studentHasLogin(student));
+  const [rollNoInput, setRollNoInput] = useState<string>(student.rollNo || '');
+  const [creds, setCreds] = useState<{ rollNo: string; password: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setFeePaid(!!student.baseFeePaid);
+    setHasLogin(studentHasLogin(student));
+    setRollNoInput(student.rollNo || '');
+    setCreds(null);
+  }, [student]);
+
+  const markPaid = async () => {
+    setBusy(true);
+    try {
+      await api.editUser(student.id, { baseFeePaid: true });
+      setFeePaid(true);
+      onUpdated({ ...student, baseFeePaid: 1 });
+      toast({ title: 'Fee marked as paid', description: student.name });
+    } catch (e: any) {
+      toast({ title: 'Could not mark paid', description: e?.message || 'Try again', variant: 'destructive' });
+    } finally { setBusy(false); }
+  };
+
+  const provideLogin = async () => {
+    const rn = rollNoInput.trim();
+    if (!rn) { toast({ title: 'Enter the roll number first', variant: 'destructive' }); return; }
+    setBusy(true);
+    try {
+      const password = genStudentPassword();
+      const email = `${rn.toLowerCase()}@concordia.edu.pk`;
+      await api.editUser(student.id, { rollNo: rn, email, password });
+      setHasLogin(true);
+      setCreds({ rollNo: rn, password });
+      onUpdated({ ...student, rollNo: rn, email, password });
+      toast({ title: 'Login provided', description: `Roll no ${rn}` });
+    } catch (e: any) {
+      toast({ title: 'Could not provide login', description: e?.message || 'Try again', variant: 'destructive' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <KeyRound className="h-4 w-4 text-[#F26522]" />
+        <h4 className="text-sm font-semibold text-gray-900">Fees &amp; Login</h4>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 ${feePaid ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+          Fee: {feePaid ? 'Paid' : 'Unpaid'}
+        </span>
+        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 ${hasLogin ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-white text-gray-500'}`}>
+          Login: {hasLogin ? `Active · ${student.rollNo || rollNoInput || '—'}` : 'Not provided'}
+        </span>
+        {student.baseFee != null && student.baseFee !== '' && (
+          <span className="text-gray-500">Base fee: {fmtMoney(Number(student.baseFee))}</span>
+        )}
+      </div>
+
+      {!canAct ? (
+        <p className="text-xs text-gray-500">
+          Only the Accountant / Academic Office can mark the fee paid and provide the login.
+        </p>
+      ) : hasLogin ? (
+        <p className="text-xs text-emerald-700">
+          Login is active. The student signs in with their roll number and changes the password on first login.
+        </p>
+      ) : (
+        <div className="space-y-2.5">
+          {!feePaid ? (
+            <button
+              onClick={markPaid}
+              disabled={busy}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-xs font-semibold disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              Mark Fee Paid
+            </button>
+          ) : (
+            <div className="flex items-end gap-2 flex-wrap">
+              <div className="flex-1 min-w-[150px]">
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Roll Number (assigned by college)</label>
+                <Input value={rollNoInput} onChange={(e) => setRollNoInput(e.target.value)} placeholder="e.g. 1024" className={inputCls} />
+              </div>
+              <button
+                onClick={provideLogin}
+                disabled={busy}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#F26522] hover:bg-[#D4541E] text-white px-3 py-2 text-xs font-semibold h-10 disabled:opacity-60"
+              >
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                Provide Login
+              </button>
+            </div>
+          )}
+          {creds && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 space-y-1">
+              <p className="font-semibold">Login created — share with the student:</p>
+              <p>Roll No / Username: <span className="font-mono font-bold">{creds.rollNo}</span></p>
+              <p>Password: <span className="font-mono font-bold">{creds.password}</span></p>
+              <p className="text-emerald-600">They change it on first login.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditStudentSheet({
   student,
   user,
@@ -2538,6 +2675,9 @@ function EditStudentSheet({
               className="rounded-lg border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#F26522] focus:ring-2 focus:ring-[#F26522]/12"
             />
           </Field>
+
+          {/* Fees & Login — mark paid + provide login (Accountant / Academic) */}
+          <StudentFeeLoginPanel student={student} user={user} onUpdated={onSaved} />
         </div>
 
         <SheetFooter>
