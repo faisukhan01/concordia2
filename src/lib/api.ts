@@ -1,4 +1,6 @@
 // Concordia API client — talks to the in-process Next.js API routes directly (no port).
+import { readSessionToken, clearSession } from '@/lib/session-store';
+
 function apiUrl(path: string) {
   return '/api/' + path.replace(/^\//, '');
 }
@@ -61,36 +63,14 @@ async function backgroundRefresh<T>(path: string) {
   } catch {}
 }
 
-// Get the stored auth token from the zustand-persisted auth state.
-// IMPORTANT: we read from localStorage (NOT sessionStorage) so the session
-// survives WebView/app closes — this is what keeps the user logged in across
-// app restarts and is a prerequisite for reliable background FCM pushes
-// (the device token is registered to the logged-in user).
+// Get the stored auth token from the persisted session.
+// v4.6.3: delegates to session-store.ts, which reads from sessionStorage in a
+// browser (per-tab isolation) and localStorage in the native mobile app
+// (persists across app restarts for reliable background FCM pushes). The
+// legacy localStorage → sessionStorage migration is handled inside
+// session-store.ts on module load, so we don't need a fallback here.
 function getToken(): string | null {
-  try {
-    const raw = localStorage.getItem('concordia-app');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return parsed?.state?.token || null;
-    }
-  } catch {}
-  // Backward-compat fallback: some users may still have a sessionStorage entry
-  // from the old build. Read it once so they don't get logged out on first
-  // load of the new build, then it migrates to localStorage on next login.
-  try {
-    const raw = sessionStorage.getItem('concordia-app');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const token = parsed?.state?.token || null;
-      if (token) {
-        // Migrate to localStorage so it persists going forward.
-        localStorage.setItem('concordia-app', raw);
-        sessionStorage.removeItem('concordia-app');
-      }
-      return token;
-    }
-  } catch {}
-  return null;
+  return readSessionToken();
 }
 
 // Global blocked-state callback — set by the RolePortal to detect access revocation
@@ -139,12 +119,13 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
 export const api = {
   login: (email: string, password: string, name?: string) =>
     request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
-  // Client-side logout — clears the persisted zustand session from localStorage
-  // (and any legacy sessionStorage entry). Auth is stateless bearer-token, so no
-  // server round-trip is needed. After calling, the app reloads to '/'.
+  // Client-side logout — clears the persisted session from BOTH storages
+  // (sessionStorage in browser, localStorage in native app, plus any stale
+  // legacy localStorage entry from before v4.6.3). Auth is stateless
+  // bearer-token, so no server round-trip is needed. After calling, the app
+  // reloads to '/'.
   logout: async () => {
-    try { localStorage.removeItem('concordia-app'); } catch {}
-    try { sessionStorage.removeItem('concordia-app'); } catch {}
+    clearSession();
     // Also clear the API cache so a subsequent login as a different user
     // doesn't see stale cached data from the previous user.
     invalidateCache();

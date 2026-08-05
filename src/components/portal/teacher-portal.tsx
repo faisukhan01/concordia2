@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApp } from '@/lib/store';
+import { readSessionToken } from '@/lib/session-store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -377,15 +378,11 @@ function studentsForClass(students: Student[], cls: TeacherClass): Student[] {
 
 // Pull auth token from the same store the api client uses. Needed only for the
 // feedback POST (which goes to a route the backend hasn't formally defined yet).
+// v4.6.3: delegates to session-store so it reads the right storage (sessionStorage
+// in browser, localStorage in native app) instead of hardcoding sessionStorage.
 async function authHeaders(): Promise<Record<string, string>> {
-  try {
-    const raw = sessionStorage.getItem('concordia-app');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const token = parsed?.state?.token;
-      if (token) return { Authorization: `Bearer ${token}` };
-    }
-  } catch {}
+  const token = readSessionToken();
+  if (token) return { Authorization: `Bearer ${token}` };
   return {};
 }
 
