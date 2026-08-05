@@ -402,7 +402,7 @@ export function SettingsPage({ user }: { user: any }) {
     .toUpperCase();
 
   // ─── App version for "About" section ───
-  const appVersion = nativeInfo.appVersion || '4.6.1';
+  const appVersion = nativeInfo.appVersion || '4.6.2';
 
   return (
     <div className="space-y-6 max-w-4xl pb-12">
