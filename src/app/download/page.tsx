@@ -18,6 +18,9 @@ import {
   Megaphone,
   QrCode,
   Cpu,
+  Share2,
+  Plus,
+  Apple,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -109,6 +112,18 @@ export default function DownloadPage() {
   const isAndroid = useSyncExternalStore(
     () => () => {},
     () => typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('android'),
+    () => false,
+  );
+  const isIos = useSyncExternalStore(
+    () => () => {},
+    () => {
+      if (typeof navigator === 'undefined') return false;
+      const ua = navigator.userAgent.toLowerCase();
+      // iPhone/iPod always report clearly; iPadOS 13+ masquerades as Mac, so
+      // also treat a touch-capable "Mac" as iPad.
+      return /iphone|ipod|ipad/.test(ua) ||
+        (ua.includes('mac') && typeof document !== 'undefined' && 'ontouchend' in document);
+    },
     () => false,
   );
   const mounted = useSyncExternalStore(
@@ -320,6 +335,57 @@ export default function DownloadPage() {
                 <span className="font-semibold text-emerald-700">Update App</span> above. Your login
                 and data are preserved after the update.
               </p>
+            </motion.div>
+          )}
+
+          {/* iPhone / iPad — free install via Safari (Add to Home Screen).
+              Apple blocks APK-style sideloading, so this is the free equivalent.
+              Shown on iOS + desktop; hidden on Android (they have the APK). */}
+          {mounted && !isAndroid && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.4 }}
+              className={`mt-6 mx-auto max-w-2xl rounded-2xl border p-5 ${
+                isIos ? 'border-[#F26522]/40 bg-[#FFF7F2]' : 'border-gray-200 bg-gray-50/70'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1A1A1A] text-white">
+                  <Apple className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-gray-900">
+                    {isIos ? 'You’re on iPhone / iPad' : 'On iPhone or iPad?'} — install free, no App Store
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Apple doesn&rsquo;t allow APK-style installs, but you can add Concordia to your
+                    Home Screen from Safari — it opens full-screen like a real app, completely free.
+                  </p>
+                  <ol className="mt-3 space-y-2 text-xs text-gray-700">
+                    <li className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#F26522] text-white text-[10px] font-bold">1</span>
+                      Open <span className="font-semibold">concordia-colleges.vercel.app</span> in <span className="font-semibold">Safari</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#F26522] text-white text-[10px] font-bold">2</span>
+                      Tap the <span className="inline-flex items-center gap-1 font-semibold"><Share2 className="h-3.5 w-3.5" /> Share</span> button
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#F26522] text-white text-[10px] font-bold">3</span>
+                      Choose <span className="inline-flex items-center gap-1 font-semibold"><Plus className="h-3.5 w-3.5" /> Add to Home Screen</span>
+                    </li>
+                  </ol>
+                  {isIos && (
+                    <a
+                      href="/"
+                      className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#1A1A1A] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-black"
+                    >
+                      Open the portal in Safari <ArrowRight className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                </div>
+              </div>
             </motion.div>
           )}
         </div>
