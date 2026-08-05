@@ -222,6 +222,14 @@ class _SplashToWebViewState extends State<SplashToWebView>
   void _initWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      // v4.6.3: Custom User-Agent marker so the web app can detect the native
+      // shell SYNCHRONOUSLY at JS-module-load time (before onPageFinished
+      // injects window.concordiaNative.isNativeApp). This matters because the
+      // Zustand persist middleware reads storage during store creation, which
+      // happens when the JS bundle first evaluates. The UA is set at WebView
+      // config time and is in navigator.userAgent from the very first JS
+      // execution. The web app checks /ConcordiaNative/ in session-store.ts.
+      ..setUserAgent('ConcordiaNative/4.6.2 (Linux; Android) WebView')
       ..setBackgroundColor(Colors.white)
       // JavaScript channel the web app uses to REQUEST the FCM token on demand.
       // The web app posts a message with a unique request id; we respond by

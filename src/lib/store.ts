@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { readSession, writeSession, clearSession } from '@/lib/session-store';
 
 export type View = 'login' | 'portal';
 
@@ -66,41 +67,32 @@ type AppState = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// PERSISTENCE: localStorage (NOT sessionStorage)
+// PERSISTENCE — per-tab in browser, cross-restart in mobile app (v4.6.3)
 // ─────────────────────────────────────────────────────────────────────────
-// WhatsApp-style session persistence: the user stays logged in across app
-// restarts, phone reboots, and WebView process kills. sessionStorage is wiped
-// the moment the WebView closes — which is exactly why the mobile app was
-// logging users out whenever they closed the app, and why background FCM
-// pushes had no live session to target.
+// PROBLEM (v4.6.2 and earlier):
+//   The whole app state lived in localStorage under `concordia-app`.
+//   localStorage is shared across all browser tabs, so opening the Admin
+//   portal in tab A and the Teacher portal in tab B overwrote the shared
+//   entry — refreshing tab A then loaded tab B's portal. See
+//   `src/lib/session-store.ts` for the full diagnosis.
 //
-// localStorage survives until the user explicitly logs out (or clears app
-// data), which is the correct behavior for a college portal. This is also a
-// prerequisite for reliable background notifications: the FCM device-token is
-// registered to the logged-in user, so the session must persist for pushes to
-// keep flowing to the right account.
+// FIX:
+//   • Browser → sessionStorage. Per-tab (each tab keeps its own portal/user),
+//     survives refresh, cleared on tab close. This is the correct behaviour
+//     for a multi-tab web session.
+//   • Mobile app → localStorage. The mobile app is a single WebView (no
+//     multi-tab concern), and localStorage survives app kills / phone reboots,
+//     which is a prerequisite for reliable background FCM push delivery (the
+//     device token is registered to the logged-in user, so the session must
+//     persist).
 //
-// Multi-tab note: in a browser, two tabs share the same localStorage entry.
-// This is fine for this app (single-institution, single-session). The mobile
-// app has exactly one WebView so there's no multi-tab concern there at all.
-const localStorageAdapter = {
-  getItem: (name: string) => {
-    try {
-      return localStorage.getItem(name);
-    } catch {
-      return null;
-    }
-  },
-  setItem: (name: string, value: string) => {
-    try {
-      localStorage.setItem(name, value);
-    } catch {}
-  },
-  removeItem: (name: string) => {
-    try {
-      localStorage.removeItem(name);
-    } catch {}
-  },
+// The adapter below delegates to session-store.ts, which picks the right
+// storage based on `isNativeApp()` and handles one-time migration of any
+// legacy localStorage entry into sessionStorage.
+const sessionAdapter = {
+  getItem: (_name: string) => readSession(),
+  setItem: (_name: string, value: string) => writeSession(value),
+  removeItem: (_name: string) => clearSession(),
 };
 
 export const useApp = create<AppState>()(
@@ -130,7 +122,7 @@ export const useApp = create<AppState>()(
     }),
     {
       name: 'concordia-app',
-      storage: createJSONStorage(() => localStorageAdapter),
+      storage: createJSONStorage(() => sessionAdapter),
     }
   )
 );
