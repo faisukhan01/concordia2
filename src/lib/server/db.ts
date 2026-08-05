@@ -179,6 +179,9 @@ const MIGRATION_STATEMENTS: string[] = [
   // Extra student fields captured by the Excel bulk-import (Father CNIC + Gender).
   `ALTER TABLE users ADD COLUMN fatherCnic TEXT`,
   `ALTER TABLE users ADD COLUMN gender TEXT`,
+  // Student-level "base/admission fee paid" flag. The Accountant marks this on
+  // the student detail page; a login can only be provided once it's 1.
+  `ALTER TABLE users ADD COLUMN baseFeePaid INTEGER NOT NULL DEFAULT 0`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===

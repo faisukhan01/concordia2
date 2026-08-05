@@ -30,6 +30,8 @@ import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useApp, useNavState } from '@/lib/store';
+// Delegated Student Records (detail page → mark fee Paid + provide login).
+import { AdmissionsPortal } from './admissions-portal';
 import {
   DEPARTMENTS,
   DeptCardGrid,
@@ -521,7 +523,12 @@ export function AccountantPortal({ activeModule, user }: Props) {
     });
 
   let content: React.ReactNode;
-  if (
+  // Delegated Student Records (namespaced `admissions:…`) so the Accountant can
+  // open a student's detail page and mark fee Paid + provide the login.
+  if (activeModule && activeModule.includes(':')) {
+    const [, modId] = activeModule.split(':', 2);
+    content = <AdmissionsPortal activeModule={modId || ''} user={user} />;
+  } else if (
     activeModule === 'accountant-challans' ||
     activeModule === 'accountant-collect' ||
     activeModule === 'accountant-installments'
