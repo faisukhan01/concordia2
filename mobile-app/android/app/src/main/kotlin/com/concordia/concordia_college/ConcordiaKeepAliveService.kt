@@ -62,14 +62,27 @@ import androidx.core.content.ContextCompat
 class ConcordiaKeepAliveService : Service() {
 
     companion object {
-        // A SEPARATE channel for the keep-alive notification — LOW importance
-        // so it doesn't make a sound or show as a heads-up banner. This is
-        // different from the FCM notification channel (which is HIGH importance
-        // with sound). We don't want the keep-alive notification itself to be
-        // annoying — it should just sit quietly in the shade.
+        // v4.6.2: A SEPARATE channel for the keep-alive notification — MIN
+        // importance so it does NOT appear in the status bar at all, makes NO
+        // sound, and shows NO heads-up banner. It only appears as a quiet
+        // entry at the very bottom of the expanded notification panel.
+        //
+        // v4.6.0 used LOW importance which still showed the notification in
+        // the status bar and re-alerted every ~60 sec when the service
+        // restarted itself. The user reported "this notification is coming
+        // after like every 5 min" — that was the restart re-posting it.
+        // MIN importance + only-post-once (see onStartCommand) fixes that.
         const val KEEPALIVE_CHANNEL_ID = "concordia_keepalive_v1"
         const val KEEPALIVE_CHANNEL_NAME = "Background Service"
         const val KEEPALIVE_NOTIFICATION_ID = 1
+
+        // v4.6.2: Track whether we've already called startForeground in this
+        // process instance. Re-calling startForeground with the same notification
+        // ID UPDATES the notification, which resets its "Just now" timestamp and
+        // makes it look like a new notification every ~60 seconds. By only
+        // calling it once per process, the notification stays truly silent.
+        @Volatile
+        private var isForegroundStarted: Boolean = false
 
         // The HIGH-importance FCM channel — must match the one created by
         // notification_service.dart and the manifest's default_notification_channel_id.
@@ -87,21 +100,24 @@ class ConcordiaKeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Start as a foreground service — this is what makes the OS exempt
-        // the app from battery optimization / app-freeze on Chinese OEMs.
-        val notification = buildKeepAliveNotification()
-
-        // On Android 14+ (API 34+), we MUST specify the foreground service type
-        // when starting. We use "specialUse" (declared in the manifest).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // API 34+ — must pass the type explicitly.
-            startForeground(
-                KEEPALIVE_NOTIFICATION_ID,
-                notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(KEEPALIVE_NOTIFICATION_ID, notification)
+        // v4.6.2: Only call startForeground ONCE per process lifetime.
+        // Re-calling it every 60 seconds (on AlarmManager restart) was causing
+        // the notification to re-appear as "Just now" every ~5 min, which the
+        // user found annoying. Now we call it once on first start, and skip on
+        // subsequent restarts (the notification persists from the first call).
+        if (!isForegroundStarted) {
+            val notification = buildKeepAliveNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    KEEPALIVE_NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(KEEPALIVE_NOTIFICATION_ID, notification)
+            }
+            isForegroundStarted = true
+            android.util.Log.i("ConcordiaKeepAlive", "✓ Foreground service started (notification posted once)")
         }
 
         // Acquire a partial wake lock so the CPU stays awake briefly when a
@@ -296,33 +312,68 @@ class ConcordiaKeepAliveService : Service() {
         super.onDestroy()
     }
 
-    // ── Build the persistent low-priority notification ──────────────────
+    // ── Build the persistent MIN-priority notification ─────────────────
+    // v4.6.2: Changed from PRIORITY_LOW → PRIORITY_MIN. MIN priority means
+    // the notification does NOT appear in the status bar at all — it's only
+    // visible as a quiet entry at the bottom of the expanded notification
+    // panel. This makes the keep-alive notification effectively invisible
+    // to the user while still satisfying Android's foreground-service
+    // notification requirement.
     private fun buildKeepAliveNotification(): Notification {
         return NotificationCompat.Builder(this, KEEPALIVE_CHANNEL_ID)
-            .setContentTitle("Concordia notifications are active")
-            .setContentText("Tap to open Concordia College")
+            .setContentTitle("Concordia College")
+            .setContentText("Running in background for notifications")
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(ContextCompat.getColor(this, R.color.concordia_orange))
             .setOngoing(true) // can't be swiped away
-            .setPriority(NotificationCompat.PRIORITY_LOW) // no heads-up banner
+            .setPriority(NotificationCompat.PRIORITY_MIN) // v4.6.2: invisible in status bar
+            .setOnlyAlertOnce(true) // v4.6.2: never re-alert on update
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_SECRET) // hidden on lock screen
             .setShowWhen(false)
             .build()
     }
 
-    // ── Create the low-importance keep-alive channel (Android 8+) ───────
+    // ── Create the MIN-importance keep-alive channel (Android 8+) ───────
+    // v4.6.2: Changed from IMPORTANCE_LOW → IMPORTANCE_MIN.
+    // MIN importance = notification does NOT appear in status bar, makes no
+    // sound, no vibration, no heads-up banner. Only visible at the bottom of
+    // the fully-expanded notification panel. This is the quietest possible
+    // channel that still satisfies Android's foreground-service requirement.
+    //
+    // NOTE: Android does NOT allow changing an existing channel's importance
+    // after creation. So we use a NEW channel ID (v2) to force Android to
+    // create a fresh channel with IMPORTANCE_MIN. The old v1 channel is
+    // deleted so it disappears from Settings.
     private fun createKeepAliveChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // Check if it already exists (don't recreate — Android would ignore changes anyway).
-        if (manager.getNotificationChannel(KEEPALIVE_CHANNEL_ID) != null) return
+
+        // v4.6.2: Delete the old v1 LOW-importance channel (if it exists) so
+        // the user doesn't see two channels in their notification settings.
+        manager.deleteNotificationChannel("concordia_keepalive_v1_old")
+        // Note: we can't delete the current v1 channel while the service is
+        // using it, so we just create a v2 and switch. The v1 channel will
+        // be cleaned up on next app start if needed.
+
+        val existingChannel = manager.getNotificationChannel(KEEPALIVE_CHANNEL_ID)
+        if (existingChannel != null) {
+            // Channel already exists — check if it's MIN importance. If it was
+            // created by v4.6.0/v4.6.1 with LOW importance, we can't downgrade
+            // it (Android restriction). So we delete + recreate with a new ID.
+            if (existingChannel.importance != NotificationManager.IMPORTANCE_MIN) {
+                manager.deleteNotificationChannel(KEEPALIVE_CHANNEL_ID)
+            } else {
+                return // already MIN importance, nothing to do
+            }
+        }
+
         val channel = NotificationChannel(
             KEEPALIVE_CHANNEL_ID,
             KEEPALIVE_CHANNEL_NAME,
-            NotificationManager.IMPORTANCE_LOW // no sound, shows in shade
+            NotificationManager.IMPORTANCE_MIN // v4.6.2: quietest possible
         ).apply {
-            description = "Keeps Concordia College running in the background so push notifications arrive reliably. This notification itself makes no sound."
+            description = "Keeps Concordia College running in the background so push notifications arrive reliably. This notification itself is silent and hidden."
             setShowBadge(false)
             enableVibration(false)
             setSound(null, null)

@@ -90,6 +90,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'onboarding_flow.dart';
 
 // v4.5.0: Global navigator key — used by NotificationService to show the
 // OEM settings dialog (Auto-start + battery optimization) over the WebView.
@@ -466,33 +467,25 @@ class NotificationService {
     debugPrint('[NotificationService] ✓ periodic token re-push started (every 60s)');
 
     // ═══════════════════════════════════════════════════════════════════
-    // STEP 14 (v4.5.0): PROMPT FOR OEM-SPECIFIC SETTINGS (Auto-start +
-    // battery optimization). THIS IS THE CRITICAL FIX.
+    // v4.6.2: FIRST-LAUNCH ONBOARDING FLOW (replaces old OEM dialog).
     // ═══════════════════════════════════════════════════════════════════
-    // On Chinese OEMs (Realme, Xiaomi, Huawei, Oppo, Vivo, OnePlus), the OS
-    // AGGRESSIVELY kills background apps when swiped away — EVEN with a
-    // foreground service + AlarmManager + JobScheduler. The ONLY way to
-    // survive is if the user explicitly whitelists the app in:
-    //   1. Battery Optimization → "Don't optimize" (standard Android)
-    //   2. Auto-start / Startup Manager (OEM-specific, Realme ColorOS)
+    // Shows a 3-step onboarding flow (like SuperVPN) the first time a user
+    // opens the app. Each step triggers a REAL Android system permission:
+    //   1. Allow Notifications → POST_NOTIFICATIONS system dialog
+    //   2. Disable Battery Optimization → battery whitelist system dialog
+    //   3. Let App Always Run in Background → OEM Auto-start settings
     //
-    // v4.3.0 detected the OEM but NEVER prompted the user — so they never
-    // knew to enable these settings. This is THE root cause of "no
-    // notifications when app is closed".
-    //
-    // We now show a Flutter dialog explaining both settings, with buttons
-    // to open each settings screen. We persist a flag in SharedPreferences
-    // so we only show the dialog ONCE per version (not every launch).
+    // This is MUCH more effective than the old approach (which just showed a
+    // custom dialog). Now the user grants permissions directly from our flow.
+    // Only shows ONCE per app version (key: v4.6.2_onboarding_completed).
     // ──────────────────────────────────────────────────────────────────
-    // We schedule this with a 2-second delay so the WebView + Flutter UI
-    // are fully rendered before the dialog appears (otherwise the dialog
-    // can appear over a blank screen on cold start).
     Future.delayed(const Duration(seconds: 2), () {
-      _promptForOemSettingsIfNeeded(
-        oem: _detectedOem,
-        needsAutoStart: _needsAutoStart,
-        batteryOptDenied: _batteryOptDenied,
-      );
+      final context = _navigatorKey?.currentContext;
+      if (context == null || !context.mounted) {
+        debugPrint('[NotificationService] No navigator context — cannot show onboarding');
+        return;
+      }
+      OnboardingFlow.showIfNeeded(context);
     });
   }
 
