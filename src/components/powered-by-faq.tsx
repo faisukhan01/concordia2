@@ -195,40 +195,67 @@ export function PoweredByFaq({
 /**
  * Sidebar footer credit.
  *
- * Expanded 260px sidebar: stacked "powered by" + refined FaQ logo (140px wide),
- *   left-aligned, floating on the sidebar's white background. Premium and
- *   not dominant — matches the arvo aesthetic.
+ * v9 — REFINED & PROFESSIONAL (per user feedback: "too large, unprofessional"):
+ *   • Expanded 260px sidebar: single-line horizontal credit — tiny
+ *     "POWERED BY" label + small FaQ logo (88px wide). Subordinate to nav,
+ *     reads as a quiet footer signature, not a billboard.
+ *   • Collapsed 72px rail: tiny centered FaQ mark (44px wide), slightly
+ *     muted — a subtle footer dot, not a stretched logo.
+ *   • A whisper-faint top hairline separates the credit from the user
+ *     profile block above, giving it the feel of a proper footer.
  *
- * Collapsed 72px rail: just the FaQ logo (64px wide), centered.
+ * NOTE: This is intentionally independent of the shared `PoweredByFaq`
+ * default variant (140px) so the download-page footer keeps its size
+ * while the sidebar credit stays small and professional.
  */
 export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean }) {
   if (collapsed) {
-    // Collapsed rail — centered FaQ logo, no label. Refined 64px width
-    // so the logo feels intentional and premium, not stretched.
+    // Collapsed rail — tiny centered FaQ mark, slightly muted so it reads
+    // as a subtle footer credit rather than a stretched logo.
     return (
-      <div className="flex justify-center px-2 pb-3 pt-1">
+      <div className="flex justify-center px-2 pb-2.5 pt-1">
         <img
           src="/faq-logo-light.png"
           alt="Powered by FaQ Systems"
-          width={64}
-          height={11}
+          width={44}
+          height={8}
           loading="lazy"
           decoding="async"
           title="Powered by FaQ Systems"
           style={{
             height: 'auto',
             display: 'block',
-            filter: 'drop-shadow(0 2px 6px rgba(10, 26, 58, 0.18))',
+            opacity: 0.7,
+            filter: 'drop-shadow(0 1px 3px rgba(10, 26, 58, 0.12))',
           }}
         />
       </div>
     );
   }
 
-  // Expanded sidebar — stacked, left-aligned, floating.
+  // Expanded sidebar — single-line horizontal credit: "POWERED BY" + small
+  // FaQ logo. Premium, subordinate, doesn't compete with the nav items.
   return (
-    <div className="px-4 pb-3 pt-2">
-      <PoweredByFaq align="left" />
+    <div className="px-4 pb-3 pt-2.5 border-t border-black/[0.04]">
+      <div className="flex items-center gap-2">
+        <span className="text-[8px] font-semibold uppercase leading-none tracking-[0.24em] text-gray-400 shrink-0">
+          powered by
+        </span>
+        <img
+          src="/faq-logo-light.png"
+          alt="FaQ Systems"
+          width={88}
+          height={16}
+          loading="lazy"
+          decoding="async"
+          title="FaQ Systems — Product Owner"
+          style={{
+            height: 'auto',
+            display: 'block',
+            filter: 'drop-shadow(0 2px 5px rgba(10, 26, 58, 0.12))',
+          }}
+        />
+      </div>
     </div>
   );
 }
