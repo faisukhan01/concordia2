@@ -168,6 +168,18 @@ export const api = {
   // documents, etc.) while preserving institutes, branches, office-staff
   // accounts, classes, courses, fee_structure, and exams.
   purgeTestData: async () => { const r = await request<any>('admin/purge-data', { method: 'POST', body: JSON.stringify({ confirmText: 'PURGE' }) }); invalidateCache(); return r; },
+  // Super-admin-only: download a full JSON backup of the entire database.
+  // Returns a Blob (the JSON file) that the browser saves as a download.
+  dbBackup: async () => {
+    const token = readSessionToken();
+    const res = await fetch('/api/admin/db-backup', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('Backup failed');
+    return res.blob();
+  },
+  // Super-admin-only: check the health of the database connection.
+  dbHealth: () => cachedGet<any>('admin/db-health'),
   blockInstitute: async (id: string, blocked: boolean, reason?: string) =>
     { const r = await request<any>(`institutes/${id}/block`, { method: 'PATCH', body: JSON.stringify({ blocked, reason }) }); invalidateCache(); return r; },
   branches: (instituteId?: string) => cachedGet<any[]>(instituteId ? `branches?instituteId=${instituteId}` : 'branches'),
