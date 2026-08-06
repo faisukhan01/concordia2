@@ -32,7 +32,7 @@ const APK_DOWNLOAD_URL =
   'https://github.com/faisukhan01/concordia2/releases/latest/download/concordia-college.apk';
 const GITHUB_RELEASES = 'https://github.com/faisukhan01/concordia2/releases';
 // Fallback version shown if the GitHub API fetch fails (e.g. rate-limited).
-const APK_VERSION_FALLBACK = 'v4.7.6';
+const APK_VERSION_FALLBACK = 'v4.7.7';
 
 // ───────────────────────── Data ─────────────────────────
 

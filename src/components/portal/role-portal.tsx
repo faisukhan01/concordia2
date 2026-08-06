@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { BrandLogo } from '@/components/brand-logo';
-import { SidebarFaqCredit, PoweredByFaq } from '@/components/powered-by-faq';
+import { SidebarFaqCredit } from '@/components/powered-by-faq';
 import {
   GraduationCap, Search, Bell, Menu, LogOut,
   PanelLeftClose, PanelLeft, Shield,
@@ -1649,7 +1649,6 @@ export function RolePortal() {
 
         <footer className="mt-auto border-t border-border px-6 py-3 text-xs text-muted-foreground flex items-center justify-between gap-3">
           <span>© {new Date().getFullYear()} Concordia College</span>
-          <PoweredByFaq variant="inline" />
         </footer>
       </div>
 
