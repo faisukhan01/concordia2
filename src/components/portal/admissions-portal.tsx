@@ -85,6 +85,11 @@ import {
   Inbox,
   ArrowLeft,
   FolderOpen,
+  Eye,
+  FileImage,
+  FileType2,
+  ShieldCheck,
+  Paperclip,
 } from 'lucide-react';
 import {
   buildAdmissionReceipt,
@@ -2009,10 +2014,10 @@ function StudentTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 px-2 text-xs text-[#F26522] hover:text-[#D4541E] hover:bg-[#FFF0E8] font-semibold"
+                    className="h-8 px-2.5 text-xs text-[#F26522] hover:text-[#D4541E] hover:bg-[#FFF0E8] font-semibold"
                     onClick={() => onDocs(s)}
                   >
-                    <FolderOpen className="h-3.5 w-3.5 mr-1" /> View &amp; Add Docs
+                    <FolderOpen className="h-3.5 w-3.5 mr-1" /> Documents
                   </Button>
                 </div>
               </TableCell>
@@ -2159,21 +2164,29 @@ function DocumentManagerDialog({
         });
         return;
       }
-      // Open the data URL in a new tab. For images and PDFs, this displays
-      // them in the browser; for binary Office docs, the browser will offer
-      // a download.
-      const win = window.open();
-      if (win) {
-        win.location.href = dataUrl;
-      } else {
-        // Fallback — trigger a direct download via an <a> click.
-        const a = document.createElement('a');
-        a.href = dataUrl;
-        a.download = res?.fileName || 'document';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }
+      // Convert the data URL to a Blob and trigger a real download via an
+      // <a download> element with a blob: URL. This is the ONLY reliable
+      // way to download data-URL content in modern browsers — assigning a
+      // data: URL to window.location or a popup's location.href is silently
+      // blocked by Chrome / Firefox / Safari (top-level navigation to data:
+      // URLs was deprecated for security in Chrome 60+).
+      const byteString = atob((dataUrl.split(',')[1] || ''));
+      const mimeMatch = dataUrl.match(/data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+      const blob = new Blob([ab], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = res?.fileName || 'document';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Revoke the blob URL after a short delay so the download has time
+      // to start in older browsers.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
     } catch (e: any) {
       toast({
         title: 'Download failed',
@@ -2183,6 +2196,55 @@ function DocumentManagerDialog({
     } finally {
       setDownloadingId(null);
     }
+  };
+
+  // Open a preview of the document in a new browser tab. Blob URLs CAN be
+  // navigated to (unlike data: URLs), so this works reliably for images
+  // and PDFs. Office documents (.doc/.docx) typically download instead.
+  const onPreview = async (id: string) => {
+    setDownloadingId(id);
+    try {
+      const res = await api.downloadStudentDocument(id);
+      const dataUrl: string | undefined = res?.dataUrl;
+      if (!dataUrl) {
+        toast({ title: 'Preview failed', description: 'No file content returned.', variant: 'destructive' });
+        return;
+      }
+      const byteString = atob((dataUrl.split(',')[1] || ''));
+      const mimeMatch = dataUrl.match(/data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+      const blob = new Blob([ab], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      // Give the new tab time to load before revoking.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } catch (e: any) {
+      toast({ title: 'Preview failed', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  // Decide whether a document is previewable in-browser (images + PDFs).
+  // Office docs (.doc/.docx) don't render in-browser and should just
+  // download.
+  const isPreviewable = (d: any) => {
+    const t = (d.fileType || '').toLowerCase();
+    const n = (d.fileName || '').toLowerCase();
+    return t.startsWith('image/') || t === 'application/pdf' ||
+      /\.(jpg|jpeg|png|gif|webp|pdf)$/i.test(n);
+  };
+
+  // Pick the right file-type icon for a document.
+  const fileIcon = (d: any) => {
+    const t = (d.fileType || '').toLowerCase();
+    const n = (d.fileName || '').toLowerCase();
+    if (t.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(n)) return FileImage;
+    if (t === 'application/pdf' || /\.pdf$/i.test(n)) return FileType2;
+    return FileText;
   };
 
   const onDelete = async (id: string, name: string) => {
@@ -2203,179 +2265,297 @@ function DocumentManagerDialog({
     }
   };
 
+  // Aggregate stats for the header summary strip.
+  const totalSize = docs.reduce((sum, d) => sum + Number(d.fileSize || 0), 0);
+
   return (
     <Dialog open={!!student} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[95vw] sm:max-w-2xl bg-white max-h-[92vh] flex flex-col gap-0 p-0 overflow-hidden">
-        <DialogHeader className="px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
-          <DialogTitle className="text-base font-semibold text-gray-900 flex items-center gap-2">
-            <FolderOpen className="h-4 w-4 text-[#F26522]" />
-            Student Documents
-          </DialogTitle>
-          <DialogDescription className="text-sm text-gray-500">
-            Upload and manage scanned documents for this student.
-          </DialogDescription>
+      <DialogContent className="w-[97vw] sm:max-w-5xl bg-white max-h-[94vh] flex flex-col gap-0 p-0 overflow-hidden rounded-2xl shadow-2xl">
+        {/* ── Header: gradient accent + student identity + summary stats ── */}
+        <DialogHeader className="px-6 pt-6 pb-5 border-b border-gray-100 shrink-0 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-[#FFF4ED] via-white to-white pointer-events-none" />
+          <div className="absolute top-0 left-0 right-0 h-0.5 bg-[#F26522]" />
+          <div className="relative flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="h-12 w-12 rounded-xl bg-[#F26522] grid place-items-center shrink-0 shadow-sm shadow-[#F26522]/30">
+                <FolderOpen className="h-6 w-6 text-white" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  Student Document Vault
+                </DialogTitle>
+                <DialogDescription className="text-sm text-gray-500 mt-0.5">
+                  Securely upload, preview, download, and manage scanned documents.
+                </DialogDescription>
+              </div>
+            </div>
+            {student && (
+              <div className="hidden sm:flex items-center gap-3 shrink-0 rounded-xl border border-gray-200 bg-white/80 backdrop-blur px-3 py-2">
+                <div className="h-9 w-9 rounded-full border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
+                  <GraduationCap className="h-4 w-4 text-gray-500" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate max-w-[180px]">
+                    {student.name}
+                  </p>
+                  <p className="text-[11px] font-mono text-gray-500">
+                    Roll # {student.rollNo || '—'}
+                    {student.class ? ` · ${student.class}` : ''}
+                    {student.section ? ` · ${student.section}` : ''}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Summary stat chips */}
+          <div className="relative flex flex-wrap items-center gap-2 mt-4">
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5">
+              <Paperclip className="h-3.5 w-3.5 text-[#F26522]" />
+              <span className="text-xs font-semibold text-gray-900 tabular-nums">{docs.length}</span>
+              <span className="text-[11px] text-gray-500">{docs.length === 1 ? 'document' : 'documents'}</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5">
+              <FileText className="h-3.5 w-3.5 text-gray-400" />
+              <span className="text-xs font-semibold text-gray-900 tabular-nums">{fmtBytes(totalSize)}</span>
+              <span className="text-[11px] text-gray-500">total</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="text-[11px] font-semibold text-emerald-700">Encrypted at rest</span>
+            </div>
+          </div>
         </DialogHeader>
 
-        {/* Scrollable body — holds student info + docs list + upload form.
-            The DialogHeader (above) and the upload button row (below) stay
-            pinned so the button never bleeds outside the dialog on small screens. */}
-        <div className="flex-1 overflow-y-auto concordia-scroll px-5 py-4 space-y-4 min-h-0">
-        {student && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full border border-gray-200 bg-white grid place-items-center shrink-0">
-              <GraduationCap className="h-5 w-5 text-gray-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate">
-                {student.name}
-              </p>
-              <p className="text-xs font-mono text-gray-500">
-                Roll # {student.rollNo || '—'}
-                {student.class ? ` · ${student.class}` : ''}
-                {student.section ? ` · ${student.section}` : ''}
-              </p>
-            </div>
-          </div>
-        )}
+        {/* ── Body: two-column on desktop — documents grid (left) + upload panel (right) ── */}
+        <div className="flex-1 overflow-y-auto concordia-scroll min-h-0">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-0">
+            {/* Left: existing documents */}
+            <div className="lg:col-span-3 p-5 sm:p-6 lg:border-r border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-[#F26522]" />
+                  Uploaded Documents
+                </h3>
+                {docs.length > 0 && (
+                  <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">
+                    {docs.length} {docs.length === 1 ? 'file' : 'files'}
+                  </span>
+                )}
+              </div>
 
-        {/* Existing documents list */}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-gray-700">
-            Existing Documents {docs.length > 0 && `(${docs.length})`}
-          </p>
-          <div className={`${scrollListCls} rounded-lg border border-gray-200 bg-white`}>
-            {loadingDocs ? (
-              <div className="p-4 space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : docs.length === 0 ? (
-              <div className="p-5 text-center">
-                <FileText className="h-6 w-6 text-gray-300 mx-auto mb-2" />
-                <p className="text-xs text-gray-500">
-                  No documents uploaded yet.
-                </p>
-              </div>
-            ) : (
-              <ul className="divide-y divide-gray-100">
-                {docs.map((d) => (
-                  <li
-                    key={d.id}
-                    className="px-3 py-2.5 flex items-center gap-3 hover:bg-gray-50"
+              {loadingDocs ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-28 w-full rounded-xl" />
+                  ))}
+                </div>
+              ) : docs.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-12 text-center">
+                  <div className="h-14 w-14 rounded-2xl bg-white border border-gray-200 grid place-items-center mx-auto mb-3 shadow-sm">
+                    <FileText className="h-7 w-7 text-gray-300" />
+                  </div>
+                  <p className="text-sm font-semibold text-gray-700">No documents yet</p>
+                  <p className="text-xs text-gray-500 mt-1 max-w-xs mx-auto">
+                    Upload the student's CNIC, B-Form, previous results, photos, or any other
+                    scanned document using the panel on the right.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {docs.map((d) => {
+                    const Icon = fileIcon(d);
+                    const previewable = isPreviewable(d);
+                    return (
+                      <div
+                        key={d.id}
+                        className="group rounded-xl border border-gray-200 bg-white hover:border-[#F26522]/40 hover:shadow-sm transition-all overflow-hidden"
+                      >
+                        <div className="p-3.5">
+                          <div className="flex items-start gap-3">
+                            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#FFF4ED] to-[#FFF0E8] border border-[#F26522]/10 grid place-items-center shrink-0">
+                              <Icon className="h-5 w-5 text-[#F26522]" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-gray-900 truncate" title={d.name}>
+                                {d.name}
+                              </p>
+                              <p className="text-[11px] text-gray-500 truncate" title={d.fileName}>
+                                {d.fileName || '—'}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
+                                <span className="tabular-nums">{fmtBytes(Number(d.fileSize || 0))}</span>
+                                {d.createdAt && (
+                                  <>
+                                    <span>·</span>
+                                    <span>{fmtDate(d.createdAt)}</span>
+                                  </>
+                                )}
+                              </div>
+                              {d.uploadedByName && (
+                                <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                                  by {d.uploadedByName}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="px-3.5 py-2 border-t border-gray-100 bg-gray-50/50 flex items-center justify-end gap-1">
+                          {previewable && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-[11px] font-medium text-gray-600 hover:text-[#F26522] hover:bg-[#FFF0E8]"
+                              onClick={() => onPreview(d.id)}
+                              disabled={downloadingId === d.id}
+                            >
+                              <Eye className="h-3.5 w-3.5 mr-1" /> Preview
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] font-medium text-gray-600 hover:text-emerald-700 hover:bg-emerald-50"
+                            onClick={() => onDownload(d.id)}
+                            disabled={downloadingId === d.id}
+                          >
+                            {downloadingId === d.id ? (
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                            ) : (
+                              <Download className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            Download
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50"
+                            onClick={() => onDelete(d.id, d.name)}
+                            disabled={deletingId === d.id}
+                          >
+                            {deletingId === d.id ? (
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Right: upload panel */}
+            <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50/40">
+              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-3">
+                <FileUp className="h-4 w-4 text-[#F26522]" />
+                Upload New Document
+              </h3>
+
+              <div className="space-y-4">
+                <Field label="Document Name" required>
+                  <Input
+                    value={docName}
+                    onChange={(e) => setDocName(e.target.value)}
+                    placeholder="e.g. Father CNIC, Student B-Form, Previous Results"
+                    className={inputCls}
+                  />
+                </Field>
+
+                <Field label="File" required>
+                  <label
+                    className={`block cursor-pointer rounded-xl border-2 border-dashed transition-all ${
+                      file
+                        ? 'border-[#F26522]/40 bg-[#FFF0E8]/40'
+                        : 'border-gray-300 bg-white hover:border-[#F26522]/50 hover:bg-[#FFF4ED]/30'
+                    } px-4 py-5 text-center`}
                   >
-                    <div className="h-9 w-9 rounded-lg border border-gray-200 bg-white grid place-items-center shrink-0">
-                      <FileText className="h-4 w-4 text-gray-400" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {d.name}
-                      </p>
-                      <p className="text-[11px] text-gray-500 truncate">
-                        {d.fileName || '—'} · {fmtBytes(Number(d.fileSize || 0))}
-                        {d.uploadedByName ? ` · by ${d.uploadedByName}` : ''}
-                        {d.createdAt ? ` · ${fmtDate(d.createdAt)}` : ''}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                        onClick={() => onDownload(d.id)}
-                        disabled={downloadingId === d.id}
-                        aria-label={`Download ${d.name}`}
-                      >
-                        {downloadingId === d.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-gray-500 hover:text-rose-600 hover:bg-rose-50"
-                        onClick={() => onDelete(d.id, d.name)}
-                        disabled={deletingId === d.id}
-                        aria-label={`Delete ${d.name}`}
-                      >
-                        {deletingId === d.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={DOC_ACCEPT}
+                      onChange={onFileChange}
+                      className="sr-only"
+                    />
+                    {file ? (
+                      <div className="flex items-center justify-center gap-2.5">
+                        <div className="h-9 w-9 rounded-lg bg-[#F26522] grid place-items-center shrink-0">
+                          <CheckCircle2 className="h-5 w-5 text-white" />
+                        </div>
+                        <div className="min-w-0 text-left">
+                          <p className="text-xs font-semibold text-gray-900 truncate max-w-[180px]" title={file.name}>
+                            {file.name}
+                          </p>
+                          <p className="text-[11px] text-gray-500 tabular-nums">
+                            {fmtBytes(file.size)} · click to replace
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="h-10 w-10 rounded-lg bg-white border border-gray-200 grid place-items-center mx-auto mb-2">
+                          <Upload className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <p className="text-xs font-semibold text-gray-700">
+                          Click to choose a file
+                        </p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          JPG, PNG, PDF, DOC, DOCX · max {(DOC_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB
+                        </p>
+                      </div>
+                    )}
+                  </label>
+                </Field>
+
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5 flex items-center gap-1">
+                    <Info className="h-3 w-3" /> Tips
+                  </p>
+                  <ul className="text-[11px] text-gray-600 space-y-1">
+                    <li>• Use clear, scanned copies for CNIC and B-Form.</li>
+                    <li>• PDF is preferred for multi-page documents.</li>
+                    <li>• Files are stored securely and only visible to authorised staff.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Upload form */}
-        <div className="rounded-lg border border-[#F26522]/30 bg-[#FFF0E8]/40 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#D4541E]">
-            <FileUp className="h-4 w-4" />
-            Upload New Document
+        {/* ── Footer: pinned action bar ── */}
+        <div className="px-6 py-3.5 border-t border-gray-100 bg-white shrink-0 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-gray-400 hidden sm:block">
+            {docs.length} {docs.length === 1 ? 'document' : 'documents'} · {fmtBytes(totalSize)} total
+          </p>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-9 px-4 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+              onClick={onClose}
+            >
+              Close
+            </Button>
+            <Button
+              type="button"
+              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-5 text-sm font-medium shadow-sm shadow-[#F26522]/30"
+              onClick={onUpload}
+              disabled={uploading || !file}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Uploading…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-1.5" /> Upload Document
+                </>
+              )}
+            </Button>
           </div>
-          <Field label="Document Name" required>
-            <Input
-              value={docName}
-              onChange={(e) => setDocName(e.target.value)}
-              placeholder="e.g. Father CNIC, Student B-Form, Previous Results"
-              className={inputCls}
-            />
-          </Field>
-          <Field label="File" required>
-            <Input
-              ref={fileInputRef}
-              type="file"
-              accept={DOC_ACCEPT}
-              onChange={onFileChange}
-              className="h-10 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 file:mr-3 file:ml-0 file:rounded-md file:border-0 file:bg-[#F26522] file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-[#D4541E] cursor-pointer"
-            />
-            {file && (
-              <p className="text-[11px] text-gray-500 mt-1">
-                {file.name} · {fmtBytes(file.size)}
-              </p>
-            )}
-            <p className="text-[11px] text-gray-500 mt-1">
-              Accepted: JPG, PNG, PDF, DOC, DOCX · max{' '}
-              {(DOC_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB
-            </p>
-          </Field>
-        </div>
-        </div>
-
-        {/* Pinned footer — upload button. Sits outside the scrollable body
-            so it never overflows the dialog, even on small screens. */}
-        <div className="px-5 py-3.5 border-t border-gray-100 bg-white shrink-0 flex items-center justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-9 px-4 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
-            onClick={onClose}
-          >
-            Close
-          </Button>
-          <Button
-            type="button"
-            className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium"
-            onClick={onUpload}
-            disabled={uploading || !file}
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Uploading…
-              </>
-            ) : (
-              <>
-                <Upload className="h-4 w-4 mr-1.5" /> Upload Document
-              </>
-            )}
-          </Button>
         </div>
       </DialogContent>
     </Dialog>

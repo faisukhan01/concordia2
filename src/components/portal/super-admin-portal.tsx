@@ -2520,6 +2520,12 @@ function SuperInstitutes() {
   const [target, setTarget] = useState<any | null>(null);
   const [reason, setReason] = useState('');
   const [acting, setActing] = useState(false);
+  // Delete dialog state (separate from block — irreversible action gets its
+  // own confirmation flow with a typed confirmation token).
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
     const [insts, brs, usrs] = await Promise.all([
@@ -2609,6 +2615,56 @@ function SuperInstitutes() {
     setDialogOpen(false);
     setTarget(null);
     setReason('');
+  };
+
+  // ── Delete college flow ──
+  // Deleting an institute is IRREVERSIBLE — it cascades to every user,
+  // branch, class, student record, fee, document, attendance, result,
+  // etc. in that college. We require the super admin to type the
+  // college name exactly as a guard against accidental clicks.
+  const openDeleteDialog = (inst: any) => {
+    setDeleteTarget(inst);
+    setDeleteConfirmText('');
+    setDeleteDialogOpen(true);
+  };
+
+  const cancelDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+    setDeleteConfirmText('');
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    // Require exact name match before allowing the delete.
+    if (deleteConfirmText.trim() !== deleteTarget.name) {
+      toast({
+        title: 'Name does not match',
+        description: 'Type the college name exactly as shown to confirm.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.deleteInstitute(deleteTarget.id);
+      toast({
+        title: 'College deleted',
+        description: `${deleteTarget.name} and all of its data have been permanently removed.`,
+      });
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
+      setDeleteConfirmText('');
+      await load();
+    } catch (e: any) {
+      toast({
+        title: 'Delete failed',
+        description: e?.message || 'Could not delete this college. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -2790,6 +2846,16 @@ function SuperInstitutes() {
                         <Ban className="h-4 w-4" /> Block Access
                       </button>
                     )}
+                    <button
+                      onClick={() => openDeleteDialog(inst)}
+                      title="Permanently delete this college and all its data"
+                      className={cn(
+                          'border border-gray-200 bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-700 rounded-lg h-9 w-9 text-sm font-medium inline-flex items-center justify-center transition-colors',
+                      )}
+                      aria-label={`Delete ${inst.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2890,6 +2956,84 @@ function SuperInstitutes() {
                     <Ban className="h-4 w-4" /> Block Access
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirmation dialog ── */}
+      {/* Deleting an institute cascades to EVERYTHING under it — every
+          user, branch, class, student record, fee, document, attendance,
+          result, etc. To prevent accidents, the super admin MUST type
+          the college name exactly as shown before the Delete button
+          becomes enabled. */}
+      {deleteDialogOpen && deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={cancelDeleteDialog}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in fade-in-0 zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="h-11 w-11 shrink-0 rounded-xl bg-rose-50 grid place-items-center">
+                <Trash2 className="h-5 w-5 text-rose-600" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-gray-900">
+                  Delete this college permanently?
+                </h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {deleteTarget.name} · {deleteTarget.city || '—'}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-md bg-rose-50 border border-rose-100 px-3 py-2.5 mb-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-700 mb-1.5">
+                This will permanently delete
+              </p>
+              <ul className="text-xs text-rose-800 space-y-0.5">
+                <li>• All branches, classes, courses & sections</li>
+                <li>• Every user account (admin, staff, teachers, students)</li>
+                <li>• All student documents, fees, invoices & salaries</li>
+                <li>• Attendance, results, report cards & exams</li>
+                <li>• Announcements, events, timetables & notifications</li>
+              </ul>
+              <p className="text-[11px] text-rose-700 mt-2 font-medium">
+                This action cannot be undone.
+              </p>
+            </div>
+
+            <Field
+              label={`Type the college name to confirm`}
+              hint={`Exactly: ${deleteTarget.name}`}
+            >
+              <Input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={deleteTarget.name}
+                className={inputCls}
+                autoFocus
+              />
+            </Field>
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button onClick={cancelDeleteDialog} className={btnSecondary} disabled={deleting}>
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting || deleteConfirmText.trim() !== deleteTarget.name}
+                className={cn(
+                  'rounded-lg h-9 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-white bg-rose-600 hover:bg-rose-700',
+                  deleteConfirmText.trim() !== deleteTarget.name && 'opacity-50 cursor-not-allowed',
+                )}
+              >
+                {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+                <Trash2 className="h-4 w-4" /> Delete Permanently
               </button>
             </div>
           </div>
