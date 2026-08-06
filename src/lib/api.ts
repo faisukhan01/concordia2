@@ -73,9 +73,21 @@ function getToken(): string | null {
   return readSessionToken();
 }
 
-// Global blocked-state callback — set by the RolePortal to detect access revocation
+// Global blocked-state callback — set by the RolePortal to detect access revocation.
+// IMPORTANT: this is ONLY for real admin-blocked accounts (403 + "blocked").
+// A normal session expiry (401 "Invalid or expired session") must NOT trigger
+// this — it triggers onSessionExpired instead, which does a clean logout +
+// redirect to the login page. Without this distinction, every expired session
+// wrongly shows the scary "Access Blocked" screen (user has to go back +
+// sign in again — reported bug).
 let onBlockedCallback: ((msg: string) => void) | null = null;
 export function setOnBlocked(cb: (msg: string) => void) { onBlockedCallback = cb; }
+
+// Session-expired callback — set by the RolePortal. Fired on 401 responses
+// (invalid/expired token). Performs a clean logout + redirect to login so the
+// user just sees the sign-in page, NOT the "Access Blocked" screen.
+let onSessionExpiredCallback: (() => void) | null = null;
+export function setOnSessionExpired(cb: () => void) { onSessionExpiredCallback = cb; }
 
 async function request<T>(path: string, options?: RequestInit, _skipCache = false): Promise<T> {
   const token = getToken();
@@ -101,10 +113,35 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
       errorMsg = parsed.error || parsed.message || `Request failed (${res.status})`;
     } catch {}
 
-    // Detect blocked/access-revoked errors and trigger global handler
-    if (res.status === 403 || res.status === 401) {
-      const lowerMsg = errorMsg.toLowerCase();
-      if (lowerMsg.includes('blocked') || lowerMsg.includes('access') || lowerMsg.includes('session') || lowerMsg.includes('expired')) {
+    const lowerMsg = errorMsg.toLowerCase();
+
+    // ── 401 Unauthorized: session is invalid or expired ──
+    // This is a NORMAL session expiry — do a clean logout + redirect to the
+    // login page. Do NOT show the "Access Blocked" screen (that's only for
+    // real admin-blocked accounts). Guard with a once-per-page-load flag so
+    // we don't fire N concurrent logouts when multiple API calls fail at once.
+    if (res.status === 401) {
+      if (!_sessionExpiredFired) {
+        _sessionExpiredFired = true;
+        try { clearSession(); } catch {}
+        if (onSessionExpiredCallback) {
+          onSessionExpiredCallback();
+        } else {
+          // Fallback: hard redirect to the login page if no callback registered yet.
+          if (typeof window !== 'undefined') {
+            try { window.location.replace('/?view=login'); } catch {}
+          }
+        }
+      }
+      throw new Error(errorMsg);
+    }
+
+    // ── 403 Forbidden: real access revocation (admin blocked the account,
+    //    institute, or branch). Only trigger the blocked screen for actual
+    //    "blocked" messages — NOT for generic "access" / "session" / "expired"
+    //    strings (those caused the previous false-positive bug). ──
+    if (res.status === 403) {
+      if (lowerMsg.includes('blocked') || lowerMsg.includes('revoked') || lowerMsg.includes('retired')) {
         if (onBlockedCallback) {
           onBlockedCallback(errorMsg);
         }
@@ -116,9 +153,18 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
   return res.json() as Promise<T>;
 }
 
+// Once-per-page-load guard for 401 session-expiry handling. Prevents N
+// concurrent API calls (all failing with 401 at once) from each triggering
+// a logout/redirect. Reset when the page reloads or the user logs in again.
+let _sessionExpiredFired = false;
+export function _resetSessionExpiredGuard() { _sessionExpiredFired = false; }
+
 export const api = {
-  login: (email: string, password: string, name?: string) =>
-    request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
+  login: (email: string, password: string, name?: string) => {
+    // Reset the 401 session-expired guard so a fresh login starts clean.
+    _sessionExpiredFired = false;
+    return request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) });
+  },
   // Client-side logout — clears the persisted session from BOTH storages
   // (sessionStorage in browser, localStorage in native app, plus any stale
   // legacy localStorage entry from before v4.6.3). Auth is stateless
@@ -126,6 +172,7 @@ export const api = {
   // reloads to '/'.
   logout: async () => {
     clearSession();
+    _sessionExpiredFired = false;
     // Also clear the API cache so a subsequent login as a different user
     // doesn't see stale cached data from the previous user.
     invalidateCache();

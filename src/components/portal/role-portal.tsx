@@ -33,7 +33,7 @@ import { OnboardingTips } from '@/components/onboarding/onboarding-tooltips';
 import { HelpWidget } from '@/components/ui/help-widget';
 import { ProfileDropdown } from '@/components/portal/profile-dropdown';
 import { WhatsNewDialog, useWhatsNewAutoOpen } from '@/components/portal/whats-new-dialog';
-import { api, setOnBlocked } from '@/lib/api';
+import { api, setOnBlocked, setOnSessionExpired } from '@/lib/api';
 import { useAppUpdateChecker } from '@/lib/use-app-update-checker';
 import { initFcmBridge, isNativeApp, refreshFcmTokenAfterLogin, showLocalNotification } from '@/lib/fcm-bridge';
 import { toast } from '@/hooks/use-toast';
@@ -763,14 +763,35 @@ export function RolePortal() {
   );
   const accent = roleAccent[role];
 
-  // Register global blocked handler — when API returns 403/401 with "blocked",
-  // show the blocked screen instead of silent errors
+  // Register global blocked handler — when API returns 403 with "blocked",
+  // show the blocked screen. NOTE: 401 session-expiry is handled separately
+  // by the onSessionExpired callback below (clean logout → login page), so
+  // it NEVER triggers this blocked screen.
   useEffect(() => {
     setOnBlocked((msg: string) => {
       setBlockedMsg(msg);
     });
     return () => setOnBlocked(() => {});
   }, []);
+
+  // Register session-expired handler — when API returns 401 (invalid/expired
+  // token), do a clean logout + redirect to the login page. This replaces the
+  // previous behaviour where a 401 "Invalid or expired session" wrongly
+  // showed the scary "Access Blocked" screen (reported bug). Now users just
+  // see the login page and can sign back in.
+  useEffect(() => {
+    setOnSessionExpired(() => {
+      try {
+        logout();
+      } catch {}
+      // Hard redirect to the login route as a safety net (in case the store
+      // logout hasn't re-rendered yet, or multiple tabs are involved).
+      if (typeof window !== 'undefined') {
+        try { window.location.replace('/?view=login'); } catch {}
+      }
+    });
+    return () => setOnSessionExpired(() => {});
+  }, [logout]);
 
   // Global Cmd+K / Ctrl+K to toggle the command palette.
   // ignoreKey: prevent opening while typing in inputs that explicitly opt out

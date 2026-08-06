@@ -61,7 +61,7 @@ export function PoweredByFaq({
   className?: string;
   href?: string;
   align?: 'left' | 'center';
-  size?: 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md';
 }) {
   const alignClass = align === 'center' ? 'items-center' : 'items-start';
 
@@ -71,20 +71,24 @@ export function PoweredByFaq({
   // teal FaQ logo pops and the design feels premium/aesthetic.
   //
   // size prop:
+  //   'xs' (92px)  — compact login corner credit (refined, less dominant)
   //   'sm' (120px) — mobile login (proportional on small screens)
-  //   'md' (180px) — desktop bottom-right corner (default)
+  //   'md' (180px) — desktop bottom-right corner (legacy default)
   if (variant === 'on-light') {
-    const logoWidth = size === 'sm' ? 120 : 180;
-    const logoHeight = size === 'sm' ? 21 : 32;
-    const padX = size === 'sm' ? 'px-5' : 'px-6';
-    const padY = size === 'sm' ? 'py-3' : 'py-4';
-    const gap = size === 'sm' ? 'gap-1.5' : 'gap-2';
-    const labelSize = size === 'sm'
-      ? 'text-[9px] tracking-[0.24em]'
-      : 'text-[10px] tracking-[0.28em]';
+    const logoWidth = size === 'xs' ? 92 : size === 'sm' ? 120 : 180;
+    const logoHeight = size === 'xs' ? 16 : size === 'sm' ? 21 : 32;
+    const padX = size === 'xs' ? 'px-4' : size === 'sm' ? 'px-5' : 'px-6';
+    const padY = size === 'xs' ? 'py-2.5' : size === 'sm' ? 'py-3' : 'py-4';
+    const gap = size === 'xs' ? 'gap-1' : size === 'sm' ? 'gap-1.5' : 'gap-2';
+    const labelSize = size === 'xs'
+      ? 'text-[8px] tracking-[0.22em]'
+      : size === 'sm'
+        ? 'text-[9px] tracking-[0.24em]'
+        : 'text-[10px] tracking-[0.28em]';
+    const radius = size === 'xs' ? 'rounded-xl' : 'rounded-2xl';
     const content = (
       <div
-        className={`flex flex-col ${alignClass} ${gap} ${padX} ${padY} rounded-2xl`}
+        className={`flex flex-col ${alignClass} ${gap} ${padX} ${padY} ${radius}`}
         style={{
           background: 'rgba(255, 255, 255, 0.96)',
           border: '1px solid rgba(255, 255, 255, 0.9)',

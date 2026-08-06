@@ -278,10 +278,10 @@ export function LoginPage() {
             {/* Mobile-only powered-by — aesthetic white card (matches the
                 desktop bottom-right corner credit). Right side FaQ is
                 hidden on mobile, so we show the white card here instead.
-                v4.7.7: Uses size="sm" (120px) so the FaQ card is proportional
-                on small screens — was too large at 180px. */}
+                v4.7.9: Uses size="xs" (92px) — refined and proportional on
+                small screens, less dominant than the previous 'sm' (120px). */}
             <div className="mt-4 flex justify-center lg:hidden">
-              <PoweredByFaq variant="on-light" align="center" size="sm" />
+              <PoweredByFaq variant="on-light" align="center" size="xs" />
             </div>
           </motion.div>
         </div>
@@ -304,7 +304,7 @@ export function LoginPage() {
           transition={{ duration: 0.55, delay: 0.25, ease: [0.4, 0, 0.2, 1] }}
           className="hidden lg:block absolute bottom-7 right-7 z-30"
         >
-          <PoweredByFaq variant="on-light" align="center" />
+          <PoweredByFaq variant="on-light" align="center" size="xs" />
         </motion.div>
       </div>
     </div>
