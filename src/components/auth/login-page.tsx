@@ -236,10 +236,12 @@ export function LoginPage() {
             <p className="text-center text-[11px] text-white/70 mt-5 drop-shadow">
               © {new Date().getFullYear()} Concordia College · All rights reserved
             </p>
-            {/* Product-owner credit — FaQ Systems. Dark metallic pill makes
-                the silver+gold logo pop beneath the frosted login card. */}
-            <div className="mt-3 flex justify-center">
-              <PoweredByFaq />
+            {/* Product-owner credit — FaQ Systems.
+                Stacked "powered by" + logo in a minimal white pill (the only
+                place a pill is used — needed for contrast over the dark campus
+                photo). Logo is 44px so the metallic detail shines. */}
+            <div className="mt-4 flex justify-center">
+              <PoweredByFaq variant="on-dark" align="center" />
             </div>
           </motion.div>
         </div>
