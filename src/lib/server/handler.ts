@@ -392,7 +392,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    now handles update visibility silently without spamming users.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.6.2';
+      const LATEST_APP_VERSION = '4.6.7';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -426,7 +426,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    This replaces the annoying "update your app" push notifications.
     if (method === 'GET' && path === 'app/update-status') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.6.2';
+      const LATEST_APP_VERSION = '4.6.7';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -4064,6 +4064,144 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         created++;
       }
       return NextResponse.json({ success: true, created, total: students.length }, { status: 201 });
+    }
+
+    // ===================== ADMIN: PURGE TEST DATA =====================
+    // Super-admin-only destructive operation that wipes ALL test student /
+    // teacher data while preserving the institutional skeleton (institutes,
+    // branches, classes, courses, fee_structure, exams, office-staff
+    // accounts, super-admin). Used to reset the platform to a clean state
+    // before delivering it to a real customer.
+    //
+    // What gets DELETED:
+    //   • users where role IN ('student', 'teacher')   — keeps office staff
+    //   • sessions (every login is invalidated — everyone must sign in again)
+    //   • device_tokens (FCM tokens re-register on next app launch)
+    //   • notifications (the in-app bell history — test noise)
+    //   • attendance, results, report_cards              — test grading
+    //   • fees, fee_invoices, misc_charges                — test billing
+    //   • student_documents                               — test admissions docs
+    //   • teacher_salaries, salary_payments               — test payroll
+    //   • teacher_class_courses                           — test assignments
+    //   • manual_revenue, events                          — test admin entries
+    //   • timetable, date_sheets + date_sheet_entries     — test scheduling
+    //   • announcements                                   — test broadcasts
+    //
+    // What gets PRESERVED:
+    //   • institutes + branches (the college skeleton)
+    //   • users with role IN ('super-admin','institute-admin','branch-manager',
+    //                          'admin','admissions','accountant','academic')
+    //   • classes, courses, class_courses                 (course catalog)
+    //   • fee_structure                                   (fee templates)
+    //   • exams                                           (exam definitions)
+    //
+    // What gets RESET:
+    //   • institutes.students = 0, institutes.staff = (recomputed live)
+    //   • branches.students = 0, branches.teachers = 0
+    if (method === 'POST' && path === 'admin/purge-data') {
+      const user = await requireAuth(req);
+      requireRole(user, 'super-admin');
+      const { confirmText } = body || {};
+      // Double-safety: caller must send the literal token "PURGE" so an
+      // accidental empty POST can never trigger the wipe.
+      if (confirmText !== 'PURGE') {
+        return NextResponse.json({ error: 'Confirmation token missing. Send { "confirmText": "PURGE" }.' }, { status: 400 });
+      }
+
+      // Capture BEFORE counts for the response so the caller can verify.
+      const before = await db.execute({
+        sql: `SELECT
+                (SELECT COUNT(*) FROM users WHERE role='student') AS students,
+                (SELECT COUNT(*) FROM users WHERE role='teacher') AS teachers,
+                (SELECT COUNT(*) FROM sessions)                AS sessions,
+                (SELECT COUNT(*) FROM notifications)           AS notifications,
+                (SELECT COUNT(*) FROM device_tokens)           AS device_tokens,
+                (SELECT COUNT(*) FROM attendance)              AS attendance,
+                (SELECT COUNT(*) FROM results)                 AS results,
+                (SELECT COUNT(*) FROM fees)                    AS fees,
+                (SELECT COUNT(*) FROM fee_invoices)            AS fee_invoices,
+                (SELECT COUNT(*) FROM student_documents)       AS student_documents,
+                (SELECT COUNT(*) FROM report_cards)            AS report_cards`,
+      });
+      const beforeRow = (before.rows[0] || {}) as any;
+
+      // ── Cascade delete (children first, parents last) ──
+      // 1. Sessions + device_tokens + notifications: wipe EVERYTHING so
+      //    every active login is kicked out and the bell history is clean.
+      await db.execute('DELETE FROM sessions');
+      await db.execute('DELETE FROM device_tokens');
+      await db.execute('DELETE FROM notifications');
+
+      // 2. Records that reference a studentId / teacherId directly.
+      await db.execute('DELETE FROM attendance');
+      await db.execute('DELETE FROM results');
+      await db.execute('DELETE FROM report_cards');
+      await db.execute('DELETE FROM fees');
+      await db.execute('DELETE FROM fee_invoices');
+      await db.execute('DELETE FROM misc_charges');
+      await db.execute('DELETE FROM student_documents');
+      await db.execute('DELETE FROM salary_payments');
+      await db.execute('DELETE FROM teacher_salaries');
+      await db.execute('DELETE FROM teacher_class_courses');
+      await db.execute('DELETE FROM manual_revenue');
+      await db.execute('DELETE FROM events');
+      await db.execute('DELETE FROM announcements');
+      await db.execute('DELETE FROM timetable');
+      await db.execute('DELETE FROM date_sheet_entries');
+      await db.execute('DELETE FROM date_sheets');
+
+      // 3. Finally delete the student + teacher user rows themselves.
+      //    Office-staff roles (admin/admissions/accountant/academic/
+      //    institute-admin/branch-manager/super-admin) are PRESERVED.
+      await db.execute({
+        sql: `DELETE FROM users WHERE role IN ('student','teacher')`,
+      });
+
+      // 4. Reset the denormalized counter columns on institutes + branches
+      //    so the dashboard doesn't show stale "87 students" after the wipe.
+      await db.execute('UPDATE institutes SET students = 0, staff = 0, revenue = 0');
+      await db.execute('UPDATE branches SET students = 0, teachers = 0');
+
+      // 5. Recompute the office-staff headcount per institute so the
+      //    "Staff" KPI on the dashboard stays accurate post-purge.
+      const staffCounts = await db.execute({
+        sql: `SELECT instituteId, COUNT(*) AS n
+              FROM users
+              WHERE role IN ('admin','admissions','accountant','academic','institute-admin','branch-manager')
+                AND instituteId IS NOT NULL
+              GROUP BY instituteId`,
+      });
+      for (const row of staffCounts.rows) {
+        const r = row as any;
+        await db.execute({
+          sql: 'UPDATE institutes SET staff = ? WHERE id = ?',
+          args: [r.n, r.instituteId],
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'All test student / teacher data has been permanently purged. The platform is now in a clean state.',
+        purged: {
+          students: Number(beforeRow.students || 0),
+          teachers: Number(beforeRow.teachers || 0),
+          sessions: Number(beforeRow.sessions || 0),
+          notifications: Number(beforeRow.notifications || 0),
+          device_tokens: Number(beforeRow.device_tokens || 0),
+          attendance: Number(beforeRow.attendance || 0),
+          results: Number(beforeRow.results || 0),
+          fees: Number(beforeRow.fees || 0),
+          fee_invoices: Number(beforeRow.fee_invoices || 0),
+          student_documents: Number(beforeRow.student_documents || 0),
+          report_cards: Number(beforeRow.report_cards || 0),
+        },
+        preserved: [
+          'institutes', 'branches', 'classes', 'courses', 'class_courses',
+          'fee_structure', 'exams',
+          'office-staff accounts (admin / admissions / accountant / academic)',
+          'super-admin account',
+        ],
+      });
     }
 
     // ===================== FALLBACK =====================
