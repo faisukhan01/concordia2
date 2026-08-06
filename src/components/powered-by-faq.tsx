@@ -195,64 +195,62 @@ export function PoweredByFaq({
 /**
  * Sidebar footer credit.
  *
- * v10 — SHRUNK FURTHER (user: "still very large, make it more smaller"):
- *   • Expanded 260px sidebar: 56px FaQ logo + tiny 7px "POWERED BY" label,
- *     single-line, tight padding. Reads as a whisper-quiet footer signature.
- *   • Collapsed 72px rail: 30px centered FaQ mark, opacity 0.55 — barely
- *     there, a subtle footer dot.
- *   • Muted gray label + softer drop-shadow so the credit never competes
- *     with the nav items above it.
+ * v11 — BALANCED (user: "make sure it must be large enough to clearly visible"):
+ *   v9 (88px) was too large; v10 (56px) was too small/hard to read.
+ *   • Expanded 260px sidebar: 74px FaQ logo + 8px "POWERED BY" label,
+ *     single-line, full opacity (1.0) so the teal logo is crisp and
+ *     legible. Subordinate to nav but clearly readable.
+ *   • Collapsed 72px rail: 40px centered FaQ mark, opacity 0.85 — small
+ *     but clearly visible (not the barely-there 0.55 of v10).
  *
  * NOTE: This is intentionally independent of the shared `PoweredByFaq`
  * default variant (140px) so the download-page footer keeps its size
- * while the sidebar credit stays minimal.
+ * while the sidebar credit stays balanced and legible.
  */
 export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean }) {
   if (collapsed) {
-    // Collapsed rail — tiny, muted, centered FaQ mark. Barely-there footer
-    // credit so it never reads as a stretched logo.
+    // Collapsed rail — small but clearly visible centered FaQ mark.
     return (
-      <div className="flex justify-center px-2 pb-2 pt-0.5">
+      <div className="flex justify-center px-2 pb-2.5 pt-1">
         <img
           src="/faq-logo-light.png"
           alt="Powered by FaQ Systems"
-          width={30}
-          height={5}
+          width={40}
+          height={7}
           loading="lazy"
           decoding="async"
           title="Powered by FaQ Systems"
           style={{
             height: 'auto',
             display: 'block',
-            opacity: 0.55,
-            filter: 'drop-shadow(0 1px 2px rgba(10, 26, 58, 0.10))',
+            opacity: 0.85,
+            filter: 'drop-shadow(0 1px 3px rgba(10, 26, 58, 0.14))',
           }}
         />
       </div>
     );
   }
 
-  // Expanded sidebar — single-line, minimal: tiny "POWERED BY" + 56px FaQ
-  // logo. Whisper-quiet so it never competes with the nav items.
+  // Expanded sidebar — single-line: "POWERED BY" + 74px FaQ logo. Small
+  // enough to stay subordinate to nav, large enough to be clearly legible.
   return (
-    <div className="px-4 pb-2.5 pt-2 border-t border-black/[0.04]">
-      <div className="flex items-center gap-1.5">
-        <span className="text-[7px] font-semibold uppercase leading-none tracking-[0.2em] text-gray-400/80 shrink-0">
+    <div className="px-4 pb-3 pt-2.5 border-t border-black/[0.04]">
+      <div className="flex items-center gap-2">
+        <span className="text-[8px] font-semibold uppercase leading-none tracking-[0.22em] text-gray-400 shrink-0">
           powered by
         </span>
         <img
           src="/faq-logo-light.png"
           alt="FaQ Systems"
-          width={56}
-          height={10}
+          width={74}
+          height={13}
           loading="lazy"
           decoding="async"
           title="FaQ Systems — Product Owner"
           style={{
             height: 'auto',
             display: 'block',
-            opacity: 0.92,
-            filter: 'drop-shadow(0 1px 3px rgba(10, 26, 58, 0.10))',
+            filter: 'drop-shadow(0 1px 3px rgba(10, 26, 58, 0.14))',
           }}
         />
       </div>
