@@ -1,7 +1,7 @@
 name: concordia_college
 description: Concordia College — Management Portal mobile app. 100% identical to the web app's mobile preview.
 publish_to: 'none'
-version: 4.6.8+29
+version: 4.6.9+30
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
