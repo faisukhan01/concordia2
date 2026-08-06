@@ -23,6 +23,7 @@ import {
   Apple,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/brand-logo';
+import { PoweredByFaq } from '@/components/powered-by-faq';
 
 // ───────────────────────── Config ─────────────────────────
 // Always points to the LATEST GitHub release — no version baked into the URL.
@@ -31,7 +32,7 @@ const APK_DOWNLOAD_URL =
   'https://github.com/faisukhan01/concordia2/releases/latest/download/concordia-college.apk';
 const GITHUB_RELEASES = 'https://github.com/faisukhan01/concordia2/releases';
 // Fallback version shown if the GitHub API fetch fails (e.g. rate-limited).
-const APK_VERSION_FALLBACK = 'v4.6.7';
+const APK_VERSION_FALLBACK = 'v4.6.8';
 
 // ───────────────────────── Data ─────────────────────────
 
@@ -545,6 +546,10 @@ export default function DownloadPage() {
             <p className="text-xs text-gray-400">
               &copy; {new Date().getFullYear()} Concordia College · {apkVersion} · Updated {apkUpdated} · Android 5.0+
             </p>
+            {/* Product-owner credit — FaQ Systems */}
+            <div className="mt-3 flex justify-center">
+              <PoweredByFaq />
+            </div>
           </div>
         </div>
       </footer>

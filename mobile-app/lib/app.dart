@@ -232,7 +232,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
       // happens when the JS bundle first evaluates. The UA is set at WebView
       // config time and is in navigator.userAgent from the very first JS
       // execution. The web app checks /ConcordiaNative/ in session-store.ts.
-      ..setUserAgent('ConcordiaNative/4.6.7 (Linux; Android) WebView')
+      ..setUserAgent('ConcordiaNative/4.6.8 (Linux; Android) WebView')
       ..setBackgroundColor(Colors.white)
       // JavaScript channel the web app uses to REQUEST the FCM token on demand.
       // The web app posts a message with a unique request id; we respond by
@@ -355,7 +355,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
               window.concordiaNative.isNativeApp = true;
               // KEEP IN SYNC with pubspec.yaml `version:` field.
               // (Read at build time by GitHub Actions when building the APK.)
-              window.concordiaNative.appVersion = "4.6.7";
+              window.concordiaNative.appVersion = "4.6.8";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
@@ -569,41 +569,111 @@ class _SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      body: SafeArea(
+        child: Stack(
           children: [
-            // Logo in white pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
+            // Centered logo + spinner
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Logo in white pill
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.08),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Image.asset(
+                      'assets/images/concordia-logo.png',
+                      height: 48,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  // Loading indicator
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: CircularProgressIndicator(
+                      color: _C.primary,
+                      strokeWidth: 3,
+                    ),
                   ),
                 ],
               ),
-              child: Image.asset(
-                'assets/images/concordia-logo.png',
-                height: 48,
-              ),
             ),
-            const SizedBox(height: 32),
-            // Loading indicator
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(
-                color: _C.primary,
-                strokeWidth: 3,
+            // ── Product-owner credit pinned to the bottom ──
+            // Dark metallic pill makes the silver+gold FaQ logo pop.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 24,
+              child: Center(
+                child: _FaqCreditPill(),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── "Powered by FaQ SYSTEMS" pill — used on the splash screen ──────
+// Dark charcoal gradient + subtle gold top-gleam to echo the FaQ logo's
+// metallic gold accent. Non-interactive credit.
+class _FaqCreditPill extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF1A1A1A),
+            Color(0xFF2A2A2A),
+            Color(0xFF1F1F1F),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x2ED4AF6E), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'POWERED BY',
+            style: TextStyle(
+              fontSize: 8,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.4,
+              color: Color(0xFFD1D5DB),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Image.asset(
+            'assets/images/faq-systems-logo.png',
+            height: 20,
+            width: 20,
+            fit: BoxFit.contain,
+          ),
+        ],
       ),
     );
   }

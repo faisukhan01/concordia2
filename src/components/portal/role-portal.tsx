@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { BrandLogo } from '@/components/brand-logo';
+import { SidebarFaqCredit, PoweredByFaq } from '@/components/powered-by-faq';
 import {
   GraduationCap, Search, Bell, Menu, LogOut,
   PanelLeftClose, PanelLeft, Shield,
@@ -218,6 +219,11 @@ function SidebarContent({ role, collapsed, groupOpen, setGroupOpen, activeModule
           </button>
         )}
       </div>
+
+      {/* ─── Product-owner credit — FaQ Systems ───
+          Thin dark metallic strip at the very bottom of the sidebar.
+          Collapses to just the FaQ mark on the 72px rail. */}
+      <SidebarFaqCredit collapsed={collapsed} />
     </div>
   );
 }
@@ -1641,8 +1647,9 @@ export function RolePortal() {
           </AnimatePresence>
         </main>
 
-        <footer className="mt-auto border-t border-border px-6 py-3 text-xs text-muted-foreground flex items-center justify-between">
+        <footer className="mt-auto border-t border-border px-6 py-3 text-xs text-muted-foreground flex items-center justify-between gap-3">
           <span>© {new Date().getFullYear()} Concordia College</span>
+          <PoweredByFaq variant="inline" />
         </footer>
       </div>
 
