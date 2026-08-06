@@ -1,41 +1,37 @@
 'use client';
 
-import Image from 'next/image';
-
 /**
  * "Powered by FaQ SYSTEMS" — product-owner branding credit.
  *
  * ──────────────────────────────────────────────────────────────────────
- * v5 — PREMIUM PNG LOGO (user-requested: "logo must be in png")
+ * v6 — STUNNING PREMIUM PNG LOGO ("FaQ" capitalization, real .png file)
  * ──────────────────────────────────────────────────────────────────────
  *
- * The logo is a real PNG file (`/faq-logo-light.png` + `/faq-logo-dark.png`)
- * — a premium lowercase "faq" wordmark in emerald-teal gradient with a flat
- * gold dot accent and a wide-tracked "SYSTEMS" subtitle. Matches the
- * "Powered by arvo" aesthetic the user referenced:
- *   • lowercase modern sans-serif wordmark (Inter ExtraBold)
- *   • single accent color (teal) — premium SaaS feel
- *   • subtle gold dot — jewel-like accent
- *   • clean tracked "SYSTEMS" subtitle in slate gray
- *   • transparent background — floats freely, no card
+ * The logo is a real PNG file served directly via a native <img> tag
+ * (NOT next/image, which would convert it to webp/avif). This guarantees:
+ *   • The browser receives the actual .png file
+ *   • Right-click → "Save image as" downloads a .png
+ *   • The logo renders identically everywhere
  *
- * The logo PNGs are 1200×525 (wide aspect) rendered from SVG via sharp at
- * 384 DPI density → crisp at any display size.
+ * LOGO DESIGN (matches the "Powered by arvo" stunning aesthetic):
+ *   • "FaQ" — F capital, a lowercase, Q capital (user's exact brand)
+ *   • Sora ExtraBold font (modern, distinctive, premium SaaS typeface)
+ *   • Rich 4-stop emerald-teal gradient (#0F766E → #2DD4BF) — luminous
+ *   • Subtle top-light sheen overlay for depth (modern, not dated 3D)
+ *   • Refined jewel-like gold dot (radial gradient + soft glow)
+ *   • "SYSTEMS" subtitle in slate, wide-tracked (0.43em)
+ *   • Transparent background — floats freely, no card
  *
- * VARIANTS
- * ────────
+ * TWO VARIANTS:
+ *   • faq-logo-light.png  — teal "FaQ" for light backgrounds
+ *   • faq-logo-dark.png   — white→gold "FaQ" for dark backgrounds
+ *
+ * VARIANTS (all 3× larger than v4.6.9)
  *   <PoweredByFaq />                      → stacked floating (sidebar, download)
  *   <PoweredByFaq variant="inline" />     → inline row (portal footer bar)
  *   <PoweredByFaq variant="on-dark" />    → glass pill (login page over photo)
- *
  *   <SidebarFaqCredit collapsed={false} /> → sidebar expanded footer
  *   <SidebarFaqCredit collapsed={true} />  → sidebar collapsed rail (centered)
- *
- * SIZES (3× larger than v4.6.9 per user request "at least 3 times larger")
- *   • default stacked:    logo 220px wide  (was ~48px)
- *   • inline footer:      logo 130px wide  (was ~26px)
- *   • on-dark login pill: logo 180px wide  (was ~44px)
- *   • sidebar collapsed:  logo 90px wide   (was ~40px)
  */
 
 type FaqVariant = 'default' | 'inline' | 'on-dark';
@@ -58,29 +54,30 @@ export function PoweredByFaq({
   const alignClass = align === 'center' ? 'items-center' : 'items-start';
 
   // ── on-dark variant: glassmorphism pill for the login page ─────────────
-  // The login page sits over a dark campus photograph. Uses the DARK logo
-  // variant (white→gold gradient wordmark) inside a frosted-glass pill.
+  // Uses the DARK logo variant (white→gold gradient) inside a frosted pill.
   if (variant === 'on-dark') {
     const content = (
       <div
         className={`flex flex-col ${alignClass} gap-2.5 rounded-2xl px-7 py-5 backdrop-blur-md`}
         style={{
-          background: 'rgba(255,255,255,0.08)',
-          border: '1px solid rgba(255,255,255,0.18)',
+          background: 'rgba(255,255,255,0.09)',
+          border: '1px solid rgba(255,255,255,0.2)',
           boxShadow:
-            '0 12px 48px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12)',
+            '0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
         }}
       >
-        <span className={LABEL_CLASS} style={{ color: 'rgba(255,255,255,0.75)' }}>
+        <span className={LABEL_CLASS} style={{ color: 'rgba(255,255,255,0.78)' }}>
           powered by
         </span>
-        <Image
+        {/* Native <img> so it serves the actual .png file (no webp/avif conversion) */}
+        <img
           src="/faq-logo-dark.png"
           alt="FaQ Systems — Product Owner"
-          width={180}
-          height={79}
-          className="object-contain"
-          priority
+          width={200}
+          height={80}
+          loading="eager"
+          decoding="async"
+          style={{ height: 'auto', display: 'block' }}
         />
       </div>
     );
@@ -95,35 +92,41 @@ export function PoweredByFaq({
   }
 
   // ── inline variant: horizontal row for the portal footer bar ───────────
-  // "powered by" + logo, all on one line, baseline-aligned. Compact.
   if (variant === 'inline') {
     return (
       <span className={`inline-flex items-center gap-2.5 ${className}`}>
         <span className={LABEL_CLASS}>powered by</span>
-        <Image
+        <img
           src="/faq-logo-light.png"
           alt="FaQ Systems"
-          width={130}
-          height={57}
-          className="object-contain"
+          width={140}
+          height={56}
+          loading="lazy"
+          decoding="async"
+          style={{ height: 'auto', display: 'inline-block' }}
         />
       </span>
     );
   }
 
   // ── default variant: stacked, floating, no card ────────────────────────
-  // "powered by" tiny label on top, FaQ logo (220px wide) below. Floats on
+  // "powered by" tiny label on top, FaQ logo (240px wide) below. Floats on
   // the white sidebar / download background. This is the arvo aesthetic.
   const content = (
     <div className={`flex flex-col ${alignClass} gap-2.5`}>
       <span className={LABEL_CLASS}>powered by</span>
-      <Image
+      <img
         src="/faq-logo-light.png"
         alt="FaQ Systems — Product Owner"
-        width={220}
+        width={240}
         height={96}
-        className="object-contain"
-        style={{ filter: 'drop-shadow(0 2px 6px rgba(15, 118, 110, 0.12))' }}
+        loading="lazy"
+        decoding="async"
+        style={{
+          height: 'auto',
+          display: 'block',
+          filter: 'drop-shadow(0 4px 12px rgba(15, 118, 110, 0.18))',
+        }}
       />
     </div>
   );
@@ -141,25 +144,29 @@ export function PoweredByFaq({
 /**
  * Sidebar footer credit.
  *
- * Expanded 260px sidebar: stacked "powered by" + big FaQ logo (180px wide),
+ * Expanded 260px sidebar: stacked "powered by" + big FaQ logo (200px wide),
  *   left-aligned, floating on the sidebar's white background.
  *
- * Collapsed 72px rail: just the FaQ logo (90px wide), centered. The logo's
- *   wide aspect ratio means it fits the narrow rail beautifully.
+ * Collapsed 72px rail: just the FaQ logo (100px wide), centered.
  */
 export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean }) {
   if (collapsed) {
     // Collapsed rail — centered FaQ logo, no label.
     return (
       <div className="flex justify-center px-2 pb-3 pt-1">
-        <Image
+        <img
           src="/faq-logo-light.png"
           alt="Powered by FaQ Systems"
-          width={90}
-          height={39}
-          className="object-contain"
-          style={{ filter: 'drop-shadow(0 1px 3px rgba(15, 118, 110, 0.15))' }}
+          width={100}
+          height={40}
+          loading="lazy"
+          decoding="async"
           title="Powered by FaQ Systems"
+          style={{
+            height: 'auto',
+            display: 'block',
+            filter: 'drop-shadow(0 2px 6px rgba(15, 118, 110, 0.2))',
+          }}
         />
       </div>
     );
