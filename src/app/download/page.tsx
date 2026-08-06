@@ -32,7 +32,7 @@ const APK_DOWNLOAD_URL =
   'https://github.com/faisukhan01/concordia2/releases/latest/download/concordia-college.apk';
 const GITHUB_RELEASES = 'https://github.com/faisukhan01/concordia2/releases';
 // Fallback version shown if the GitHub API fetch fails (e.g. rate-limited).
-const APK_VERSION_FALLBACK = 'v4.6.9';
+const APK_VERSION_FALLBACK = 'v4.7.0';
 
 // ───────────────────────── Data ─────────────────────────
 
@@ -546,9 +546,9 @@ export default function DownloadPage() {
             <p className="text-xs text-gray-400">
               &copy; {new Date().getFullYear()} Concordia College · {apkVersion} · Updated {apkUpdated} · Android 5.0+
             </p>
-            {/* Product-owner credit — FaQ Systems */}
-            <div className="mt-3 flex justify-center">
-              <PoweredByFaq />
+            {/* Product-owner credit — FaQ Systems. Floating, no card (arvo style). */}
+            <div className="mt-4 flex justify-center">
+              <PoweredByFaq align="center" />
             </div>
           </div>
         </div>

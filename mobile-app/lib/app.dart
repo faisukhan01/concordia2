@@ -232,7 +232,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
       // happens when the JS bundle first evaluates. The UA is set at WebView
       // config time and is in navigator.userAgent from the very first JS
       // execution. The web app checks /ConcordiaNative/ in session-store.ts.
-      ..setUserAgent('ConcordiaNative/4.6.9 (Linux; Android) WebView')
+      ..setUserAgent('ConcordiaNative/4.7.0 (Linux; Android) WebView')
       ..setBackgroundColor(Colors.white)
       // JavaScript channel the web app uses to REQUEST the FCM token on demand.
       // The web app posts a message with a unique request id; we respond by
@@ -355,7 +355,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
               window.concordiaNative.isNativeApp = true;
               // KEEP IN SYNC with pubspec.yaml `version:` field.
               // (Read at build time by GitHub Actions when building the APK.)
-              window.concordiaNative.appVersion = "4.6.9";
+              window.concordiaNative.appVersion = "4.7.0";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
@@ -626,64 +626,34 @@ class _SplashScreen extends StatelessWidget {
   }
 }
 
-// ── "Powered by FaQ SYSTEMS" pill — used on the splash screen ──────
-// LIGHT cream gradient + soft gold border so the silver+gold metallic
-// FaQ logo actually shines. The logo is rendered large (30px) so the
-// "FaQ" wordmark + "SYSTEMS" subtext are both legible.
-// (Dark backgrounds kill metallic detail — the logo just becomes a
-// muddy gray blob. Light backgrounds let it reflect.)
+// ── "Powered by FaQ SYSTEMS" credit — used on the splash screen ──────
+// FLOATING, no card (arvo aesthetic). Stacked: tiny "POWERED BY" gray
+// label on top, big FaQ logo (48px) below. The logo is the hero.
+// No background box — it floats directly on the white splash. The
+// metallic silver+gold shines on the white surface.
 class _FaqCreditPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFFFFFFF),
-            Color(0xFFFAF6EE),
-            Color(0xFFF5EFE3),
-          ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text(
+          'POWERED BY',
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 1.8,
+            color: Color(0xFF9CA3AF),
+          ),
         ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x59D4AF6E), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.12),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-          const BoxShadow(
-            color: Color(0x1E785A28),
-            blurRadius: 8,
-            offset: Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const Text(
-            'POWERED BY',
-            style: TextStyle(
-              fontSize: 8,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.6,
-              color: Color(0xFF9B8B7A),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Image.asset(
-            'assets/images/faq-systems-logo.png',
-            height: 30,
-            width: 30,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
+        const SizedBox(height: 4),
+        Image.asset(
+          'assets/images/faq-systems-logo.png',
+          height: 48,
+          width: 48,
+          fit: BoxFit.contain,
+        ),
+      ],
     );
   }
 }
