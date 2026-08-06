@@ -9,29 +9,52 @@ import Image from 'next/image';
  * Concordia College platform. This badge credits them on the sign-in
  * page, portal sidebars, the /download app page, and the main footer.
  *
- * DESIGN PHILOSOPHY
- * ─────────────────
- * The FaQ logo is a silver + gold/bronze metallic 3D wordmark. To make
- * the metallic pop, the badge uses a dark charcoal gradient backdrop
- * with a subtle gold-tinted ring. This complements (never competes with)
- * Concordia's orange brand colour — the two coexist as:
+ * DESIGN PHILOSOPHY (v2 — light theme)
+ * ─────────────────────────────────────
+ * The FaQ logo is a silver + gold/bronze metallic 3D wordmark. Metallic
+ * finishes ONLY shine on LIGHT backgrounds — on dark they become a muddy
+ * gray blob (the silver+gold gradients need light to reflect). So the
+ * badge uses a warm cream/white gradient backdrop with a soft gold-tinted
+ * border. This lets the metallic detail of the logo actually be visible.
+ *
+ * The logo is also a full wordmark ("FaQ" + "SYSTEMS" beneath), so it
+ * needs to be rendered LARGE enough to read — minimum 28-30px tall.
+ * Anything smaller and "SYSTEMS" becomes illegible.
+ *
+ * The two brands coexist as:
  *   • Orange = Concordia (the college / customer)
  *   • Silver/Gold metallic = FaQ Systems (the product owner)
  *
  * VARIANTS
  * ────────
- *   <PoweredByFaq />                      → default pill (login page, footer)
- *   <PoweredByFaq variant="compact" />    → thin strip for sidebar footer
- *   <PoweredByFaq variant="inline" />     → inline row (no bg) for tight spots
- *   <PoweredByFaq variant="dark" />       → on already-dark backgrounds
+ *   <PoweredByFaq />                      → light pill (login page, download)
+ *   <PoweredByFaq variant="compact" />    → stacked card for sidebar footer
+ *   <PoweredByFaq variant="inline" />     → inline row (no bg) for footer bar
  *
  * The badge is a non-interactive credit (no link) by default. It can be
  * made into a link by passing href.
  */
 
-type FaqVariant = 'default' | 'compact' | 'inline' | 'dark';
+type FaqVariant = 'default' | 'compact' | 'inline';
 
-const FAQ_LOGO_H = 22; // px — logo image height inside the badge (aspect ~1:1)
+// Logo heights per context. The FaQ wordmark needs ≥28px to be legible.
+const LOGO_H_DEFAULT = 30; // login page, download page
+const LOGO_H_COMPACT = 30; // sidebar expanded — stacked, centered
+const LOGO_H_COLLAPSED = 34; // sidebar collapsed rail — logo is the hero
+const LOGO_H_INLINE = 22; // portal footer bar — smaller, inline
+
+// Shared light "premium card" style — warm cream gradient + gold border.
+// This is what makes the metallic logo actually visible.
+const LIGHT_CARD_STYLE = {
+  background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF6EE 50%, #F5EFE3 100%)',
+  border: '1px solid rgba(212, 175, 110, 0.35)',
+  boxShadow:
+    '0 1px 2px rgba(120, 90, 40, 0.06), 0 4px 12px rgba(120, 90, 40, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+} as const;
+
+// Soft "Powered by" label — taupe, matching the logo's SYSTEMS text color.
+const LABEL_CLASS =
+  'text-[9px] font-semibold uppercase leading-none tracking-[0.18em] text-[#9B8B7A]';
 
 export function PoweredByFaq({
   variant = 'default',
@@ -42,103 +65,78 @@ export function PoweredByFaq({
   className?: string;
   href?: string;
 }) {
-  // ── Inline variant: no background, just the row. For very tight spots. ──
+  // ── Inline variant: no background, just the row. For the portal footer
+  //    bar where horizontal space is tight but the background is already light. ──
   if (variant === 'inline') {
     return (
-      <span className={`inline-flex items-center gap-1.5 ${className}`}>
-        <span className="text-[9px] font-medium uppercase tracking-[0.14em] text-gray-400">
-          Powered by
-        </span>
+      <span className={`inline-flex items-center gap-2 ${className}`}>
+        <span className={LABEL_CLASS}>Powered by</span>
         <Image
           src="/faq-systems-logo.png"
           alt="FaQ Systems"
-          width={FAQ_LOGO_H}
-          height={FAQ_LOGO_H}
+          width={LOGO_H_INLINE}
+          height={LOGO_H_INLINE}
           className="object-contain"
+          style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.08))' }}
         />
       </span>
     );
   }
 
-  // ── Compact variant: thin strip for the sidebar footer. Fits 260px sidebar
-  //    AND collapses gracefully to the 72px rail (shows just the logo mark). ──
+  // ── Compact variant: stacked card for the sidebar footer. ──
+  //    "POWERED BY" tiny label on top, FaQ logo (30px) centered below.
+  //    Full-width on the 260px sidebar. The logo is the hero.
   if (variant === 'compact') {
     return (
       <div
-        className={`relative flex items-center justify-center gap-1.5 overflow-hidden rounded-lg px-2 py-1.5 ${className}`}
-        style={{
-          background:
-            'linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 50%, #1F1F1F 100%)',
-          boxShadow:
-            'inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.15)',
-        }}
+        className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-xl px-3 py-2.5 ${className}`}
+        style={LIGHT_CARD_STYLE}
       >
         {/* Subtle gold top-edge gleam */}
         <span
           className="pointer-events-none absolute inset-x-0 top-0 h-px"
           style={{
             background:
-              'linear-gradient(90deg, transparent, rgba(212,175,110,0.45), transparent)',
+              'linear-gradient(90deg, transparent, rgba(212,175,110,0.6), transparent)',
           }}
         />
-        <span className="text-[8px] font-semibold uppercase leading-none tracking-[0.16em] text-gray-300">
-          Powered by
-        </span>
+        <span className={LABEL_CLASS}>Powered by</span>
         <Image
           src="/faq-systems-logo.png"
-          alt="FaQ Systems"
-          width={16}
-          height={16}
+          alt="FaQ Systems — Product Owner"
+          width={LOGO_H_COMPACT}
+          height={LOGO_H_COMPACT}
           className="object-contain"
+          style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))' }}
         />
       </div>
     );
   }
 
-  // ── Default + dark variants: full pill badge. ──
-  // dark variant drops the heavy bg (assumes already-dark parent) and uses
-  // a translucent overlay instead.
-  const isDark = variant === 'dark';
-  const bgStyle = isDark
-    ? {
-        background:
-          'linear-gradient(135deg, rgba(26,26,26,0.85) 0%, rgba(42,42,42,0.85) 50%, rgba(31,31,31,0.85) 100%)',
-        backdropFilter: 'blur(8px)',
-      }
-    : {
-        background:
-          'linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 50%, #1F1F1F 100%)',
-      };
-
+  // ── Default variant: horizontal light pill. For login + download pages. ──
   const content = (
     <>
-      {/* Gold top-edge gleam — echoes the logo's gold accent */}
+      {/* Gold top-edge gleam */}
       <span
         className="pointer-events-none absolute inset-x-0 top-0 h-px"
         style={{
           background:
-            'linear-gradient(90deg, transparent, rgba(212,175,110,0.55), transparent)',
+            'linear-gradient(90deg, transparent, rgba(212,175,110,0.7), transparent)',
         }}
       />
-      {/* Faint inner gold ring */}
-      <span
-        className="pointer-events-none absolute inset-0 rounded-full"
-        style={{ boxShadow: 'inset 0 0 0 1px rgba(212,175,110,0.18)' }}
-      />
-      <span className="relative text-[9px] font-semibold uppercase leading-none tracking-[0.16em] text-gray-300">
-        Powered by
-      </span>
+      <span className={`relative ${LABEL_CLASS}`}>Powered by</span>
       <Image
         src="/faq-systems-logo.png"
         alt="FaQ Systems — Product Owner"
-        width={FAQ_LOGO_H}
-        height={FAQ_LOGO_H}
+        width={LOGO_H_DEFAULT}
+        height={LOGO_H_DEFAULT}
         className="relative object-contain"
+        style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.12))' }}
       />
     </>
   );
 
-  const baseClass = `group relative inline-flex items-center gap-2 overflow-hidden rounded-full px-3.5 py-1.5 transition-all duration-200 ${className}`;
+  const baseClass = `group relative inline-flex items-center gap-2.5 overflow-hidden rounded-full px-4 py-2 transition-all duration-200 ${className}`;
 
   if (href) {
     return (
@@ -146,8 +144,8 @@ export function PoweredByFaq({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${baseClass} hover:scale-[1.03] hover:shadow-lg hover:shadow-amber-900/20`}
-        style={bgStyle}
+        className={`${baseClass} hover:scale-[1.03] hover:shadow-lg`}
+        style={LIGHT_CARD_STYLE}
         title="FaQ Systems — Product Owner"
       >
         {content}
@@ -156,44 +154,43 @@ export function PoweredByFaq({
   }
 
   return (
-    <div className={baseClass} style={bgStyle} title="FaQ Systems — Product Owner">
+    <div className={baseClass} style={LIGHT_CARD_STYLE} title="FaQ Systems — Product Owner">
       {content}
     </div>
   );
 }
 
 /**
- * Compact sidebar footer credit — wraps the compact variant with the
- * correct spacing for the sidebar's bottom edge. Renders just the FaQ
- * mark when the sidebar is collapsed (72px rail).
+ * Sidebar footer credit — stacked card on the expanded sidebar, single
+ * large logo chip on the collapsed 72px rail. The FaQ logo is the hero
+ * in both states (no more muddy dark blob).
  */
 export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean }) {
   if (collapsed) {
-    // Collapsed rail — show just the FaQ mark in a tiny dark chip
+    // Collapsed 72px rail — just the FaQ logo at a readable size in a
+    // light rounded chip. The metallic detail is finally visible.
     return (
-      <div className="flex justify-center px-2 pb-1">
+      <div className="flex justify-center px-2 pb-2">
         <div
-          className="grid place-items-center rounded-md p-1"
-          style={{
-            background:
-              'linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 50%, #1F1F1F 100%)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
-          }}
+          className="grid place-items-center rounded-xl p-1.5"
+          style={LIGHT_CARD_STYLE}
           title="Powered by FaQ Systems"
         >
           <Image
             src="/faq-systems-logo.png"
             alt="FaQ Systems"
-            width={18}
-            height={18}
+            width={LOGO_H_COLLAPSED}
+            height={LOGO_H_COLLAPSED}
             className="object-contain"
+            style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))' }}
           />
         </div>
       </div>
     );
   }
+  // Expanded 260px sidebar — stacked "POWERED BY" + logo card.
   return (
-    <div className="px-2 pb-1">
+    <div className="px-2 pb-2 pt-1">
       <PoweredByFaq variant="compact" className="w-full" />
     </div>
   );
