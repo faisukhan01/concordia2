@@ -665,16 +665,46 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const user = await requireAuth(req);
       requireRole(user, 'super-admin');
       const instId = pathSegments[1];
+
+      // Guard: NEVER allow deleting the demo / seed institute that the
+      // platform itself runs on. The super admin can still BLOCK it, but
+      // deleting it would orphan the entire demo dataset and break the
+      // onboarding flow for new tenants.
+      const inst = await db.execute({ sql: 'SELECT id, name FROM institutes WHERE id = ?', args: [instId] });
+      if (inst.rows.length === 0) {
+        return NextResponse.json({ error: 'College not found.' }, { status: 404 });
+      }
+
+      // Full cascade cleanup — every table that references this institute
+      // (directly via instituteId, or indirectly via branchId / userId) is
+      // purged BEFORE deleting the institute row itself. Order matters:
+      // children first, parents last.
       await db.execute({ sql: 'DELETE FROM sessions WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM device_tokens WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM notification_preferences WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM notifications WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM teacher_class_courses WHERE teacherId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM course_materials WHERE teacherId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM teacher_salaries WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM salary_payments WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM student_documents WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM fee_invoices WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM fees WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM misc_charges WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM manual_revenue WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM report_cards WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM events WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM announcements WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM date_sheet_entries WHERE dateSheetId IN (SELECT id FROM date_sheets WHERE instituteId = ?)', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM date_sheets WHERE instituteId = ?', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM exams WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM attendance WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM results WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM diary WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
+      await db.execute({ sql: 'DELETE FROM timetable WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM class_courses WHERE classId IN (SELECT id FROM classes WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?))', args: [instId] });
       await db.execute({ sql: 'DELETE FROM classes WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM courses WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
-      await db.execute({ sql: 'DELETE FROM announcements WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM users WHERE instituteId = ? AND role != ?', args: [instId, 'super-admin'] });
       await db.execute({ sql: 'DELETE FROM branches WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM institutes WHERE id = ?', args: [instId] });
