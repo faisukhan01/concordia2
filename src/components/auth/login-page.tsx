@@ -19,6 +19,11 @@ import { PoweredByFaq } from '@/components/powered-by-faq';
 // opacity, stronger blur, iridescent edge gradient, inset highlights, outer
 // glow. FaQ logo moved to the BOTTOM-RIGHT corner with an aesthetic WHITE
 // card background (replacing the centered transparent glass pill).
+// v4.7.7: MOBILE-ONLY refinements (desktop untouched): smaller FaQ logo
+// (120px via size="sm"), reduced card padding on small screens, softer
+// iridescent halo on mobile, smaller heading/logo on mobile. Portal footer
+// FaQ logo REMOVED (both web + mobile). Sidebar FaQ logo shrunk further
+// (180→140px expanded, 84→64px collapsed).
 
 // ==================== Concordia College — Sign In ====================
 // Layout (v4.7.6 — refined premium glass):
@@ -102,32 +107,36 @@ export function LoginPage() {
       {/* ─── Main layout — left card + bottom-right FaQ credit ─── */}
       <div className="relative z-20 min-h-screen flex items-stretch justify-between">
         {/* ═══════════ LEFT — STUNNING premium glass crystal card ═══════════ */}
-        <div className="flex-1 lg:flex-[0.42] flex items-center justify-start px-6 sm:px-10 lg:pl-16 py-12">
+        <div className="flex-1 lg:flex-[0.42] flex items-center justify-start px-5 sm:px-10 lg:pl-16 py-10 lg:py-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-            className="w-full max-w-[420px]"
+            className="w-full max-w-[380px] lg:max-w-[420px]"
           >
             {/* Premium glass crystal card — very transparent, strong blur,
                 iridescent edge, inset highlights, outer glow.
                 This is the v4.7.6 stunning redesign: lower opacity (0.10),
                 stronger backdrop blur (3xl + saturate 1.8), a soft iridescent
                 edge gradient wrapper, inset top highlight, and a deep outer
-                glow. The card feels like a floating crystal over the campus. */}
+                glow. The card feels like a floating crystal over the campus.
+                v4.7.7: Mobile uses tighter padding + softer halo; desktop
+                (lg:) keeps the original spacious premium feel. */}
             <div className="relative">
-              {/* Iridescent edge glow — soft halo behind the card */}
+              {/* Iridescent edge glow — soft halo behind the card.
+                  Mobile: subtler (opacity-40, blur-md) so it doesn't overwhelm
+                  a small screen. Desktop: full (opacity-70, blur-lg). */}
               <div
-                className="absolute -inset-1.5 rounded-[28px] opacity-70 blur-lg"
+                className="absolute -inset-1.5 rounded-[28px] opacity-40 blur-md lg:opacity-70 lg:blur-lg"
                 style={{
                   background:
                     'linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(242,101,34,0.15) 35%, rgba(255,255,255,0.25) 65%, rgba(15,118,110,0.18) 100%)',
                 }}
               />
 
-              {/* Main glass card */}
+              {/* Main glass card — mobile: px-6 py-8, desktop: px-9 py-11 */}
               <div
-                className="relative rounded-[24px] px-9 py-11 backdrop-blur-3xl backdrop-saturate-[1.8]"
+                className="relative rounded-[20px] lg:rounded-[24px] px-6 py-8 lg:px-9 lg:py-11 backdrop-blur-3xl backdrop-saturate-[1.8]"
                 style={{
                   backgroundColor: 'rgba(255, 255, 255, 0.10)',
                   border: '1px solid rgba(255, 255, 255, 0.30)',
@@ -136,10 +145,10 @@ export function LoginPage() {
                 }}
               >
                 {/* Logo — white bg pill so it's always visible regardless of background.
-                    Subtle floating shadow + iridescent ring for premium feel. */}
-                <div className="mb-8 flex justify-center">
+                    Mobile: smaller pill (px-5 py-3). Desktop: px-6 py-3.5. */}
+                <div className="mb-6 lg:mb-8 flex justify-center">
                   <div
-                    className="rounded-2xl bg-white px-6 py-3.5"
+                    className="rounded-2xl bg-white px-5 py-3 lg:px-6 lg:py-3.5"
                     style={{
                       boxShadow:
                         '0 12px 32px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 1)',
@@ -149,24 +158,25 @@ export function LoginPage() {
                   </div>
                 </div>
 
-                {/* Heading — refined premium typography */}
+                {/* Heading — refined premium typography.
+                    Mobile: 24px. Desktop: 28px. */}
                 <h1
-                  className="text-[28px] leading-tight font-bold text-white tracking-tight text-center"
+                  className="text-[24px] lg:text-[28px] leading-tight font-bold text-white tracking-tight text-center"
                   style={{ textShadow: '0 2px 12px rgba(0, 0, 0, 0.35)' }}
                 >
                   Sign in
                 </h1>
                 <p
-                  className="text-sm text-white/80 mt-2 text-center tracking-wide"
+                  className="text-[13px] lg:text-sm text-white/80 mt-1.5 lg:mt-2 text-center tracking-wide"
                   style={{ textShadow: '0 1px 6px rgba(0, 0, 0, 0.3)' }}
                 >
                   Use your Concordia account to continue
                 </p>
 
                 {/* Subtle accent divider */}
-                <div className="mt-6 mb-7 flex justify-center">
+                <div className="mt-5 mb-6 lg:mt-6 lg:mb-7 flex justify-center">
                   <div
-                    className="h-px w-16 rounded-full"
+                    className="h-px w-14 lg:w-16 rounded-full"
                     style={{
                       background:
                         'linear-gradient(to right, transparent, rgba(255,255,255,0.5), transparent)',
@@ -250,9 +260,11 @@ export function LoginPage() {
             </p>
             {/* Mobile-only powered-by — aesthetic white card (matches the
                 desktop bottom-right corner credit). Right side FaQ is
-                hidden on mobile, so we show the white card here instead. */}
-            <div className="mt-5 flex justify-center lg:hidden">
-              <PoweredByFaq variant="on-light" align="center" />
+                hidden on mobile, so we show the white card here instead.
+                v4.7.7: Uses size="sm" (120px) so the FaQ card is proportional
+                on small screens — was too large at 180px. */}
+            <div className="mt-4 flex justify-center lg:hidden">
+              <PoweredByFaq variant="on-light" align="center" size="sm" />
             </div>
           </motion.div>
         </div>

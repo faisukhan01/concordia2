@@ -355,7 +355,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
               window.concordiaNative.isNativeApp = true;
               // KEEP IN SYNC with pubspec.yaml `version:` field.
               // (Read at build time by GitHub Actions when building the APK.)
-              window.concordiaNative.appVersion = "4.7.6";
+              window.concordiaNative.appVersion = "4.7.7";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
@@ -657,10 +657,12 @@ class _FaqCreditPill extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        // The premium PNG logo — 180px wide, floats on white splash
+        // The premium PNG logo — 140px wide (v4.7.7: reduced from 180px for a
+        // more refined, premium proportion on the splash screen), floats on
+        // white splash.
         Image.asset(
           'assets/images/faq-logo-light.png',
-          width: 180,
+          width: 140,
           fit: BoxFit.contain,
         ),
       ],
