@@ -195,13 +195,10 @@ export function PoweredByFaq({
 /**
  * Sidebar footer credit.
  *
- * v11 — BALANCED (user: "make sure it must be large enough to clearly visible"):
- *   v9 (88px) was too large; v10 (56px) was too small/hard to read.
- *   • Expanded 260px sidebar: 74px FaQ logo + 8px "POWERED BY" label,
- *     single-line, full opacity (1.0) so the teal logo is crisp and
- *     legible. Subordinate to nav but clearly readable.
- *   • Collapsed 72px rail: 40px centered FaQ mark, opacity 0.85 — small
- *     but clearly visible (not the barely-there 0.55 of v10).
+ * v12 — BUMPED UP (user: "make it a bit more larger"):
+ *   v11 (74px) was good but user wants slightly bigger.
+ *   • Expanded 260px sidebar: 88px FaQ logo + 9px "POWERED BY" label.
+ *   • Collapsed 72px rail: 48px centered FaQ mark, opacity 0.9.
  *
  * NOTE: This is intentionally independent of the shared `PoweredByFaq`
  * default variant (140px) so the download-page footer keeps its size
@@ -215,15 +212,15 @@ export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean })
         <img
           src="/faq-logo-light.png"
           alt="Powered by FaQ Systems"
-          width={40}
-          height={7}
+          width={48}
+          height={9}
           loading="lazy"
           decoding="async"
           title="Powered by FaQ Systems"
           style={{
             height: 'auto',
             display: 'block',
-            opacity: 0.85,
+            opacity: 0.9,
             filter: 'drop-shadow(0 1px 3px rgba(10, 26, 58, 0.14))',
           }}
         />
@@ -231,19 +228,19 @@ export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean })
     );
   }
 
-  // Expanded sidebar — single-line: "POWERED BY" + 74px FaQ logo. Small
-  // enough to stay subordinate to nav, large enough to be clearly legible.
+  // Expanded sidebar — single-line: "POWERED BY" + 88px FaQ logo. Clearly
+  // visible while still subordinate to the nav items.
   return (
     <div className="px-4 pb-3 pt-2.5 border-t border-black/[0.04]">
       <div className="flex items-center gap-2">
-        <span className="text-[8px] font-semibold uppercase leading-none tracking-[0.22em] text-gray-400 shrink-0">
+        <span className="text-[9px] font-semibold uppercase leading-none tracking-[0.22em] text-gray-400 shrink-0">
           powered by
         </span>
         <img
           src="/faq-logo-light.png"
           alt="FaQ Systems"
-          width={74}
-          height={13}
+          width={88}
+          height={16}
           loading="lazy"
           decoding="async"
           title="FaQ Systems — Product Owner"
