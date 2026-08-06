@@ -628,19 +628,18 @@ class _SplashScreen extends StatelessWidget {
 
 // ── "Powered by FaQ SYSTEMS" credit — used on the splash screen ──────
 //
-// v4 — TYPOGRAPHIC WORDMARK (3× larger, matches the web design).
+// v5 — PREMIUM PNG LOGO (user-requested: "logo must be in png").
 //
-// Replaces the illegible metallic PNG with a crisp CSS-equivalent Flutter
-// wordmark:
-//   • "POWERED BY"  — tiny slate label, uppercase, wide-tracked
-//   • "FaQ"         — large extrabold, charcoal→bronze metallic gradient
-//                     (via ShaderMask + LinearGradient). NOT indigo/blue —
-//                     warm bronze ties to the original metallic brand.
-//   • "•"           — a glowing gold dot accent (jewel-like sparkle)
-//   • "SYSTEMS"     — small uppercase, wide-tracked, rich amber-gold
+// Uses the real PNG logo asset (`faq-logo-light.png`) — a premium lowercase
+// "faq" wordmark in emerald-teal gradient with a flat gold dot accent and a
+// wide-tracked "SYSTEMS" subtitle. Matches the "Powered by arvo" aesthetic:
+//   • lowercase modern sans-serif wordmark (Inter ExtraBold)
+//   • single accent color (teal) — premium SaaS feel
+//   • subtle gold dot — jewel-like accent
+//   • clean tracked "SYSTEMS" subtitle in slate gray
+//   • transparent background — floats freely, no card
 //
-// Floats directly on the white splash — no card/box. Matches the
-// "Powered by arvo" aesthetic: modern, typographic, colorful, large.
+// Large size (180px wide) per user request "at least 3 times larger".
 class _FaqCreditPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -657,85 +656,12 @@ class _FaqCreditPill extends StatelessWidget {
             color: Color(0xFF94A3B8),
           ),
         ),
-        const SizedBox(height: 8),
-        // Row: "FaQ" gradient wordmark + glowing gold dot
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            // "FaQ" — extrabold charcoal→bronze metallic gradient
-            ShaderMask(
-              shaderCallback: (Rect bounds) {
-                return const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF1C1917), // stone-900
-                    Color(0xFF3F3F46), // zinc-700
-                    Color(0xFF7C2D12), // orange-900
-                    Color(0xFFB45309), // amber-700
-                  ],
-                  stops: [0.0, 0.35, 0.7, 1.0],
-                ).createShader(bounds);
-              },
-              blendMode: BlendMode.srcIn,
-              child: const Text(
-                'FaQ',
-                style: TextStyle(
-                  fontSize: 52,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -1.3,
-                  height: 0.92,
-                  color: Colors.white, // required for ShaderMask srcIn
-                ),
-              ),
-            ),
-            const SizedBox(width: 5),
-            // Glowing gold dot — jewel accent
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFFFDE68A), // amber-200
-                    Color(0xFFF59E0B), // amber-500
-                    Color(0xFFD97706), // amber-600
-                    Color(0xFF92400E), // amber-800
-                  ],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFF59E0B).withOpacity(0.55),
-                    blurRadius: 10,
-                    spreadRadius: 1,
-                  ),
-                  BoxShadow(
-                    color: const Color(0xFFD97706).withOpacity(0.25),
-                    blurRadius: 18,
-                    spreadRadius: 3,
-                  ),
-                ],
-              ),
-              transform: Matrix4.translationValues(0, -3, 0),
-            ),
-          ],
-        ),
         const SizedBox(height: 10),
-        // "SYSTEMS" — tracked gold subtitle
-        const Text(
-          'SYSTEMS',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 5.5,
-            color: Color(0xFFB45309),
-            height: 1.0,
-          ),
+        // The premium PNG logo — 180px wide, floats on white splash
+        Image.asset(
+          'assets/images/faq-logo-light.png',
+          width: 180,
+          fit: BoxFit.contain,
         ),
       ],
     );
