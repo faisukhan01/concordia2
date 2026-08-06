@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { BrandLogo } from '@/components/brand-logo';
+import { PoweredByFaq } from '@/components/powered-by-faq';
 // v4.1.0: ThemeToggle import REMOVED — user requested removal of the theme
 // switcher from the entire app (default light theme is the intended design).
 
@@ -235,6 +236,11 @@ export function LoginPage() {
             <p className="text-center text-[11px] text-white/70 mt-5 drop-shadow">
               © {new Date().getFullYear()} Concordia College · All rights reserved
             </p>
+            {/* Product-owner credit — FaQ Systems. Dark metallic pill makes
+                the silver+gold logo pop beneath the frosted login card. */}
+            <div className="mt-3 flex justify-center">
+              <PoweredByFaq />
+            </div>
           </motion.div>
         </div>
 
