@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { useApp, useNavState } from '@/lib/store';
+import { isNativeApp } from '@/lib/session-store';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -2164,6 +2165,24 @@ function DocumentManagerDialog({
         });
         return;
       }
+      // ── Mobile app path ──
+      // Inside the Flutter WebView, <a download> + blob: URLs are blocked
+      // by Android. Hand off to the native bridge — it decodes the base64,
+      // writes a temp file, and opens the Android share sheet so the user
+      // can save to Downloads or share via WhatsApp.
+      if (isNativeApp() && (window as any).concordiaNative?.downloadDocument) {
+        (window as any).concordiaNative.downloadDocument(
+          dataUrl,
+          res?.fileName || 'document',
+          res?.fileType || '',
+        );
+        toast({
+          title: 'Opening share sheet…',
+          description: 'Pick "Save to Downloads" or any app to save the file.',
+        });
+        return;
+      }
+      // ── Web browser path ──
       // Convert the data URL to a Blob and trigger a real download via an
       // <a download> element with a blob: URL. This is the ONLY reliable
       // way to download data-URL content in modern browsers — assigning a
@@ -2210,6 +2229,19 @@ function DocumentManagerDialog({
         toast({ title: 'Preview failed', description: 'No file content returned.', variant: 'destructive' });
         return;
       }
+      // ── Mobile app path ──
+      // Hand off to the native bridge — it writes a temp file and opens
+      // the Android share sheet so the user can pick a viewer (Photos,
+      // PDF reader, etc.). window.open(blob:) doesn't work in WebView.
+      if (isNativeApp() && (window as any).concordiaNative?.previewDocument) {
+        (window as any).concordiaNative.previewDocument(
+          dataUrl,
+          res?.fileName || 'document',
+          res?.fileType || '',
+        );
+        return;
+      }
+      // ── Web browser path ──
       const byteString = atob((dataUrl.split(',')[1] || ''));
       const mimeMatch = dataUrl.match(/data:([^;]+)/);
       const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
@@ -2228,12 +2260,14 @@ function DocumentManagerDialog({
     }
   };
 
-  // Decide whether a document is previewable in-browser (images + PDFs).
-  // Office docs (.doc/.docx) don't render in-browser and should just
-  // download.
-  const isPreviewable = (d: any) => {
-    const t = (d.fileType || '').toLowerCase();
-    const n = (d.fileName || '').toLowerCase();
+  // Decide whether a document is previewable. In the web browser, only
+  // images + PDFs can be previewed (Office docs don't render in-browser).
+  // In the native mobile app, the share sheet can open ANY file type via
+  // the user's installed apps, so always show the Preview button.
+  const isPreviewable = (_d: any) => {
+    if (isNativeApp()) return true;
+    const t = (_d.fileType || '').toLowerCase();
+    const n = (_d.fileName || '').toLowerCase();
     return t.startsWith('image/') || t === 'application/pdf' ||
       /\.(jpg|jpeg|png|gif|webp|pdf)$/i.test(n);
   };

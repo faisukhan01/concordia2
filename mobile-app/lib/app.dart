@@ -10,11 +10,14 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'notification_service.dart' show NotificationService, concordiaNavigatorKey;
 
 // ── Brand colors (inlined to avoid external deps) ──────────────
@@ -229,7 +232,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
       // happens when the JS bundle first evaluates. The UA is set at WebView
       // config time and is in navigator.userAgent from the very first JS
       // execution. The web app checks /ConcordiaNative/ in session-store.ts.
-      ..setUserAgent('ConcordiaNative/4.6.5 (Linux; Android) WebView')
+      ..setUserAgent('ConcordiaNative/4.6.6 (Linux; Android) WebView')
       ..setBackgroundColor(Colors.white)
       // JavaScript channel the web app uses to REQUEST the FCM token on demand.
       // The web app posts a message with a unique request id; we respond by
@@ -280,6 +283,58 @@ class _SplashToWebViewState extends State<SplashToWebView>
           }
         },
       )
+      // v4.6.6: File download/preview channel. The web app calls
+      // window.concordiaNative.downloadDocument(dataUrl, fileName, fileType)
+      // or .previewDocument(...) — these are shimmed (in onPageFinished
+      // below) to post a message to this channel. We decode the base64
+      // dataUrl, write it to a temp file, and open the Android share sheet
+      // so the user can save to Downloads / share via WhatsApp / open with
+      // any installed viewer. This is needed because <a download> and
+      // window.open(blob:) do NOT work inside a Flutter WebView — Android
+      // blocks blob: URL navigation and the WebView has no native download
+      // manager wired up by default.
+      ..addJavaScriptChannel(
+        'concordiaFileRequest',
+        onMessageReceived: (JavaScriptMessage message) async {
+          try {
+            final req = jsonDecode(message.message) as Map<String, dynamic>;
+            final method = req['method'] as String? ?? '';
+            final dataUrl = req['dataUrl'] as String? ?? '';
+            final fileName = req['fileName'] as String? ?? 'document';
+            final fileType = req['fileType'] as String? ?? '';
+            if (dataUrl.isEmpty) {
+              debugPrint('[WebView] concordiaFileRequest: empty dataUrl');
+              return;
+            }
+            // Decode the base64 payload out of the data URL.
+            final commaIdx = dataUrl.indexOf(',');
+            final base64Data = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : dataUrl;
+            final bytes = base64Decode(base64Data);
+            // Pick a sensible extension from fileType / fileName.
+            final ext = _pickExtension(fileType, fileName);
+            final safeName = _sanitizeFileName(fileName) + ext;
+            // Write to the app's cache directory (always writable, no
+            // permissions needed on Android 10+).
+            final dir = await getTemporaryDirectory();
+            final filePath = '${dir.path}/$safeName';
+            final file = File(filePath);
+            await file.writeAsBytes(bytes, flush: true);
+            // Both download + preview use the Android share sheet — it's
+            // the most reliable cross-device way to let the user either
+            // save the file (to Downloads / Drive) or open it with an
+            // installed viewer (Photos, PDF reader, Office). The sheet's
+            // header text differs per method so the user knows what to do.
+            await Share.shareXFiles(
+              [XFile(filePath)],
+              text: method == 'previewFile'
+                  ? 'Open $safeName with…'
+                  : 'Save or share $safeName',
+            );
+          } catch (e) {
+            debugPrint('[WebView] concordiaFileRequest error: $e');
+          }
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (_) {
@@ -300,7 +355,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
               window.concordiaNative.isNativeApp = true;
               // KEEP IN SYNC with pubspec.yaml `version:` field.
               // (Read at build time by GitHub Actions when building the APK.)
-              window.concordiaNative.appVersion = "4.6.5";
+              window.concordiaNative.appVersion = "4.6.6";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});
@@ -359,6 +414,38 @@ class _SplashToWebViewState extends State<SplashToWebView>
                     console.warn('[native] showLocalNotification error:', e);
                   }
                 };
+                // v4.6.6: Document download / preview bridge. The web app's
+                // DocumentManagerDialog calls these when running inside the
+                // native shell (detected via isNativeApp()). They hand off
+                // the base64 dataUrl to the Dart side, which decodes it,
+                // writes it to a temp file, and opens the Android share
+                // sheet (Save to Downloads / Open with…). This is needed
+                // because <a download> and window.open(blob:) are blocked
+                // inside Flutter WebView.
+                window.concordiaNative.downloadDocument = function(dataUrl, fileName, fileType) {
+                  try {
+                    window.concordiaFileRequest.postMessage(JSON.stringify({
+                      method: 'downloadFile',
+                      dataUrl: dataUrl || '',
+                      fileName: fileName || 'document',
+                      fileType: fileType || ''
+                    }));
+                  } catch (e) {
+                    console.warn('[native] downloadDocument error:', e);
+                  }
+                };
+                window.concordiaNative.previewDocument = function(dataUrl, fileName, fileType) {
+                  try {
+                    window.concordiaFileRequest.postMessage(JSON.stringify({
+                      method: 'previewFile',
+                      dataUrl: dataUrl || '',
+                      fileName: fileName || 'document',
+                      fileType: fileType || ''
+                    }));
+                  } catch (e) {
+                    console.warn('[native] previewDocument error:', e);
+                  }
+                };
               })();
             ''');
             if (!_loaded) {
@@ -402,6 +489,33 @@ class _SplashToWebViewState extends State<SplashToWebView>
         ),
       )
       ..loadRequest(Uri.parse(_webAppUrl));
+  }
+
+  /// Pick a sensible file extension from the MIME type / file name.
+  /// Used when saving a downloaded document so the OS can pick the right
+  /// viewer app. Returns the extension WITH a leading dot (e.g. '.pdf').
+  String _pickExtension(String fileType, String fileName) {
+    // Try the existing extension on the file name first.
+    final dotIdx = fileName.lastIndexOf('.');
+    if (dotIdx >= 0 && dotIdx < fileName.length - 1) {
+      return fileName.substring(dotIdx).toLowerCase();
+    }
+    // Fall back to mapping common MIME types.
+    final t = fileType.toLowerCase();
+    if (t == 'application/pdf') return '.pdf';
+    if (t == 'image/jpeg' || t == 'image/jpg') return '.jpg';
+    if (t == 'image/png') return '.png';
+    if (t == 'image/gif') return '.gif';
+    if (t == 'image/webp') return '.webp';
+    if (t == 'application/msword') return '.doc';
+    if (t == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return '.docx';
+    return '';
+  }
+
+  /// Strip characters that are illegal in Android file names.
+  String _sanitizeFileName(String name) {
+    final base = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+    return base.isEmpty ? 'document' : base;
   }
 
   Future<void> _launchUrl(String url) async {
