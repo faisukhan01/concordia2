@@ -73,8 +73,8 @@ export function PoweredByFaq({
         <img
           src="/faq-logo-dark.png"
           alt="FaQ Systems — Product Owner"
-          width={280}
-          height={55}
+          width={300}
+          height={54}
           loading="eager"
           decoding="async"
           style={{ height: 'auto', display: 'block' }}
@@ -99,8 +99,8 @@ export function PoweredByFaq({
         <img
           src="/faq-logo-light.png"
           alt="FaQ Systems"
-          width={170}
-          height={34}
+          width={185}
+          height={33}
           loading="lazy"
           decoding="async"
           style={{ height: 'auto', display: 'inline-block' }}
@@ -118,8 +118,8 @@ export function PoweredByFaq({
       <img
         src="/faq-logo-light.png"
         alt="FaQ Systems — Product Owner"
-        width={260}
-        height={51}
+        width={280}
+        height={50}
         loading="lazy"
         decoding="async"
         style={{
@@ -157,7 +157,7 @@ export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean })
         <img
           src="/faq-logo-light.png"
           alt="Powered by FaQ Systems"
-          width={110}
+          width={120}
           height={22}
           loading="lazy"
           decoding="async"
