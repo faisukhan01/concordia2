@@ -73,8 +73,8 @@ export function PoweredByFaq({
         <img
           src="/faq-logo-dark.png"
           alt="FaQ Systems — Product Owner"
-          width={200}
-          height={80}
+          width={280}
+          height={55}
           loading="eager"
           decoding="async"
           style={{ height: 'auto', display: 'block' }}
@@ -99,8 +99,8 @@ export function PoweredByFaq({
         <img
           src="/faq-logo-light.png"
           alt="FaQ Systems"
-          width={140}
-          height={56}
+          width={170}
+          height={34}
           loading="lazy"
           decoding="async"
           style={{ height: 'auto', display: 'inline-block' }}
@@ -110,7 +110,7 @@ export function PoweredByFaq({
   }
 
   // ── default variant: stacked, floating, no card ────────────────────────
-  // "powered by" tiny label on top, FaQ logo (240px wide) below. Floats on
+  // "powered by" tiny label on top, FaQ logo (260px wide) below. Floats on
   // the white sidebar / download background. This is the arvo aesthetic.
   const content = (
     <div className={`flex flex-col ${alignClass} gap-2.5`}>
@@ -118,14 +118,14 @@ export function PoweredByFaq({
       <img
         src="/faq-logo-light.png"
         alt="FaQ Systems — Product Owner"
-        width={240}
-        height={96}
+        width={260}
+        height={51}
         loading="lazy"
         decoding="async"
         style={{
           height: 'auto',
           display: 'block',
-          filter: 'drop-shadow(0 4px 12px rgba(15, 118, 110, 0.18))',
+          filter: 'drop-shadow(0 4px 12px rgba(10, 26, 58, 0.15))',
         }}
       />
     </div>
@@ -157,15 +157,15 @@ export function SidebarFaqCredit({ collapsed = false }: { collapsed?: boolean })
         <img
           src="/faq-logo-light.png"
           alt="Powered by FaQ Systems"
-          width={100}
-          height={40}
+          width={110}
+          height={22}
           loading="lazy"
           decoding="async"
           title="Powered by FaQ Systems"
           style={{
             height: 'auto',
             display: 'block',
-            filter: 'drop-shadow(0 2px 6px rgba(15, 118, 110, 0.2))',
+            filter: 'drop-shadow(0 2px 6px rgba(10, 26, 58, 0.18))',
           }}
         />
       </div>
