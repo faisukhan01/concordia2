@@ -15,17 +15,23 @@ import { PoweredByFaq } from '@/components/powered-by-faq';
 // v4.7.4: Demo accounts panel + student/teacher help text REMOVED per user
 // request. The right side now shows the "Powered by FaQ" product-owner
 // branding (the user is the product owner of the platform).
+// v4.7.6: Login card redesigned as a STUNNING premium glass crystal — lower
+// opacity, stronger blur, iridescent edge gradient, inset highlights, outer
+// glow. FaQ logo moved to the BOTTOM-RIGHT corner with an aesthetic WHITE
+// card background (replacing the centered transparent glass pill).
 
 // ==================== Concordia College — Sign In ====================
-// Layout (v4.7.4 — refined):
+// Layout (v4.7.6 — refined premium glass):
 //   • Full-page campus photograph as the background — clearly visible
-//   • LEFT  — clean frosted-glass login card: logo, username, password,
-//             single "Login" button, copyright, powered-by FaQ pill
-//   • RIGHT — large "Powered by FaQ" product-owner branding (centered)
+//   • LEFT  — stunning premium frosted-glass crystal card: logo, username,
+//             password, single "Login" button, copyright
+//   • FaQ   — bottom-right corner, aesthetic WHITE card (pops against
+//             the campus photo, premium product-owner credit)
 //
 // The campus image covers the entire viewport. A subtle left-to-right
 // gradient ensures the white card on the left has enough contrast, while
-// the right side shows the campus in full colour.
+// the right side shows the campus in full colour. The FaQ credit sits at
+// the bottom-right corner as a refined white card.
 
 export function LoginPage() {
   const setView = useApp(s => s.setView);
@@ -89,128 +95,188 @@ export function LoginPage() {
       {/* Barely-there gradient — only the far-left edge is darkened slightly
           so the white login card has enough contrast. Campus photo stays
           bright everywhere else. */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/15 via-transparent to-transparent" />
-      {/* Bottom vignette so the copyright text is readable */}
-      <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/60 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-black/5 to-transparent" />
+      {/* Bottom vignette so the copyright + bottom-right FaQ card read clearly */}
+      <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/55 to-transparent" />
 
-      {/* ─── Main two-column layout ─── */}
+      {/* ─── Main layout — left card + bottom-right FaQ credit ─── */}
       <div className="relative z-20 min-h-screen flex items-stretch justify-between">
-        {/* ═══════════ LEFT — fully transparent glassmorphism login card ═══════════ */}
+        {/* ═══════════ LEFT — STUNNING premium glass crystal card ═══════════ */}
         <div className="flex-1 lg:flex-[0.42] flex items-center justify-start px-6 sm:px-10 lg:pl-16 py-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-            className="w-full max-w-[400px]"
+            className="w-full max-w-[420px]"
           >
-            {/* Aesthetic frosted-glass card — 20% white opacity + backdrop blur.
-                This is the sweet spot: the card is clearly defined as a distinct
-                frosted panel (not transparent), while the campus photo remains
-                softly visible through the blur. Inline style guarantees the exact
-                opacity renders consistently across builds. */}
-            <div
-              className="rounded-2xl ring-1 ring-white/60 px-8 py-10 shadow-2xl shadow-black/30 backdrop-blur-xl backdrop-saturate-150"
-              style={{ backgroundColor: 'rgba(255, 255, 255, 0.20)' }}
-            >
-              {/* Logo — white bg pill so it's always visible regardless of background */}
-              <div className="mb-8 flex justify-center">
-                <div className="rounded-xl bg-white px-5 py-3 shadow-lg shadow-black/10">
-                  <BrandLogo size="lg" priority />
-                </div>
-              </div>
+            {/* Premium glass crystal card — very transparent, strong blur,
+                iridescent edge, inset highlights, outer glow.
+                This is the v4.7.6 stunning redesign: lower opacity (0.10),
+                stronger backdrop blur (3xl + saturate 1.8), a soft iridescent
+                edge gradient wrapper, inset top highlight, and a deep outer
+                glow. The card feels like a floating crystal over the campus. */}
+            <div className="relative">
+              {/* Iridescent edge glow — soft halo behind the card */}
+              <div
+                className="absolute -inset-1.5 rounded-[28px] opacity-70 blur-lg"
+                style={{
+                  background:
+                    'linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(242,101,34,0.15) 35%, rgba(255,255,255,0.25) 65%, rgba(15,118,110,0.18) 100%)',
+                }}
+              />
 
-              {/* Heading */}
-              <h1 className="text-[26px] leading-tight font-bold text-white tracking-tight text-center drop-shadow-sm">
-                Sign in
-              </h1>
-              <p className="text-sm text-white/70 mt-1.5 text-center">
-                Use your Concordia account to continue
-              </p>
-
-              {/* Form */}
-              <form onSubmit={handleSubmit} className="mt-7 space-y-3.5">
-                {/* Username */}
-                <div className="relative">
-                  <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-white/50 pointer-events-none" />
-                  <input
-                    id="login-email"
-                    type="text"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    autoComplete="username"
-                    placeholder="Enter Username"
-                    className="w-full h-12 pl-11 pr-4 rounded-xl border border-white/20 bg-white/10 text-white text-sm outline-none transition-all focus:border-[#F26522] focus:bg-white/20 focus:ring-2 focus:ring-[#F26522]/30 placeholder:text-white/50"
-                  />
-                </div>
-
-                {/* Password */}
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-white/50 pointer-events-none" />
-                  <input
-                    id="login-password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    placeholder="Enter Password"
-                    className="w-full h-12 pl-11 pr-11 rounded-xl border border-white/20 bg-white/10 text-white text-sm outline-none transition-all focus:border-[#F26522] focus:bg-white/20 focus:ring-2 focus:ring-[#F26522]/30 placeholder:text-white/50"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(s => !s)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white transition-colors"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+              {/* Main glass card */}
+              <div
+                className="relative rounded-[24px] px-9 py-11 backdrop-blur-3xl backdrop-saturate-[1.8]"
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.10)',
+                  border: '1px solid rgba(255, 255, 255, 0.30)',
+                  boxShadow:
+                    '0 24px 64px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                {/* Logo — white bg pill so it's always visible regardless of background.
+                    Subtle floating shadow + iridescent ring for premium feel. */}
+                <div className="mb-8 flex justify-center">
+                  <div
+                    className="rounded-2xl bg-white px-6 py-3.5"
+                    style={{
+                      boxShadow:
+                        '0 12px 32px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 1)',
+                    }}
                   >
-                    {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
-                  </button>
+                    <BrandLogo size="lg" priority />
+                  </div>
                 </div>
 
-                {/* Single Login button */}
-                <motion.button
-                  type="submit"
-                  disabled={isLoading}
-                  whileTap={{ scale: 0.985 }}
-                  className="w-full h-12 rounded-xl bg-[#F26522] hover:bg-[#D4541E] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#F26522]/30 transition-all disabled:opacity-60 disabled:cursor-not-allowed mt-1"
+                {/* Heading — refined premium typography */}
+                <h1
+                  className="text-[28px] leading-tight font-bold text-white tracking-tight text-center"
+                  style={{ textShadow: '0 2px 12px rgba(0, 0, 0, 0.35)' }}
                 >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Logging in…
-                    </>
-                  ) : (
-                    <>
-                      Login
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
-                </motion.button>
-              </form>
+                  Sign in
+                </h1>
+                <p
+                  className="text-sm text-white/80 mt-2 text-center tracking-wide"
+                  style={{ textShadow: '0 1px 6px rgba(0, 0, 0, 0.3)' }}
+                >
+                  Use your Concordia account to continue
+                </p>
+
+                {/* Subtle accent divider */}
+                <div className="mt-6 mb-7 flex justify-center">
+                  <div
+                    className="h-px w-16 rounded-full"
+                    style={{
+                      background:
+                        'linear-gradient(to right, transparent, rgba(255,255,255,0.5), transparent)',
+                    }}
+                  />
+                </div>
+
+                {/* Form */}
+                <form onSubmit={handleSubmit} className="space-y-3.5">
+                  {/* Username */}
+                  <div className="relative group">
+                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-white/55 pointer-events-none transition-colors group-focus-within:text-white" />
+                    <input
+                      id="login-email"
+                      type="text"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      autoComplete="username"
+                      placeholder="Enter Username"
+                      className="w-full h-12 pl-12 pr-4 rounded-xl border border-white/20 bg-white/10 text-white text-sm outline-none transition-all focus:border-[#F26522] focus:bg-white/15 focus:ring-2 focus:ring-[#F26522]/40 placeholder:text-white/55"
+                    />
+                  </div>
+
+                  {/* Password */}
+                  <div className="relative group">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-white/55 pointer-events-none transition-colors group-focus-within:text-white" />
+                    <input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      autoComplete="current-password"
+                      placeholder="Enter Password"
+                      className="w-full h-12 pl-12 pr-12 rounded-xl border border-white/20 bg-white/10 text-white text-sm outline-none transition-all focus:border-[#F26522] focus:bg-white/15 focus:ring-2 focus:ring-[#F26522]/40 placeholder:text-white/55"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(s => !s)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white/55 hover:text-white transition-colors"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
+                    </button>
+                  </div>
+
+                  {/* Single Login button — premium gradient + glow */}
+                  <motion.button
+                    type="submit"
+                    disabled={isLoading}
+                    whileTap={{ scale: 0.985 }}
+                    whileHover={{ scale: 1.01 }}
+                    className="w-full h-12 rounded-xl text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-60 disabled:cursor-not-allowed mt-2 relative overflow-hidden"
+                    style={{
+                      background:
+                        'linear-gradient(135deg, #F26522 0%, #D4541E 100%)',
+                      boxShadow:
+                        '0 10px 28px rgba(242, 101, 34, 0.45), 0 2px 8px rgba(242, 101, 34, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25)',
+                    }}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Logging in…
+                      </>
+                    ) : (
+                      <>
+                        Login
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </motion.button>
+                </form>
+              </div>
             </div>
 
-            <p className="text-center text-[11px] text-white/70 mt-5 drop-shadow">
+            <p
+              className="text-center text-[11px] text-white/80 mt-5 tracking-wide"
+              style={{ textShadow: '0 1px 4px rgba(0, 0, 0, 0.4)' }}
+            >
               © {new Date().getFullYear()} Concordia College · All rights reserved
             </p>
-            {/* Mobile-only powered-by (right side is hidden on mobile) */}
-            <div className="mt-4 flex justify-center lg:hidden">
-              <PoweredByFaq variant="on-dark" align="center" />
+            {/* Mobile-only powered-by — aesthetic white card (matches the
+                desktop bottom-right corner credit). Right side FaQ is
+                hidden on mobile, so we show the white card here instead. */}
+            <div className="mt-5 flex justify-center lg:hidden">
+              <PoweredByFaq variant="on-light" align="center" />
             </div>
           </motion.div>
         </div>
 
-        {/* ═══════════ RIGHT — "Powered by FaQ" product-owner branding ═══════════ */}
-        {/* v4.7.4: Demo accounts panel + student/teacher help text REMOVED.
-            Now shows the FaQ Systems product-owner branding — large, centered,
-            with a glassmorphism pill over the campus photo. */}
-        <div className="hidden lg:flex lg:flex-[0.58] items-center justify-center px-8 py-12">
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5, delay: 0.12, ease: [0.4, 0, 0.2, 1] }}
-            className="w-full max-w-[460px] flex flex-col items-center"
-          >
-            <PoweredByFaq variant="on-dark" align="center" />
-          </motion.div>
-        </div>
+        {/* ═══════════ RIGHT — empty (campus photo visible) ═══════════ */}
+        {/* v4.7.4 had the FaQ logo centered here. v4.7.6 MOVES it to the
+            bottom-right corner (see absolute element below) so the right
+            side shows the campus photo in full, and the FaQ credit sits
+            as a refined white card at the corner — premium and intentional. */}
+        <div className="hidden lg:block lg:flex-[0.58]" />
+
+        {/* ═══════════ FaQ credit — BOTTOM-RIGHT corner, aesthetic WHITE card ═══════════ */}
+        {/* Sits at the bottom-right corner of the page (where the user's
+            red-lined box was). White aesthetic background (not transparent)
+            so the teal FaQ logo pops against the campus photo. Premium
+            product-owner credit, refined and intentional. */}
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.55, delay: 0.25, ease: [0.4, 0, 0.2, 1] }}
+          className="hidden lg:block absolute bottom-7 right-7 z-30"
+        >
+          <PoweredByFaq variant="on-light" align="center" />
+        </motion.div>
       </div>
     </div>
   );
