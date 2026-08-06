@@ -392,7 +392,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    now handles update visibility silently without spamming users.
     if (method === 'GET' && path === 'app/version-check') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.7.3';
+      const LATEST_APP_VERSION = '4.7.4';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 
@@ -426,7 +426,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //    This replaces the annoying "update your app" push notifications.
     if (method === 'GET' && path === 'app/update-status') {
       const user = await requireAuth(req);
-      const LATEST_APP_VERSION = '4.7.3';
+      const LATEST_APP_VERSION = '4.7.4';
       const DOWNLOAD_URL = 'https://concordia-colleges.vercel.app/download';
       const current = (query.current || '').trim();
 

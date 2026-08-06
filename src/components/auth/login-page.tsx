@@ -6,30 +6,26 @@ import { api } from '@/lib/api';
 import { useApp } from '@/lib/store';
 import {
   Lock, Eye, EyeOff, Loader2, ArrowRight, User as UserIcon,
-  Sparkles,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { BrandLogo } from '@/components/brand-logo';
 import { PoweredByFaq } from '@/components/powered-by-faq';
 // v4.1.0: ThemeToggle import REMOVED — user requested removal of the theme
 // switcher from the entire app (default light theme is the intended design).
+// v4.7.4: Demo accounts panel + student/teacher help text REMOVED per user
+// request. The right side now shows the "Powered by FaQ" product-owner
+// branding (the user is the product owner of the platform).
 
 // ==================== Concordia College — Sign In ====================
-// Layout (UCP-inspired, refined):
+// Layout (v4.7.4 — refined):
 //   • Full-page campus photograph as the background — clearly visible
-//   • LEFT  — clean white login card: logo, username, password, single "Login" button
-//   • RIGHT — translucent demo-accounts panel (ephemeral, removable later)
+//   • LEFT  — clean frosted-glass login card: logo, username, password,
+//             single "Login" button, copyright, powered-by FaQ pill
+//   • RIGHT — large "Powered by FaQ" product-owner branding (centered)
 //
 // The campus image covers the entire viewport. A subtle left-to-right
 // gradient ensures the white card on the left has enough contrast, while
 // the right side shows the campus in full colour.
-
-const DEMO_ACCOUNTS = [
-  { role: 'Admin',            email: 'admin@concordia.edu.pk' },
-  { role: 'Admission Office', email: 'admissions@concordia.edu.pk' },
-  { role: 'Accountant',       email: 'accountant@concordia.edu.pk' },
-  { role: 'Academic Office',  email: 'academics@concordia.edu.pk' },
-];
 
 export function LoginPage() {
   const setView = useApp(s => s.setView);
@@ -39,11 +35,6 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-
-  const fillDemo = (e: string) => {
-    setEmail(e);
-    setPassword('concordia123');
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +65,7 @@ export function LoginPage() {
       } else if (msg.includes('Invalid') || msg.includes('401') || msg.includes('incorrect')) {
         toast({
           title: 'Login failed',
-          description: 'Invalid username or password. Students & Teachers: use your Roll # / Teacher ID and the password given by the Accountant (not “concordia123”).',
+          description: 'Invalid username or password. Please check your credentials and try again.',
           variant: 'destructive',
         });
       } else if (msg.includes('blocked') || msg.includes('Blocked') || msg.includes('retired')) {
@@ -194,121 +185,30 @@ export function LoginPage() {
                   )}
                 </motion.button>
               </form>
-
-              {/* Compact student/teacher hint — visible on all screen sizes */}
-              <p className="text-[11px] text-white/60 mt-3 text-center leading-relaxed">
-                Students &amp; Teachers: sign in with your{' '}
-                <span className="font-mono text-white/80">Roll #</span> /{' '}
-                <span className="font-mono text-white/80">Teacher ID</span> and the password given
-                by the Accountant.
-              </p>
-
-              {/* Mobile-only demo account quick-fill (the right panel is hidden on mobile) */}
-              <div className="lg:hidden mt-4">
-                <details className="group rounded-lg border border-white/15 bg-white/5 overflow-hidden">
-                  <summary className="flex items-center justify-between gap-2 px-3.5 py-2.5 cursor-pointer list-none">
-                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
-                      <Sparkles className="h-3 w-3 text-[#F26522]" />
-                      Demo Accounts
-                    </span>
-                    <svg className="h-3.5 w-3.5 text-white/50 group-open:rotate-180 transition-transform" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
-                  </summary>
-                  <div className="px-3.5 pb-3 space-y-1.5">
-                    {DEMO_ACCOUNTS.map(c => (
-                      <button
-                        key={c.email}
-                        type="button"
-                        onClick={() => fillDemo(c.email)}
-                        className="w-full flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 hover:bg-white/15 hover:border-[#F26522]/50 px-3 py-2 text-left transition-all"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-[12px] font-semibold text-white">{c.role}</div>
-                          <div className="text-[10px] text-white/50 font-mono truncate">{c.email}</div>
-                        </div>
-                        <span className="shrink-0 text-[9px] font-semibold text-white/40">concordia123</span>
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              </div>
             </div>
 
             <p className="text-center text-[11px] text-white/70 mt-5 drop-shadow">
               © {new Date().getFullYear()} Concordia College · All rights reserved
             </p>
-            {/* Product-owner credit — FaQ Systems.
-                Stacked "powered by" + logo in a minimal white pill (the only
-                place a pill is used — needed for contrast over the dark campus
-                photo). Logo is 44px so the metallic detail shines. */}
-            <div className="mt-4 flex justify-center">
+            {/* Mobile-only powered-by (right side is hidden on mobile) */}
+            <div className="mt-4 flex justify-center lg:hidden">
               <PoweredByFaq variant="on-dark" align="center" />
             </div>
           </motion.div>
         </div>
 
-        {/* ═══════════ RIGHT — demo accounts panel (ephemeral) ═══════════ */}
+        {/* ═══════════ RIGHT — "Powered by FaQ" product-owner branding ═══════════ */}
+        {/* v4.7.4: Demo accounts panel + student/teacher help text REMOVED.
+            Now shows the FaQ Systems product-owner branding — large, centered,
+            with a glassmorphism pill over the campus photo. */}
         <div className="hidden lg:flex lg:flex-[0.58] items-center justify-center px-8 py-12">
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5, delay: 0.12, ease: [0.4, 0, 0.2, 1] }}
-            className="w-full max-w-[340px]"
+            className="w-full max-w-[460px] flex flex-col items-center"
           >
-            {/* Ephemeral badge */}
-            <div className="flex items-center justify-end gap-1.5 mb-3">
-              <Sparkles className="h-3 w-3 text-white/60" />
-              <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-white/60">
-                Demo only · removable
-              </span>
-            </div>
-
-            <div className="rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md p-5 shadow-2xl shadow-black/20">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#F26522]" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/80">
-                  Demo Accounts
-                </span>
-              </div>
-              <p className="text-xs text-white/60 mb-4">Click any account to auto-fill the login form.</p>
-
-              <div className="space-y-2">
-                {DEMO_ACCOUNTS.map(c => (
-                  <button
-                    key={c.email}
-                    type="button"
-                    onClick={() => fillDemo(c.email)}
-                    className="group w-full flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/15 hover:border-[#F26522]/50 px-3.5 py-2.5 text-left transition-all"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-white">{c.role}</div>
-                      <div className="text-[11px] text-white/50 font-mono truncate">{c.email}</div>
-                    </div>
-                    <span className="shrink-0 text-[10px] font-semibold text-white/40 group-hover:text-[#FF8C42] transition-colors">
-                      concordia123
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-lg border border-white/15 bg-white/5 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/70 mb-1.5">
-                  Student &amp; Teacher sign-in
-                </p>
-                <ul className="text-[11px] text-white/55 leading-relaxed space-y-1">
-                  <li>
-                    • Username = <span className="font-mono text-white/75">Roll Number</span>{' '}
-                    (students) or <span className="font-mono text-white/75">Teacher ID</span>{' '}
-                    (teachers)
-                  </li>
-                  <li>
-                    • Password = the <span className="text-white/75">unique password</span> the
-                    Accountant generated (shown in the “Login Ready” box) —{' '}
-                    <span className="text-white/75">not</span> “concordia123”
-                  </li>
-                  <li>• Accountant can reveal a forgotten password via Create Logins → Edit.</li>
-                </ul>
-              </div>
-            </div>
+            <PoweredByFaq variant="on-dark" align="center" />
           </motion.div>
         </div>
       </div>
