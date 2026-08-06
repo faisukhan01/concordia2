@@ -91,18 +91,17 @@ export function LoginPage() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden">
-      {/* ─── Full-page campus photograph — cleaned + aesthetic CSS treatment ───
-          v4.7.8: The source image is the sharp-processed "cleaned" version
-          (richer colours, softened clutter). On top, a CSS blur(2px) +
-          brightness/contrast/saturate filter creates the premium
-          glassmorphism background look — cluttered details (cars, poles,
-          patchy grass) dissolve into a clean, aesthetic backdrop while the
-          building shapes stay recognisable. The college itself is unchanged. */}
+      {/* ─── Full-page campus photograph — sharp, no blur ───
+          The source image is the sharp-processed "cleaned" version
+          (richer colours, softened clutter). We keep a light
+          brightness/contrast/saturate grade for an aesthetic mood but NO
+          blur — the campus building + signage stay crisp and legible.
+          The login card on top uses its own backdrop-blur for readability. */}
       <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105"
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: 'url(/concordia-campus-cleaned.jpg)',
-          filter: 'blur(2px) brightness(0.92) contrast(1.08) saturate(1.12)',
+          filter: 'brightness(0.94) contrast(1.06) saturate(1.10)',
         }}
       />
       {/* v4.1.0: Theme toggle REMOVED — default light theme is the intended design. */}
