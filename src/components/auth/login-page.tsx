@@ -91,16 +91,16 @@ export function LoginPage() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden">
-      {/* ─── Full-page campus photograph — sharp, no blur ───
-          The source image is the sharp-processed "cleaned" version
-          (richer colours, softened clutter). We keep a light
-          brightness/contrast/saturate grade for an aesthetic mood but NO
-          blur — the campus building + signage stay crisp and legible.
-          The login card on top uses its own backdrop-blur for readability. */}
+      {/* ─── Full-page campus photograph — sharp HD, no blur ───
+          Uses the high-quality HD JPEG (1920×1440, q92, 4:4:4 chroma)
+          generated from the original PNG. NO blur filter — the campus
+          building + signage stay crisp and legible at any viewport.
+          A light brightness/contrast/saturate grade sets the mood; the
+          login card on top uses its own backdrop-blur for readability. */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage: 'url(/concordia-campus-cleaned.jpg)',
+          backgroundImage: 'url(/concordia-campus-hd.jpg)',
           filter: 'brightness(0.94) contrast(1.06) saturate(1.10)',
         }}
       />

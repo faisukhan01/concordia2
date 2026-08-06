@@ -1480,25 +1480,24 @@ export function HelpWidget() {
                   </button>
                 </form>
                 <div className="text-center mt-2">
-                  <span className="text-[10px] text-gray-400 inline-flex items-center gap-1.5">
-                    100% offline · no AI · built by{' '}
+                  <span className="inline-flex items-center gap-2">
                     <a
                       href="https://www.instagram.com/faisu._khan01/"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[#F26522] hover:underline font-medium inline-flex items-center gap-0.5"
+                      aria-label="Instagram"
+                      className="text-gray-400 hover:text-[#F26522] transition-colors"
                     >
-                      <Instagram className="h-2.5 w-2.5" />
-                      Faisal Khan
+                      <Instagram className="h-3.5 w-3.5" />
                     </a>
                     <a
                       href="https://www.linkedin.com/in/faisal-arslan-khan-a3140232a/"
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label="Faisal Khan on LinkedIn"
-                      className="text-[#0A66C2] hover:underline"
+                      aria-label="LinkedIn"
+                      className="text-gray-400 hover:text-[#0A66C2] transition-colors"
                     >
-                      <Linkedin className="h-2.5 w-2.5" />
+                      <Linkedin className="h-3.5 w-3.5" />
                     </a>
                   </span>
                 </div>
