@@ -86,25 +86,63 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         }
         if (u.status !== 'Active') return NextResponse.json({ error: 'Account is ' + u.status }, { status: 403 });
 
-        let blockedMessage: string | null = null;
-        if (u.blocked === 1) {
-          blockedMessage = 'Your account has been blocked by your administration. Please contact your administrator.';
-        } else if (u.instituteId && u.role !== 'super-admin') {
-          const inst = await db.execute({ sql: 'SELECT blocked FROM institutes WHERE id = ?', args: [u.instituteId] });
-          if (inst.rows.length > 0 && (inst.rows[0] as any).blocked === 1) {
-            blockedMessage = 'Your institute access has been blocked by the platform administration. Please contact your administrator.';
+        // ── v4.6.4: COLLEGE / BRANCH / USER ACCESS BLOCK ──────────────
+        // When the Super Admin blocks an institute (or a branch, or a single
+        // user), NO ONE from that institute/branch/user can log in. The login
+        // HARD-FAILS with HTTP 403 + a clear "contact your administration"
+        // message — no session token is issued, no portal access is granted.
+        //
+        // The super-admin is ALWAYS exempted so the platform owner can still
+        // log in to unblock. The cascade block endpoint
+        // (PATCH /api/institutes/:id/block) also deletes every active session
+        // for the blocked institute, so users already logged in get kicked
+        // out on their next API call (requireAuth re-checks institute.blocked).
+        //
+        // Message wording is intentionally the same for institute- and
+        // branch-level blocks so users see one consistent "contact your
+        // administration" message regardless of which level was blocked.
+        if (u.role !== 'super-admin') {
+          // Check institute → branch → user in that order so the MOST SPECIFIC
+          // message wins. The cascade block endpoint sets blocked=1 on the
+          // institute AND all its users/branches simultaneously — so when an
+          // institute is blocked, every user in it has BOTH u.blocked=1 AND
+          // institute.blocked=1. Checking institute first ensures the user
+          // sees "Your college access has been blocked" (accurate) instead of
+          // the generic "Your account has been blocked" message.
+          //
+          // 1. Institute-level block (super admin blocked the whole college).
+          if (u.instituteId) {
+            const inst = await db.execute({ sql: 'SELECT blocked, blockedReason FROM institutes WHERE id = ?', args: [u.instituteId] });
+            if (inst.rows.length > 0 && (inst.rows[0] as any).blocked === 1) {
+              const reason = (inst.rows[0] as any).blockedReason;
+              const msg = reason
+                ? `Your college access has been blocked. Please contact your administration. (${reason})`
+                : 'Your college access has been blocked. Please contact your administration.';
+              return NextResponse.json({ error: msg }, { status: 403 });
+            }
           }
-        }
-        if (!blockedMessage && u.branchId && u.role !== 'super-admin') {
-          const br = await db.execute({ sql: 'SELECT blocked FROM branches WHERE id = ?', args: [u.branchId] });
-          if (br.rows.length > 0 && (br.rows[0] as any).blocked === 1) {
-            blockedMessage = 'Your branch access has been blocked. Please contact your institute administrator.';
+          // 2. Branch-level block (institute admin blocked a specific campus).
+          if (u.branchId) {
+            const br = await db.execute({ sql: 'SELECT blocked, blockedReason FROM branches WHERE id = ?', args: [u.branchId] });
+            if (br.rows.length > 0 && (br.rows[0] as any).blocked === 1) {
+              const reason = (br.rows[0] as any).blockedReason;
+              const msg = reason
+                ? `Your campus access has been blocked. Please contact your administration. (${reason})`
+                : 'Your campus access has been blocked. Please contact your administration.';
+              return NextResponse.json({ error: msg }, { status: 403 });
+            }
+          }
+          // 3. User-level block (admin blocked this specific account only).
+          if (u.blocked === 1) {
+            return NextResponse.json(
+              { error: 'Your account has been blocked. Please contact your administration.' },
+              { status: 403 },
+            );
           }
         }
 
         const sessionToken = await createSession(u);
         const userProfile: any = buildUserProfile(u);
-        if (blockedMessage) userProfile.blockedMessage = blockedMessage;
         return NextResponse.json({ token: sessionToken, user: userProfile, mustChangePassword: u.mustChangePassword === 1 });
       } catch (e: any) {
         return NextResponse.json({ error: 'Login failed: ' + e.message }, { status: 500 });

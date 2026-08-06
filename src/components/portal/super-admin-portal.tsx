@@ -69,6 +69,7 @@ import {
   DollarSign, CheckCircle2, Award, Search,
   Loader2, Lock, Unlock, Edit, KeyRound, Trash2, ChevronRight, AlertCircle,
   Inbox, BookOpen, Send, TrendingUp, Crown,
+  ShieldCheck, ShieldOff, Ban, Power, MapPin, Layers,
 } from 'lucide-react';
 import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
 import { DEPARTMENTS } from './shared/concordia-hierarchy';
@@ -413,6 +414,12 @@ function SuperAdminDashboard({
 
   const quickActions = [
     {
+      icon: ShieldCheck,
+      title: 'Block College Access',
+      subtitle: 'Instantly revoke portal access for an entire college',
+      target: 'super-institutes',
+    },
+    {
       icon: UserCog,
       title: 'Manage Office Staff',
       subtitle: 'Edit accounts, reset passwords, block access',
@@ -442,12 +449,6 @@ function SuperAdminDashboard({
       subtitle: 'Review collected fees and recent transactions',
       target: 'super-fees',
     },
-    {
-      icon: Building2,
-      title: 'Branches & Classes',
-      subtitle: 'Inspect the college structure and course catalog',
-      target: 'super-branches',
-    },
   ];
 
   return (
@@ -472,6 +473,17 @@ function SuperAdminDashboard({
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <StatCard
+            icon={ShieldCheck}
+            label="Colleges"
+            value={overview?.institutes ?? 1}
+            sub={
+              overview && overview.institutes > 0
+                ? `${overview.activeInstitutes ?? overview.institutes} active · ${Math.max(0, (overview.institutes ?? 1) - (overview.activeInstitutes ?? overview.institutes ?? 1))} blocked`
+                : 'Access control'
+            }
+            onClick={() => setActiveModule('super-institutes')}
+          />
           <StatCard
             icon={GraduationCap}
             label="Total Students"
@@ -506,13 +518,6 @@ function SuperAdminDashboard({
             value={fmtMoney(feeCollected)}
             sub="Total paid fees"
             onClick={() => setActiveModule('super-fees')}
-          />
-          <StatCard
-            icon={Megaphone}
-            label="Announcements"
-            value={announcements.length}
-            sub="Recent college broadcasts"
-            onClick={() => setActiveModule('super-announcements')}
           />
         </div>
       )}
@@ -2488,6 +2493,412 @@ function GradeBadge({ grade }: { grade?: string }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// SuperInstitutes — COLLEGE ACCESS CONTROL (v4.6.4)
+//
+// The super admin's primary security lever. Blocking a college instantly
+// revokes portal access for EVERYONE in that institute — admin, admission
+// office, accountant, academic office, teachers, AND students. None of them
+// can log in (they get a clear "Your college access has been blocked. Please
+// contact your administration." error) and anyone already logged in is
+// kicked out on their next API call (active sessions are deleted by the
+// cascade block endpoint).
+//
+// The super admin themselves is ALWAYS exempted, so the platform owner can
+// still log in to unblock the college.
+// ═══════════════════════════════════════════════════════════════
+
+function SuperInstitutes() {
+  const [institutes, setInstitutes] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'active' | 'blocked'>('all');
+  // Block/unblock dialog state.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [target, setTarget] = useState<any | null>(null);
+  const [reason, setReason] = useState('');
+  const [acting, setActing] = useState(false);
+
+  const load = async () => {
+    const [insts, brs, usrs] = await Promise.all([
+      api.institutes().catch(() => []),
+      api.branches().catch(() => []),
+      api.platformUsers({}).catch(() => []),
+    ]);
+    setInstitutes(Array.isArray(insts) ? insts : []);
+    setBranches(Array.isArray(brs) ? brs : []);
+    setUsers(Array.isArray(usrs) ? usrs : []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // Per-institute live stats (branches / students / staff counts).
+  const statsFor = (instId: string) => {
+    const instBranches = branches.filter((b) => b.instituteId === instId);
+    const instUsers = users.filter((u) => u.instituteId === instId);
+    const students = instUsers.filter((u) => u.role === 'student').length;
+    const staff = instUsers.filter((u) =>
+      ['admin', 'admissions', 'accountant', 'academic', 'teacher'].includes(u.role),
+    ).length;
+    return {
+      branchCount: instBranches.length,
+      studentCount: students,
+      staffCount: staff,
+    };
+  };
+
+  const filtered = useMemo(() => {
+    let list = institutes;
+    if (filter === 'active') list = list.filter((i) => !(i.blocked === 1));
+    if (filter === 'blocked') list = list.filter((i) => i.blocked === 1);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (i) =>
+          (i.name || '').toLowerCase().includes(q) ||
+          (i.city || '').toLowerCase().includes(q) ||
+          (i.id || '').toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [institutes, filter, search]);
+
+  const blockedCount = institutes.filter((i) => i.blocked === 1).length;
+  const activeCount = institutes.length - blockedCount;
+
+  const openBlockDialog = (inst: any) => {
+    setTarget(inst);
+    setReason(inst.blockedReason || '');
+    setDialogOpen(true);
+  };
+
+  const confirmAction = async () => {
+    if (!target) return;
+    const willBlock = !(target.blocked === 1);
+    setActing(true);
+    try {
+      await api.blockInstitute(target.id, willBlock, willBlock ? reason.trim() : '');
+      toast({
+        title: willBlock ? 'College access blocked' : 'College access restored',
+        description: willBlock
+          ? `${target.name} can no longer log in. All active sessions were revoked.`
+          : `${target.name} can log in again.`,
+      });
+      setDialogOpen(false);
+      setTarget(null);
+      setReason('');
+      // Refresh data (bypass cache so the new blocked state is reflected).
+      await load();
+    } catch (e: any) {
+      toast({
+        title: 'Action failed',
+        description: e?.message || 'Could not update college access. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const cancelDialog = () => {
+    setDialogOpen(false);
+    setTarget(null);
+    setReason('');
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Colleges & Access Control"
+        subtitle="Block or restore portal access for an entire college. When blocked, no one from that college can log in."
+      />
+
+      {/* ── Summary KPI strip ── */}
+      {loading ? (
+        <div className="grid grid-cols-3 gap-4">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-[#FFF4ED] grid place-items-center">
+                <Layers className="h-5 w-5 text-[#F26522]" />
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-gray-900 tabular-nums">{institutes.length}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Total Colleges</div>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-emerald-50 grid place-items-center">
+                <ShieldCheck className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-gray-900 tabular-nums">{activeCount}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Active</div>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-rose-50 grid place-items-center">
+                <ShieldOff className="h-5 w-5 text-rose-600" />
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-gray-900 tabular-nums">{blockedCount}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Blocked</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Filter + search bar ── */}
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 self-start">
+          {(['all', 'active', 'blocked'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                'px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors',
+                filter === f
+                  ? 'bg-[#F26522] text-white'
+                  : 'text-gray-600 hover:bg-gray-50',
+              )}
+            >
+              {f} ({f === 'all' ? institutes.length : f === 'active' ? activeCount : blockedCount})
+            </button>
+          ))}
+        </div>
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, city, or ID…"
+            className={cn(inputCls, 'pl-9 w-full')}
+          />
+        </div>
+      </div>
+
+      {/* ── Institute list ── */}
+      {loading ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <SkeletonTable rows={3} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <EmptyState
+            icon={Building2}
+            title={institutes.length === 0 ? 'No colleges yet' : 'No matches'}
+            desc={
+              institutes.length === 0
+                ? 'Colleges will appear here once the platform is provisioned.'
+                : 'Try a different search or filter.'
+            }
+          />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((inst) => {
+            const isBlocked = inst.blocked === 1;
+            const s = statsFor(inst.id);
+            return (
+              <div
+                key={inst.id}
+                className={cn(
+                  'rounded-xl border bg-white overflow-hidden transition-all',
+                  isBlocked ? 'border-rose-200 bg-rose-50/30' : 'border-gray-200 hover:border-gray-300 hover:shadow-sm',
+                )}
+              >
+                <div className="flex flex-col lg:flex-row lg:items-center gap-4 p-4 sm:p-5">
+                  {/* Identity */}
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div
+                      className={cn(
+                        'h-11 w-11 shrink-0 rounded-xl grid place-items-center',
+                        isBlocked ? 'bg-rose-100' : 'bg-[#FFF4ED]',
+                      )}
+                    >
+                      {isBlocked ? (
+                        <ShieldOff className="h-5 w-5 text-rose-600" />
+                      ) : (
+                        <Building2 className="h-5 w-5 text-[#F26522]" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-semibold text-gray-900 truncate">{inst.name}</h3>
+                        {isBlocked ? (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                            <Ban className="h-3 w-3" /> Blocked
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                            <ShieldCheck className="h-3 w-3" /> Active
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin className="h-3 w-3" /> {inst.city || '—'}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Layers className="h-3 w-3" /> {s.branchCount} campus{s.branchCount === 1 ? '' : 'es'}
+                        </span>
+                        <span>{s.studentCount} students</span>
+                        <span>{s.staffCount} staff &amp; teachers</span>
+                        <span className="text-gray-300">·</span>
+                        <span className="font-mono text-[10px] text-gray-400">{inst.id}</span>
+                      </div>
+                      {isBlocked && inst.blockedReason && (
+                        <p className="mt-2 text-xs text-rose-700 bg-rose-100/60 border border-rose-200 rounded-md px-2 py-1.5">
+                          <span className="font-semibold">Reason: </span>
+                          {inst.blockedReason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Action */}
+                  <div className="shrink-0 flex items-center gap-2">
+                    {isBlocked ? (
+                      <button
+                        onClick={() => openBlockDialog(inst)}
+                        className={cn(btnSecondary, 'border-emerald-200 text-emerald-700 hover:bg-emerald-50')}
+                      >
+                        <Power className="h-4 w-4" /> Restore Access
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openBlockDialog(inst)}
+                        className={cn(
+                          'border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 rounded-lg h-9 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors',
+                        )}
+                      >
+                        <Ban className="h-4 w-4" /> Block Access
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Block / Restore confirmation dialog ── */}
+      {dialogOpen && target && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={cancelDialog}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in fade-in-0 zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div
+                className={cn(
+                  'h-11 w-11 shrink-0 rounded-xl grid place-items-center',
+                  target.blocked === 1 ? 'bg-emerald-50' : 'bg-rose-50',
+                )}
+              >
+                {target.blocked === 1 ? (
+                  <Power className="h-5 w-5 text-emerald-600" />
+                ) : (
+                  <Ban className="h-5 w-5 text-rose-600" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-gray-900">
+                  {target.blocked === 1 ? 'Restore college access?' : 'Block college access?'}
+                </h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {target.name} · {target.city || '—'}
+                </p>
+              </div>
+            </div>
+
+            {target.blocked === 1 ? (
+              <p className="text-sm text-gray-600 mb-4">
+                Everyone in this college (admin, admissions, accountant, academic office, teachers, and students)
+                will be able to log in again immediately. Their accounts were preserved during the block.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600 mb-3">
+                  <span className="font-semibold text-rose-700">No one</span> from this college will be able to log in —
+                  admin, admissions, accountant, academic office, teachers, AND students. Anyone currently logged in
+                  will be signed out instantly. You (super admin) will still be able to log in to unblock later.
+                </p>
+                <Field
+                  label="Reason (optional, shown to users)"
+                  hint="e.g. 'Fee pending' or 'Under review'. Leave blank for a generic message."
+                >
+                  <Textarea
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    rows={2}
+                    placeholder="Why is this college being blocked?"
+                    className="resize-none"
+                  />
+                </Field>
+                <div className="mt-3 rounded-md bg-rose-50 border border-rose-100 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-700 mb-1">
+                    Users will see this message at login
+                  </p>
+                  <p className="text-xs text-rose-800">
+                    {reason.trim()
+                      ? `Your college access has been blocked. Please contact your administration. (${reason.trim()})`
+                      : 'Your college access has been blocked. Please contact your administration.'}
+                  </p>
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button onClick={cancelDialog} className={btnSecondary} disabled={acting}>
+                Cancel
+              </button>
+              <button
+                onClick={confirmAction}
+                disabled={acting}
+                className={cn(
+                  'rounded-lg h-9 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-white',
+                  target.blocked === 1 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700',
+                )}
+              >
+                {acting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {target.blocked === 1 ? (
+                  <>
+                    <Power className="h-4 w-4" /> Restore Access
+                  </>
+                ) : (
+                  <>
+                    <Ban className="h-4 w-4" /> Block Access
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ───────────────────────── Coming Soon ─────────────────────────
 
 function ComingSoon({ title }: { title: string }) {
@@ -2526,6 +2937,9 @@ export function SuperAdminPortal({ activeModule, user }: Props) {
       break;
     case 'super-branches':
       content = <SuperBranches />;
+      break;
+    case 'super-institutes':
+      content = <SuperInstitutes />;
       break;
     case 'super-staff':
       content = <SuperStaff />;

@@ -54,22 +54,24 @@ export const ROLE_MODULES: RoleModules = {
   //
   // The single-institution model replaces the old multi-tenant SaaS
   // provisioning UI. The super admin now monitors the WHOLE college:
-  //   • Dashboard       — college-wide stats + recent activity
+  //   • Dashboard         — college-wide stats + recent activity
+  //   • Colleges & Access — BLOCK / unblock an entire college's portal
   //   • Branches & Classes — view all branches/classes/courses
-  //   • Office Staff    — manage admin/admissions/accountant/academic
-  //   • Teachers        — view all teachers, block/unblock, reset pwd
-  //   • Students        — view all students, block/unblock, reset pwd
-  //   • Announcements   — broadcast college-wide + view history
-  //   • Fee Collection  — fee stats + recent invoices
-  //   • Attendance      — all attendance records across classes
-  //   • Results         — all test results across classes
-  //   • Settings        — change own password (handled by role-portal.tsx)
+  //   • Office Staff      — manage admin/admissions/accountant/academic
+  //   • Teachers          — view all teachers, block/unblock, reset pwd
+  //   • Students          — view all students, block/unblock, reset pwd
+  //   • Announcements     — broadcast college-wide + view history
+  //   • Fee Collection    — fee stats + recent invoices
+  //   • Attendance        — all attendance records across classes
+  //   • Results           — all test results across classes
+  //   • Settings          — change own password (handled by role-portal.tsx)
   // ═══════════════════════════════════════════════════════════════
   'super-admin': [
     { group: 'Main', flat: true, items: [
       { id: 'super-dashboard', name: 'Dashboard', icon: LayoutDashboard, color: PRIMARY },
     ]},
     { group: 'College', items: [
+      { id: 'super-institutes', name: 'Colleges & Access', icon: ShieldCheck, color: PRIMARY },
       { id: 'super-branches', name: 'Branches & Classes', icon: Building2, color: PRIMARY },
       { id: 'super-staff', name: 'Office Staff', icon: UserCog, color: PRIMARY },
       { id: 'super-teachers', name: 'Teachers', icon: Users, color: PRIMARY },
