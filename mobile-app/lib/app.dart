@@ -232,7 +232,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
       // happens when the JS bundle first evaluates. The UA is set at WebView
       // config time and is in navigator.userAgent from the very first JS
       // execution. The web app checks /ConcordiaNative/ in session-store.ts.
-      ..setUserAgent('ConcordiaNative/4.6.6 (Linux; Android) WebView')
+      ..setUserAgent('ConcordiaNative/4.6.7 (Linux; Android) WebView')
       ..setBackgroundColor(Colors.white)
       // JavaScript channel the web app uses to REQUEST the FCM token on demand.
       // The web app posts a message with a unique request id; we respond by
@@ -355,7 +355,7 @@ class _SplashToWebViewState extends State<SplashToWebView>
               window.concordiaNative.isNativeApp = true;
               // KEEP IN SYNC with pubspec.yaml `version:` field.
               // (Read at build time by GitHub Actions when building the APK.)
-              window.concordiaNative.appVersion = "4.6.6";
+              window.concordiaNative.appVersion = "4.6.7";
               (function() {
                 var pending = window.__concordiaFcmPending || (window.__concordiaFcmPending = {});
                 var resolvers = window.__concordiaFcmResolvers || (window.__concordiaFcmResolvers = {});

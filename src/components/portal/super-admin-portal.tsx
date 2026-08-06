@@ -70,6 +70,7 @@ import {
   Loader2, Lock, Unlock, Edit, KeyRound, Trash2, ChevronRight, AlertCircle,
   Inbox, BookOpen, Send, TrendingUp, Crown,
   ShieldCheck, ShieldOff, Ban, Power, MapPin, Layers,
+  DatabaseZap, AlertTriangle,
 } from 'lucide-react';
 import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
 import { DEPARTMENTS } from './shared/concordia-hierarchy';
@@ -350,6 +351,77 @@ function SuperAdminDashboard({
   const [finance, setFinance] = useState<any>(null);
   const [branches, setBranches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ── Purge Test Data dialog state ──
+  // Destructive, irreversible operation: wipes ALL test students, teachers,
+  // sessions, notifications, attendance, results, fees, documents, etc.
+  // while preserving institutes, branches, office-staff accounts, classes,
+  // courses, fee_structure, and exams. Used to reset the platform to a
+  // clean state before delivering it to a real customer.
+  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purging, setPurging] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<any>(null);
+
+  const openPurgeDialog = () => {
+    setPurgeConfirmText('');
+    setPurgeResult(null);
+    setPurgeDialogOpen(true);
+  };
+
+  const cancelPurgeDialog = () => {
+    setPurgeDialogOpen(false);
+    setPurgeConfirmText('');
+    setPurgeResult(null);
+  };
+
+  const confirmPurge = async () => {
+    // Require exact typed confirmation to prevent accidents.
+    if (purgeConfirmText.trim() !== 'PURGE ALL DATA') {
+      toast({
+        title: 'Confirmation phrase does not match',
+        description: 'Type "PURGE ALL DATA" exactly to confirm.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setPurging(true);
+    try {
+      const result = await api.purgeTestData();
+      setPurgeResult(result);
+      toast({
+        title: 'Test data purged',
+        description: 'All test students, teachers, sessions, notifications and related records have been permanently removed.',
+      });
+      // Reload dashboard so KPIs reflect the wiped state.
+      setOverview(null);
+      setUsers([]);
+      setAnnouncements([]);
+      setLoading(true);
+      Promise.all([
+        api.platformOverview().catch(() => null),
+        api.platformUsers({}).catch(() => []),
+        api.getAnnouncements().catch(() => []),
+        api.getPlatformFinance().catch(() => null),
+        api.branches().catch(() => []),
+      ]).then(([o, u, a, f, b]) => {
+        setOverview(o);
+        setUsers(Array.isArray(u) ? u : []);
+        setAnnouncements(Array.isArray(a) ? a.slice(0, 5) : []);
+        setFinance(f);
+        setBranches(Array.isArray(b) ? b : []);
+        setLoading(false);
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Purge failed',
+        description: e?.message || 'Could not purge test data. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPurging(false);
+    }
+  };
 
   const firstName = (user?.name || 'Owner').split(' ')[0];
 
@@ -818,6 +890,153 @@ function SuperAdminDashboard({
           );
         })()}
       </div>
+
+      {/* ── Danger Zone — Purge Test Data ── */}
+      {/* destructive, irreversible. Wipes ALL test students/teachers/sessions/
+          notifications/attendance/results/fees/documents/salaries/etc. while
+          preserving institutes, branches, classes, courses, fee_structure,
+          exams, and office-staff accounts. */}
+      <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 shrink-0 rounded-xl bg-rose-100 grid place-items-center">
+              <AlertTriangle className="h-5 w-5 text-rose-600" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-rose-700">
+                Danger Zone
+              </div>
+              <h3 className="text-base font-bold text-gray-900 mt-0.5">
+                Purge all test data
+              </h3>
+              <p className="text-xs text-gray-600 mt-1 max-w-xl">
+                Permanently deletes every test student, teacher, login session,
+                notification, attendance record, result, fee, invoice, document,
+                salary payment, and timetable entry. Preserves colleges,
+                departments, office-staff accounts, classes, courses, fee
+                templates, and exam definitions. Use before delivering the
+                platform to a real customer.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={openPurgeDialog}
+            className="shrink-0 rounded-lg h-10 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors text-white bg-rose-600 hover:bg-rose-700"
+          >
+            <DatabaseZap className="h-4 w-4" /> Purge Test Data
+          </button>
+        </div>
+      </div>
+
+      {/* ── Purge confirmation dialog ── */}
+      {/* Requires the user to type "PURGE ALL DATA" exactly. Shows a live
+          result panel after the operation completes so the caller can verify
+          what was deleted. */}
+      {purgeDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={cancelPurgeDialog}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 animate-in fade-in-0 zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="h-11 w-11 shrink-0 rounded-xl bg-rose-50 grid place-items-center">
+                <AlertTriangle className="h-5 w-5 text-rose-600" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-gray-900">
+                  Purge all test data?
+                </h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  This will permanently remove everything listed below.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-md bg-rose-50 border border-rose-100 px-3 py-2.5 mb-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-700 mb-1.5">
+                This will permanently delete
+              </p>
+              <ul className="text-xs text-rose-800 space-y-0.5">
+                <li>• All student accounts (every test student)</li>
+                <li>• All teacher accounts (every test teacher)</li>
+                <li>• Every active login session (everyone must sign in again)</li>
+                <li>• All in-app notifications + FCM device tokens</li>
+                <li>• All attendance, results, and report cards</li>
+                <li>• All fees, invoices, misc charges, and salaries</li>
+                <li>• All student documents, events, and announcements</li>
+                <li>• All timetables and date sheets</li>
+              </ul>
+              <p className="text-[11px] text-rose-700 mt-2 font-semibold uppercase tracking-wider">
+                Preserved
+              </p>
+              <ul className="text-xs text-emerald-700 space-y-0.5 mt-1">
+                <li>• Colleges, departments, classes, courses, fee templates, exams</li>
+                <li>• Office-staff accounts (admin / admissions / accountant / academic)</li>
+                <li>• Super-admin account (you stay logged in)</li>
+              </ul>
+              <p className="text-[11px] text-rose-700 mt-2 font-medium">
+                This action cannot be undone.
+              </p>
+            </div>
+
+            {purgeResult ? (
+              <div className="rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 mb-1.5">
+                  Purge complete
+                </p>
+                <ul className="text-xs text-emerald-800 space-y-0.5">
+                  <li>• {purgeResult.purged?.students ?? 0} students removed</li>
+                  <li>• {purgeResult.purged?.teachers ?? 0} teachers removed</li>
+                  <li>• {purgeResult.purged?.sessions ?? 0} login sessions cleared</li>
+                  <li>• {purgeResult.purged?.notifications ?? 0} notifications cleared</li>
+                  <li>• {purgeResult.purged?.attendance ?? 0} attendance records removed</li>
+                  <li>• {purgeResult.purged?.results ?? 0} results removed</li>
+                  <li>• {purgeResult.purged?.fees ?? 0} fees removed</li>
+                  <li>• {purgeResult.purged?.fee_invoices ?? 0} invoices removed</li>
+                  <li>• {purgeResult.purged?.student_documents ?? 0} documents removed</li>
+                  <li>• {purgeResult.purged?.report_cards ?? 0} report cards removed</li>
+                </ul>
+              </div>
+            ) : (
+              <Field
+                label={`Type the confirmation phrase to proceed`}
+                hint={`Exactly: PURGE ALL DATA`}
+              >
+                <Input
+                  value={purgeConfirmText}
+                  onChange={(e) => setPurgeConfirmText(e.target.value)}
+                  placeholder="PURGE ALL DATA"
+                  className={inputCls}
+                  autoFocus
+                  disabled={purging}
+                />
+              </Field>
+            )}
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button onClick={cancelPurgeDialog} className={btnSecondary} disabled={purging}>
+                {purgeResult ? 'Close' : 'Cancel'}
+              </button>
+              {!purgeResult && (
+                <button
+                  onClick={confirmPurge}
+                  disabled={purging || purgeConfirmText.trim() !== 'PURGE ALL DATA'}
+                  className={cn(
+                    'rounded-lg h-9 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-white bg-rose-600 hover:bg-rose-700',
+                    purgeConfirmText.trim() !== 'PURGE ALL DATA' && 'opacity-50 cursor-not-allowed',
+                  )}
+                >
+                  {purging && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <DatabaseZap className="h-4 w-4" /> Purge Permanently
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
