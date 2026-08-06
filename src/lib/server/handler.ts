@@ -682,9 +682,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       await db.execute({ sql: 'DELETE FROM sessions WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM device_tokens WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM notification_preferences WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
-      await db.execute({ sql: 'DELETE FROM notifications WHERE instituteId = ?', args: [instId] });
+      // notifications has no instituteId column — scope by userId.
+      await db.execute({ sql: 'DELETE FROM notifications WHERE userId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM teacher_class_courses WHERE teacherId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
-      await db.execute({ sql: 'DELETE FROM course_materials WHERE teacherId IN (SELECT id FROM users WHERE instituteId = ?)', args: [instId] });
+      // NOTE: course_materials + diary tables were intentionally DROPPED
+      // in db.ts CLEANUP_DROP_TABLES (legacy unused tables). Do NOT
+      // reference them here — they no longer exist at runtime.
       await db.execute({ sql: 'DELETE FROM teacher_salaries WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM salary_payments WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM student_documents WHERE instituteId = ?', args: [instId] });
@@ -700,7 +703,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       await db.execute({ sql: 'DELETE FROM exams WHERE instituteId = ?', args: [instId] });
       await db.execute({ sql: 'DELETE FROM attendance WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM results WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
-      await db.execute({ sql: 'DELETE FROM diary WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
+      // NOTE: diary table was intentionally DROPPED — see comment above.
       await db.execute({ sql: 'DELETE FROM timetable WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
       await db.execute({ sql: 'DELETE FROM class_courses WHERE classId IN (SELECT id FROM classes WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?))', args: [instId] });
       await db.execute({ sql: 'DELETE FROM classes WHERE branchId IN (SELECT id FROM branches WHERE instituteId = ?)', args: [instId] });
@@ -769,10 +772,11 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const brId = pathSegments[1];
       await db.execute({ sql: 'DELETE FROM sessions WHERE userId IN (SELECT id FROM users WHERE branchId = ?)', args: [brId] });
       await db.execute({ sql: 'DELETE FROM teacher_class_courses WHERE teacherId IN (SELECT id FROM users WHERE branchId = ?)', args: [brId] });
-      await db.execute({ sql: 'DELETE FROM course_materials WHERE teacherId IN (SELECT id FROM users WHERE branchId = ?)', args: [brId] });
+      // NOTE: course_materials + diary tables were intentionally DROPPED
+      // in db.ts CLEANUP_DROP_TABLES (legacy unused tables). Do NOT
+      // reference them — they no longer exist at runtime.
       await db.execute({ sql: 'DELETE FROM attendance WHERE branchId = ?', args: [brId] });
       await db.execute({ sql: 'DELETE FROM results WHERE branchId = ?', args: [brId] });
-      await db.execute({ sql: 'DELETE FROM diary WHERE branchId = ?', args: [brId] });
       await db.execute({ sql: 'DELETE FROM class_courses WHERE classId IN (SELECT id FROM classes WHERE branchId = ?)', args: [brId] });
       await db.execute({ sql: 'DELETE FROM classes WHERE branchId = ?', args: [brId] });
       await db.execute({ sql: 'DELETE FROM courses WHERE branchId = ?', args: [brId] });
@@ -1110,8 +1114,9 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         await safe('UPDATE timetable SET teacherId = NULL, teacherName = ? WHERE teacherId = ?', ['(deleted)', target.id]);
         // Hard-delete rows the teacher authored/owns.
         await safe('DELETE FROM teacher_class_courses WHERE teacherId = ?', [target.id]);
-        await safe('DELETE FROM course_materials WHERE teacherId = ?', [target.id]);
-        await safe('DELETE FROM diary WHERE teacherId = ?', [target.id]);
+        // NOTE: course_materials + diary tables were intentionally DROPPED
+        // in db.ts CLEANUP_DROP_TABLES — skip them (safe() swallows errors
+        // but there's no point issuing DELETEs against non-existent tables).
         await safe('DELETE FROM salary_payments WHERE teacherId = ?', [target.id]);
         await safe('DELETE FROM teacher_salaries WHERE teacherId = ?', [target.id]);
         await safe('DELETE FROM attendance WHERE teacherId = ?', [target.id]);

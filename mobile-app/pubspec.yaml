@@ -1,7 +1,7 @@
 name: concordia_college
 description: Concordia College — Management Portal mobile app. 100% identical to the web app's mobile preview.
 publish_to: 'none'
-version: 4.6.5+26
+version: 4.6.6+27
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -29,6 +29,14 @@ dependencies:
   # ── v4.5.0: Shared preferences (for persisting "has prompted" flags so we
   #    don't nag the user about Auto-start / battery optimization every launch) ──
   shared_preferences: ^2.2.2
+
+  # ── v4.6.6: File download/preview support for student documents ──
+  #    path_provider gives us a writable temp directory to stage files.
+  #    share_plus opens the Android share sheet so the user can save the
+  #    file to Downloads, share it via WhatsApp, or open it with any
+  #    installed viewer (Photos, PDF reader, Office, etc.).
+  path_provider: ^2.1.4
+  share_plus: ^7.2.2
 
 dev_dependencies:
   flutter_test:
