@@ -91,16 +91,34 @@ export function LoginPage() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden">
-      {/* ─── Full-page campus photograph — covers the entire viewport ─── */}
+      {/* ─── Full-page campus photograph — cleaned + aesthetic CSS treatment ───
+          v4.7.8: The source image is the sharp-processed "cleaned" version
+          (richer colours, softened clutter). On top, a CSS blur(2px) +
+          brightness/contrast/saturate filter creates the premium
+          glassmorphism background look — cluttered details (cars, poles,
+          patchy grass) dissolve into a clean, aesthetic backdrop while the
+          building shapes stay recognisable. The college itself is unchanged. */}
       <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: 'url(/concordia-campus.jpg)' }}
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105"
+        style={{
+          backgroundImage: 'url(/concordia-campus-cleaned.jpg)',
+          filter: 'blur(2px) brightness(0.92) contrast(1.08) saturate(1.12)',
+        }}
       />
       {/* v4.1.0: Theme toggle REMOVED — default light theme is the intended design. */}
-      {/* Barely-there gradient — only the far-left edge is darkened slightly
-          so the white login card has enough contrast. Campus photo stays
-          bright everywhere else. */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-black/5 to-transparent" />
+      {/* v4.7.8: Refined gradient overlays — a soft aesthetic wash that
+          enhances the premium glass look while keeping the campus visible.
+          Left side gets a subtle darkening for card contrast; right side
+          stays brighter with a warm tint for an inviting, polished mood. */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/25 via-black/8 to-black/15" />
+      {/* Subtle warm tint overlay for an aesthetic, cohesive mood */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(242, 101, 34, 0.06) 0%, transparent 40%, rgba(15, 118, 110, 0.05) 100%)',
+        }}
+      />
       {/* Bottom vignette so the copyright + bottom-right FaQ card read clearly */}
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/55 to-transparent" />
 
