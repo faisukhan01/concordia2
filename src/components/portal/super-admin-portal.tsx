@@ -70,7 +70,7 @@ import {
   Loader2, Lock, Unlock, Edit, KeyRound, Trash2, ChevronRight, AlertCircle,
   Inbox, BookOpen, Send, TrendingUp, Crown,
   ShieldCheck, ShieldOff, Ban, Power, MapPin, Layers,
-  DatabaseZap, AlertTriangle,
+  DatabaseZap, AlertTriangle, Download, Database,
 } from 'lucide-react';
 import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
 import { DEPARTMENTS } from './shared/concordia-hierarchy';
@@ -362,6 +362,55 @@ function SuperAdminDashboard({
   const [purgeConfirmText, setPurgeConfirmText] = useState('');
   const [purging, setPurging] = useState(false);
   const [purgeResult, setPurgeResult] = useState<any>(null);
+
+  // ── Database Backup state ──
+  // Downloads a full JSON snapshot of every table + every row in the
+  // database. Saved as a .json file the super admin can keep on their
+  // laptop / Google Drive as a point-in-time backup.
+  const [backingUp, setBackingUp] = useState(false);
+  const [dbHealth, setDbHealth] = useState<any>(null);
+
+  const downloadBackup = async () => {
+    setBackingUp(true);
+    try {
+      const blob = await api.dbBackup();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `concordia-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({
+        title: 'Backup downloaded',
+        description: 'A full JSON snapshot of the database has been saved to your downloads folder.',
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Backup failed',
+        description: e?.message || 'Could not download the backup. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const checkDbHealth = async () => {
+    try {
+      const h = await api.dbHealth();
+      setDbHealth(h);
+    } catch {
+      setDbHealth({ status: 'unhealthy' });
+    }
+  };
+
+  useEffect(() => {
+    checkDbHealth();
+    const interval = setInterval(checkDbHealth, 60000); // refresh every 60s
+    return () => clearInterval(interval);
+  }, []);
 
   const openPurgeDialog = () => {
     setPurgeConfirmText('');
@@ -889,6 +938,61 @@ function SuperAdminDashboard({
             </ul>
           );
         })()}
+      </div>
+
+      {/* ── Database Backup & Health ── */}
+      {/* One-click JSON backup of the entire database + live health badge. */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 shrink-0 rounded-xl bg-[#FFF4ED] grid place-items-center">
+              <Database className="h-5 w-5 text-[#F26522]" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#F26522]">
+                  Database
+                </div>
+                {dbHealth && (
+                  <span className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                    dbHealth.status === 'healthy'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-rose-50 text-rose-700'
+                  )}>
+                    <span className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      dbHealth.status === 'healthy' ? 'bg-emerald-500' : 'bg-rose-500'
+                    )} />
+                    {dbHealth.status === 'healthy' ? 'Connected' : 'Offline'}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-base font-bold text-gray-900 mt-0.5">
+                Download database backup
+              </h3>
+              <p className="text-xs text-gray-600 mt-1 max-w-xl">
+                Exports every table and every row as a JSON file. Save it to
+                your laptop or Google Drive as a point-in-time snapshot. If
+                anything ever happens to the database, you can restore from
+                this file.
+                {dbHealth?.status === 'healthy' && (
+                  <span className="text-gray-400 ml-1">
+                    ({dbHealth.tables} tables · {dbHealth.users} users · {dbHealth.latencyMs}ms)
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={downloadBackup}
+            disabled={backingUp}
+            className="shrink-0 rounded-lg h-10 px-4 text-sm font-medium inline-flex items-center gap-1.5 transition-colors text-white bg-[#F26522] hover:bg-[#D4541E] disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {backingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {backingUp ? 'Backing up...' : 'Download Backup'}
+          </button>
+        </div>
       </div>
 
       {/* ── Danger Zone — Purge Test Data ── */}

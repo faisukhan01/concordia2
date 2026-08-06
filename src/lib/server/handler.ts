@@ -4204,6 +4204,95 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
     }
 
+    // ===================== ADMIN: DATABASE BACKUP =====================
+    // Super-admin-only endpoint that exports the ENTIRE database as a JSON
+    // file. Every table + every row is included. The response is a
+    // downloadable .json file the super admin can save to their laptop /
+    // Google Drive as a point-in-time backup.
+    //
+    // To restore: import the JSON back via a script that INSERTs each row.
+    // (This is a manual process — the backup is primarily for disaster
+    // recovery, not automated replication.)
+    if (method === 'GET' && path === 'admin/db-backup') {
+      const user = await requireAuth(req);
+      requireRole(user, 'super-admin');
+
+      // List all user tables (exclude sqlite internal tables).
+      const tablesResult = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name"
+      );
+      const tableNames = tablesResult.rows.map((r: any) => r.name);
+
+      // Dump every table's rows.
+      const dump: Record<string, any[]> = {};
+      for (const name of tableNames) {
+        try {
+          const rows = await db.execute(`SELECT * FROM "${name}"`);
+          dump[name] = rows.rows.map((r: any) => {
+            // Convert typed values to plain JS for JSON serialization.
+            const obj: Record<string, any> = {};
+            for (const col of rows.columns) {
+              obj[col] = r[col];
+            }
+            return obj;
+          });
+        } catch {
+          dump[name] = [];
+        }
+      }
+
+      const backup = {
+        metadata: {
+          exportedAt: new Date().toISOString(),
+          exportedBy: user.email,
+          tableCount: tableNames.length,
+          totalRows: Object.values(dump).reduce((sum, rows) => sum + rows.length, 0),
+          version: '4.6.7',
+        },
+        tables: dump,
+      };
+
+      // Return as a downloadable JSON file.
+      const jsonStr = JSON.stringify(backup, null, 2);
+      const filename = `concordia-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      return new NextResponse(jsonStr, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    // ===================== ADMIN: DATABASE HEALTH =====================
+    // Super-admin-only endpoint that reports the health of the database
+    // connection — useful for the dashboard status badge.
+    if (method === 'GET' && path === 'admin/db-health') {
+      const user = await requireAuth(req);
+      requireRole(user, 'super-admin');
+      try {
+        const start = Date.now();
+        await db.execute('SELECT 1');
+        const latency = Date.now() - start;
+        const tables = await db.execute("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'");
+        const users = await db.execute("SELECT COUNT(*) AS n FROM users");
+        return NextResponse.json({
+          status: 'healthy',
+          latencyMs: latency,
+          tables: tables.rows[0].n,
+          users: users.rows[0].n,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (e: any) {
+        return NextResponse.json({
+          status: 'unhealthy',
+          error: e.message,
+          timestamp: new Date().toISOString(),
+        }, { status: 503 });
+      }
+    }
+
     // ===================== FALLBACK =====================
     return NextResponse.json({ error: 'Not found', method, path }, { status: 404 });
   } catch (err: any) {
