@@ -12,7 +12,7 @@ dependencies:
 
   # ── WebView (core — wraps the web app for pixel-perfect match) ──
   webview_flutter: ^4.9.0
-  webview_flutter_android: ^3.16.0
+  webview_flutter_android: ^4.13.0
   webview_flutter_wkwebview: ^3.13.0
 
   # ── URL launcher ──
