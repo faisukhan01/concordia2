@@ -16,7 +16,7 @@ dependencies:
   webview_flutter_wkwebview: ^3.13.0
 
   # ── URL launcher ──
-  url_launcher: ^6.2.2
+  url_launcher: ^6.3.2
 
   # ── Icons ──
   cupertino_icons: ^1.0.6
