@@ -430,8 +430,8 @@ export const api = {
   createClassSection: (classId: string, section?: string) =>
     request<any>(`classes/${classId}/sections`, { method: 'POST', body: JSON.stringify({ section }) }),
   // Delete a section (only allowed when it has no students assigned and is not the only section for that class)
-  deleteClassSection: (classId: string) =>
-    request<any>(`classes/${classId}`, { method: 'DELETE' }),
+  deleteClassSection: async (classId: string) => { const r = await request<any>(`classes/${classId}`, { method: 'DELETE' }); invalidateCache(); return r; },
+  renameClassSection: async (classId: string, section: string) => { const r = await request<any>(`classes/${classId}`, { method: 'PATCH', body: JSON.stringify({ section }) }); invalidateCache(); return r; },
   // teacher & student scoped
   getTeacherClasses: () => cachedGet<any[]>('teacher/classes'),
   getStudentCourses: () => cachedGet<any[]>('student/courses'),

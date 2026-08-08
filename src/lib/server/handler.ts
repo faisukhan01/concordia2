@@ -1648,6 +1648,31 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ id: newId, branchId: parentClass.branchId, name: parentClass.name, section, courseCount: parentCourses.rows.length }, { status: 201 });
     }
 
+    // Rename a section (Accountant Classes & Sections → edit). Updates the
+    // class row's section letter AND syncs every student in that section.
+    if (method === 'PATCH' && pathSegments[0] === 'classes' && pathSegments.length === 2) {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin');
+      const id = pathSegments[1];
+      const clsR = await db.execute({ sql: 'SELECT * FROM classes WHERE id = ?', args: [id] });
+      if (clsR.rows.length === 0) return NextResponse.json({ error: 'Class not found' }, { status: 404 });
+      const c = clsR.rows[0] as any;
+      const newSec = String((body?.section || '')).trim().toUpperCase();
+      if (!newSec) return NextResponse.json({ error: 'Section name is required' }, { status: 400 });
+      const dup = await db.execute({
+        sql: "SELECT id FROM classes WHERE branchId = ? AND name = ? AND COALESCE(part,'1') = ? AND UPPER(section) = ? AND id != ?",
+        args: [c.branchId, c.name, String(c.part || '1'), newSec, id],
+      });
+      if (dup.rows.length > 0) return NextResponse.json({ error: `Section "${newSec}" already exists for this program/part` }, { status: 409 });
+      const oldSec = c.section;
+      await db.execute({ sql: 'UPDATE classes SET section = ? WHERE id = ?', args: [newSec, id] });
+      await db.execute({
+        sql: "UPDATE users SET section = ? WHERE class = ? AND section = ? AND branchId = ? AND role = 'student'",
+        args: [newSec, c.name, oldSec, c.branchId],
+      });
+      return NextResponse.json({ success: true, section: newSec });
+    }
+
     if (method === 'DELETE' && pathSegments[0] === 'classes' && pathSegments.length === 2) {
       const user = await requireAuth(req);
       requireRole(user, 'branch-manager', 'institute-admin');

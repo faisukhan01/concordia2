@@ -809,35 +809,75 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// CLASSES & SECTIONS (Accountant) — create the sections per program that
-// students are assigned to during New Enrollments. New students are Part 1.
+// CLASSES & SECTIONS (Accountant) — create/rename/delete the sections per
+// program that students are assigned to during New Enrollments (Part 1).
 // ═══════════════════════════════════════════════════════════════════════
+function SectionChip({ row, onRename, onDelete }: {
+  row: { id: string; section: string };
+  onRename: (id: string, s: string) => Promise<void>;
+  onDelete: (id: string, s: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(row.section);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    const v = val.trim().toUpperCase();
+    if (!v || v === row.section) { setEditing(false); setVal(row.section); return; }
+    setBusy(true);
+    try { await onRename(row.id, v); setEditing(false); } finally { setBusy(false); }
+  };
+  const del = async () => {
+    if (typeof window !== 'undefined' && !window.confirm(`Delete Section ${row.section}? Students in it will be unassigned.`)) return;
+    setBusy(true);
+    try { await onDelete(row.id, row.section); } finally { setBusy(false); }
+  };
+
+  if (editing) {
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#F26522]/40 bg-white px-2 py-1.5 shadow-sm">
+        <Input value={val} onChange={(e) => setVal(e.target.value)} maxLength={4} className={`${inputCls} h-8 w-20`} autoFocus onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+        <button onClick={save} disabled={busy} title="Save" className="text-emerald-600 hover:text-emerald-700 p-1">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}</button>
+        <button onClick={() => { setEditing(false); setVal(row.section); }} className="text-xs text-gray-400 hover:text-gray-600 px-1">Cancel</button>
+      </div>
+    );
+  }
+  return (
+    <div className="group inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm hover:border-[#F26522]/40 hover:shadow transition-all">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F26522]/10 text-[#F26522] text-sm font-bold">{row.section}</span>
+      <span className="text-sm font-medium text-gray-800">Section {row.section}</span>
+      <div className="flex items-center gap-0.5 ml-1 opacity-60 group-hover:opacity-100 transition-opacity">
+        <button onClick={() => { setVal(row.section); setEditing(true); }} title="Rename" className="p-1 rounded-md text-gray-400 hover:text-[#F26522] hover:bg-[#F26522]/10"><Pencil className="h-3.5 w-3.5" /></button>
+        <button onClick={del} disabled={busy} title="Delete" className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
+      </div>
+    </div>
+  );
+}
+
 function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
   const [dept, setDept] = useState<string | null>(null);
   const [part, setPart] = useState<'1' | '2'>('1');
   const [newSection, setNewSection] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const sections = useMemo(() => {
-    if (!dept) return [];
-    return (classes || [])
-      .filter((c: any) => (c.program || '').trim() === dept && String(c.part || '1') === part && c.section)
-      .map((c: any) => String(c.section).toUpperCase())
-      .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i)
-      .sort();
+  // Section rows (id + letter) for the selected program + part, deduped.
+  const sectionRows = useMemo(() => {
+    if (!dept) return [] as { id: string; section: string }[];
+    const seen = new Set<string>();
+    const out: { id: string; section: string }[] = [];
+    for (const c of (classes || [])) {
+      if ((c.program || '').trim() === dept && String(c.part || '1') === part && c.section) {
+        const s = String(c.section).toUpperCase();
+        if (!seen.has(s)) { seen.add(s); out.push({ id: c.id, section: s }); }
+      }
+    }
+    return out.sort((a, b) => a.section.localeCompare(b.section));
   }, [classes, dept, part]);
-
-  const countByDept = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const d of DEPARTMENTS) m[d] = 0;
-    for (const c of (classes || [])) { const p = (c.program || '').trim(); if (m[p] != null && c.section) m[p] += 1; }
-    return m;
-  }, [classes]);
 
   const addSection = async () => {
     const sec = newSection.trim().toUpperCase();
     if (!sec) { toast({ title: 'Enter a section letter', variant: 'destructive' }); return; }
-    if (sections.includes(sec)) { toast({ title: 'Section already exists', variant: 'destructive' }); return; }
+    if (sectionRows.some((r) => r.section === sec)) { toast({ title: 'Section already exists', variant: 'destructive' }); return; }
     setSaving(true);
     try {
       await api.createClass(dept!, sec, user?.branchId, dept!, part);
@@ -849,6 +889,15 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
     } finally { setSaving(false); }
   };
 
+  const renameSection = async (id: string, s: string) => {
+    try { await api.renameClassSection(id, s); toast({ title: 'Section renamed', description: `Section ${s}` }); onRefresh(); }
+    catch (e: any) { toast({ title: 'Rename failed', description: e?.message, variant: 'destructive' }); }
+  };
+  const deleteSection = async (id: string, s: string) => {
+    try { await api.deleteClassSection(id); toast({ title: 'Section deleted', description: `Section ${s}` }); onRefresh(); }
+    catch (e: any) { toast({ title: 'Delete failed', description: e?.message, variant: 'destructive' }); }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader title="Classes & Sections" subtitle="Create the sections for each program. Students are assigned to these sections during New Enrollments (new students are Part 1)." />
@@ -858,7 +907,7 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-32 rounded-2xl bg-gray-100 animate-pulse" />)}</div>
           ) : (
-            <DeptCardGrid onSelect={(d) => setDept(d)} studentCounts={countByDept} />
+            <DeptCardGrid onSelect={(d) => setDept(d)} />
           )}
         </div>
       ) : (
@@ -869,22 +918,24 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
             <span className="font-semibold text-gray-900">{deptLabel(dept)}</span>
           </div>
           <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
-          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Sections in {deptLabel(dept)} · Part {part}</p>
-            {sections.length === 0 ? (
-              <p className="text-sm text-gray-500">No sections yet — add one below.</p>
+            {sectionRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">No sections yet — add one below.</div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {sections.map((s: string) => (<span key={s} className="inline-flex items-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm font-medium text-gray-800">Section {s}</span>))}
+              <div className="flex flex-wrap gap-2.5">
+                {sectionRows.map((r) => (
+                  <SectionChip key={r.id} row={r} onRename={renameSection} onDelete={deleteSection} />
+                ))}
               </div>
             )}
-            <div className="flex items-end gap-2 pt-2 border-t border-gray-100">
-              <div className="w-32">
+            <div className="flex items-end gap-2 pt-3 border-t border-gray-100">
+              <div className="w-40">
                 <label className="block text-[11px] text-gray-500 mb-1">New section</label>
-                <Input value={newSection} onChange={(e) => setNewSection(e.target.value)} maxLength={3} placeholder="A" className={inputCls} />
+                <Input value={newSection} onChange={(e) => setNewSection(e.target.value)} maxLength={4} placeholder="A" className={inputCls} onKeyDown={(e) => { if (e.key === 'Enter') addSection(); }} />
               </div>
               <Button onClick={addSection} disabled={saving} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-10">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span className="ml-1.5">Add Section</span>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}<span className="ml-1.5">Add Section</span>
               </Button>
             </div>
           </div>
