@@ -475,9 +475,21 @@ function computeInstallmentPlan(baseFee: number): number[] {
   return [fixed + firstThird, each, each];
 }
 
-function ProcessEnrollmentCard({ student, allStudents, invoices, user, onStudentUpdate, onRefresh, onClose }: any) {
+function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, onStudentUpdate, onRefresh, onClose }: any) {
+  // Sections available for this student's program (Part 1) — created by the
+  // Accountant on the Classes & Sections page.
+  const sectionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of (classes || [])) {
+      if ((c.program || '').trim() === (student.program || '').trim() && String(c.part || '1') === '1' && c.section) {
+        set.add(String(c.section).toUpperCase());
+      }
+    }
+    return Array.from(set).sort();
+  }, [classes, student.program]);
+
   const [rollNo, setRollNo] = useState(student.rollNo || '');
-  const [section, setSection] = useState(student.section || 'A');
+  const [section, setSection] = useState(student.section || sectionOptions[0] || '');
   const [savingPlacement, setSavingPlacement] = useState(false);
   const [placementSaved, setPlacementSaved] = useState(!!(student.rollNo && student.section));
   const [amounts, setAmounts] = useState<number[]>(computeInstallmentPlan(student.baseFee));
@@ -578,15 +590,27 @@ function ProcessEnrollmentCard({ student, allStudents, invoices, user, onStudent
             <Input value={rollNo} onChange={(e) => setRollNo(e.target.value)} placeholder="e.g. 1024" className={`${inputCls} ${rollTaken ? 'border-red-400' : ''}`} />
             {rollTaken && <p className="text-[11px] text-red-500 mt-1">This roll number already exists.</p>}
           </div>
-          <div className="w-24">
-            <label className="block text-[11px] text-gray-500 mb-1">Section</label>
-            <Input value={section} onChange={(e) => setSection(e.target.value)} maxLength={3} placeholder="A" className={inputCls} />
+          <div className="w-40">
+            <label className="block text-[11px] text-gray-500 mb-1">Section (Part 1)</label>
+            {sectionOptions.length === 0 ? (
+              <div className={`${inputCls} flex items-center text-xs text-amber-600`}>No sections yet</div>
+            ) : (
+              <Select value={section} onValueChange={setSection}>
+                <SelectTrigger className={inputCls}><SelectValue placeholder="Select section" /></SelectTrigger>
+                <SelectContent>
+                  {sectionOptions.map((s: string) => <SelectItem key={s} value={s}>Section {s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
           </div>
-          <Button onClick={savePlacement} disabled={savingPlacement || rollTaken} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-10">
+          <Button onClick={savePlacement} disabled={savingPlacement || rollTaken || !section} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-10">
             {savingPlacement ? <Loader2 className="h-4 w-4 animate-spin" /> : (placementSaved ? <CheckCircle2 className="h-4 w-4" /> : null)}
             <span className="ml-1.5">{placementSaved ? 'Update' : 'Assign'}</span>
           </Button>
         </div>
+        {sectionOptions.length === 0 && (
+          <p className="text-[11px] text-amber-600">Create sections for {deptLabel(student.program)} on the <span className="font-semibold">Classes &amp; Sections</span> page first.</p>
+        )}
       </div>
 
       {/* Step 2 — Fee installments */}
@@ -657,12 +681,16 @@ function ProcessEnrollmentCard({ student, allStudents, invoices, user, onStudent
   );
 }
 
-function NewEnrollmentsView({ user, students, invoices, loading, onRefresh, onStudentUpdate }: any) {
+function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefresh, onStudentUpdate }: any) {
   const [dept, setDept] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // "New enrollments" = students who don't have a login yet (awaiting processing).
-  const pending = useMemo(() => (students || []).filter((s: any) => !hasRealLogin(s)), [students]);
+  // "New enrollments" = students the Admission Office added who don't yet have
+  // a roll number (the Accountant assigns it here). New students are Part 1.
+  const pending = useMemo(
+    () => (students || []).filter((s: any) => !(s.rollNo && String(s.rollNo).trim())),
+    [students],
+  );
   const countByDept = useMemo(() => {
     const m: Record<string, number> = {};
     for (const d of DEPARTMENTS) m[d] = 0;
@@ -705,13 +733,99 @@ function NewEnrollmentsView({ user, students, invoices, loading, onRefresh, onSt
                   </button>
                   {openId === s.id && (
                     <div className="mt-2">
-                      <ProcessEnrollmentCard student={s} allStudents={students} invoices={invoices} user={user} onStudentUpdate={onStudentUpdate} onRefresh={onRefresh} onClose={() => setOpenId(null)} />
+                      <ProcessEnrollmentCard student={s} allStudents={students} classes={classes} invoices={invoices} user={user} onStudentUpdate={onStudentUpdate} onRefresh={onRefresh} onClose={() => setOpenId(null)} />
                     </div>
                   )}
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CLASSES & SECTIONS (Accountant) — create the sections per program that
+// students are assigned to during New Enrollments. New students are Part 1.
+// ═══════════════════════════════════════════════════════════════════════
+function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
+  const [dept, setDept] = useState<string | null>(null);
+  const [part, setPart] = useState<'1' | '2'>('1');
+  const [newSection, setNewSection] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const sections = useMemo(() => {
+    if (!dept) return [];
+    return (classes || [])
+      .filter((c: any) => (c.program || '').trim() === dept && String(c.part || '1') === part && c.section)
+      .map((c: any) => String(c.section).toUpperCase())
+      .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i)
+      .sort();
+  }, [classes, dept, part]);
+
+  const countByDept = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const d of DEPARTMENTS) m[d] = 0;
+    for (const c of (classes || [])) { const p = (c.program || '').trim(); if (m[p] != null && c.section) m[p] += 1; }
+    return m;
+  }, [classes]);
+
+  const addSection = async () => {
+    const sec = newSection.trim().toUpperCase();
+    if (!sec) { toast({ title: 'Enter a section letter', variant: 'destructive' }); return; }
+    if (sections.includes(sec)) { toast({ title: 'Section already exists', variant: 'destructive' }); return; }
+    setSaving(true);
+    try {
+      await api.createClass(dept!, sec, user?.branchId, dept!, part);
+      toast({ title: 'Section created', description: `${deptLabel(dept)} · Part ${part} · Section ${sec}` });
+      setNewSection('');
+      onRefresh();
+    } catch (e: any) {
+      toast({ title: 'Failed to create section', description: e?.message, variant: 'destructive' });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Classes & Sections" subtitle="Create the sections for each program. Students are assigned to these sections during New Enrollments (new students are Part 1)." />
+      {!dept ? (
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900 mb-3">Select a program</h2>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-32 rounded-2xl bg-gray-100 animate-pulse" />)}</div>
+          ) : (
+            <DeptCardGrid onSelect={(d) => setDept(d)} studentCounts={countByDept} />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-sm">
+            <button onClick={() => setDept(null)} className="text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> All programs</button>
+            <ChevronRight className="h-3.5 w-3.5 text-gray-300" />
+            <span className="font-semibold text-gray-900">{deptLabel(dept)}</span>
+          </div>
+          <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Sections in {deptLabel(dept)} · Part {part}</p>
+            {sections.length === 0 ? (
+              <p className="text-sm text-gray-500">No sections yet — add one below.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {sections.map((s: string) => (<span key={s} className="inline-flex items-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm font-medium text-gray-800">Section {s}</span>))}
+              </div>
+            )}
+            <div className="flex items-end gap-2 pt-2 border-t border-gray-100">
+              <div className="w-32">
+                <label className="block text-[11px] text-gray-500 mb-1">New section</label>
+                <Input value={newSection} onChange={(e) => setNewSection(e.target.value)} maxLength={3} placeholder="A" className={inputCls} />
+              </div>
+              <Button onClick={addSection} disabled={saving} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-10">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span className="ml-1.5">Add Section</span>
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -800,11 +914,16 @@ export function AccountantPortal({ activeModule, user }: Props) {
   if (activeModule && activeModule.includes(':')) {
     const [, modId] = activeModule.split(':', 2);
     content = <AdmissionsPortal activeModule={modId || ''} user={user} />;
+  } else if (activeModule === 'accountant-classes') {
+    content = (
+      <AccountantClassesView user={user} classes={classes} loading={loading} onRefresh={refresh} />
+    );
   } else if (activeModule === 'accountant-new') {
     content = (
       <NewEnrollmentsView
         user={user}
         students={students}
+        classes={classes}
         invoices={invoices}
         loading={loading}
         onRefresh={refresh}
