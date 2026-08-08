@@ -284,10 +284,17 @@ export async function initDB() {
     }
 
     // ── Step 2b: run column migrations (ALTER TABLE ADD COLUMN) ──
-    // Each statement is run individually — "duplicate column name" errors
-    // are silently ignored (column already exists from a prior init).
-    for (const sql of MIGRATION_STATEMENTS) {
-      try { await db.execute({ sql, args: [] }); } catch {}
+    // Batched into a single round-trip (previously 3 sequential round-trips).
+    // "duplicate column name" errors are silently ignored (column already
+    // exists from a prior init) — Turso executes the batch in a transaction
+    // so all succeed or all roll back; we catch and ignore.
+    try {
+      await db.batch(MIGRATION_STATEMENTS.map(sql => ({ sql, args: [] as any[] })));
+    } catch {
+      // Fallback: run individually (some SQLite versions reject ALTER in batch)
+      for (const sql of MIGRATION_STATEMENTS) {
+        try { await db.execute({ sql, args: [] }); } catch {}
+      }
     }
 
     // ── Step 2c: run data migrations (backfill program+part) ──
@@ -299,9 +306,18 @@ export async function initDB() {
       }
     }
 
-    // ── Step 3: seed super admin (if missing) ──
-    const existing = await db.execute({ sql: 'SELECT id FROM users WHERE role = ?', args: ['super-admin'] });
-    if (existing.rows.length === 0) {
+    // ── Step 3+4 combined: seed super admin + Concordia (if missing) ──
+    // Single query checks both at once (previously 2 sequential SELECTs).
+    const seedCheck = await db.execute({
+      sql: `SELECT
+              (SELECT COUNT(*) FROM users WHERE role = 'super-admin') as hasSuper,
+              (SELECT COUNT(*) FROM users WHERE id = 'U-CONCORDIA-ADMIN') as hasConcordia`,
+      args: [],
+    });
+    const hasSuper = (seedCheck.rows[0] as any).hasSuper > 0;
+    const hasConcordia = (seedCheck.rows[0] as any).hasConcordia > 0;
+
+    if (!hasSuper) {
       const superPwd = process.env.SEED_PASSWORD_SUPER_ADMIN || 'QaReLc_61y8';
       await db.execute({
         sql: `INSERT INTO users (id, name, email, password, role, status, title, mustChangePassword, blocked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -309,9 +325,7 @@ export async function initDB() {
       });
     }
 
-    // ── Step 4: seed Concordia institute + branch + 4 office logins (if missing) ──
-    const concordiaAdminExists = await db.execute({ sql: 'SELECT id FROM users WHERE id = ?', args: ['U-CONCORDIA-ADMIN'] });
-    if (concordiaAdminExists.rows.length === 0) {
+    if (!hasConcordia) {
       const adminPwd = process.env.SEED_PASSWORD_ADMIN || 'concordia123';
       const admissionsPwd = process.env.SEED_PASSWORD_ADMISSIONS || 'concordia123';
       const accountantPwd = process.env.SEED_PASSWORD_ACCOUNTANT || 'concordia123';
