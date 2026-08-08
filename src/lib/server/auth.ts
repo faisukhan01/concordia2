@@ -66,23 +66,31 @@ export async function createSession(user: any) {
   // expired ones are never deleted) → the Settings page shows "10 active
   // sessions" when only 1 is actually valid. We also cap at 5 most-recent
   // sessions per user to keep the list manageable.
+  //
+  // ── PERF: batch all 3 statements into a SINGLE Turso round-trip ──
+  // (previously 3 sequential round-trips = 150-600ms on login).
   try {
-    await db.execute({
-      sql: 'DELETE FROM sessions WHERE userId = ? AND expiresAt < ?',
-      args: [user.id, now],
-    });
-    // Also cap the user's session history at 5 (keep most recent).
-    await db.execute({
-      sql: `DELETE FROM sessions WHERE userId = ? AND token NOT IN (
+    await db.batch([
+      { sql: 'DELETE FROM sessions WHERE userId = ? AND expiresAt < ?', args: [user.id, now] },
+      { sql: `DELETE FROM sessions WHERE userId = ? AND token NOT IN (
         SELECT token FROM sessions WHERE userId = ? ORDER BY issuedAt DESC LIMIT 5
-      )`,
-      args: [user.id, user.id],
+      )`, args: [user.id, user.id] },
+      { sql: 'INSERT INTO sessions (token, userId, role, issuedAt, expiresAt) VALUES (?, ?, ?, ?, ?)',
+        args: [token, user.id, user.role, now, now + SESSION_TTL] },
+    ]);
+  } catch {
+    // Fallback: if batch isn't supported, run individually
+    try {
+      await db.execute({ sql: 'DELETE FROM sessions WHERE userId = ? AND expiresAt < ?', args: [user.id, now] });
+      await db.execute({ sql: `DELETE FROM sessions WHERE userId = ? AND token NOT IN (
+        SELECT token FROM sessions WHERE userId = ? ORDER BY issuedAt DESC LIMIT 5
+      )`, args: [user.id, user.id] });
+    } catch {}
+    await db.execute({
+      sql: 'INSERT INTO sessions (token, userId, role, issuedAt, expiresAt) VALUES (?, ?, ?, ?, ?)',
+      args: [token, user.id, user.role, now, now + SESSION_TTL],
     });
-  } catch {}
-  await db.execute({
-    sql: 'INSERT INTO sessions (token, userId, role, issuedAt, expiresAt) VALUES (?, ?, ?, ?, ?)',
-    args: [token, user.id, user.role, now, now + SESSION_TTL],
-  });
+  }
   return token;
 }
 
@@ -122,53 +130,59 @@ export async function requireAuth(req: Request): Promise<any> {
     throw { status: 401, error: 'Authentication required' };
   }
   const token = authHeader.substring(7);
-  const result = await db.execute({ sql: 'SELECT * FROM sessions WHERE token = ?', args: [token] });
+
+  // ── PERF: single JOINed query replaces 4 sequential round-trips ──
+  // Previously: session lookup → user lookup → institute blocked check →
+  // branch blocked check = 4 sequential Turso round-trips (200-800ms on
+  // every API call). Now: session + user + institute (with blocked flag) +
+  // branch (with blocked flag) in ONE query.
+  const result = await db.execute({
+    sql: `SELECT s.expiresAt, s.token,
+                 u.*, i.name as instituteName, i.short as instituteShort, i.blocked as instituteBlocked,
+                 b.name as branchName, b.blocked as branchBlocked
+          FROM sessions s
+          JOIN users u ON s.userId = u.id
+          LEFT JOIN institutes i ON u.instituteId = i.id
+          LEFT JOIN branches b ON u.branchId = b.id
+          WHERE s.token = ?`,
+    args: [token],
+  });
   if (result.rows.length === 0) throw { status: 401, error: 'Invalid or expired session' };
-  const session = result.rows[0] as any;
-  if (Date.now() > session.expiresAt) {
-    await db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [token] });
+  const row = result.rows[0] as any;
+
+  if (Date.now() > row.expiresAt) {
+    // Expired — fire-and-forget delete (don't block the response on it)
+    db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [token] }).catch(() => {});
     throw { status: 401, error: 'Session expired' };
   }
+
   // ── Sliding renewal (WhatsApp-style "remember me") ──
-  // If the session is within the renewal window of expiring, extend its
-  // expiresAt by the full TTL. This means an active user NEVER gets logged
-  // out by the server — only inactive users (no request for 365 days) ever
-  // see a session-expired 401. This is what keeps background FCM pushes
-  // flowing reliably: the user's session stays alive as long as they open
-  // the app occasionally.
+  // Only fires an UPDATE when within 7 days of expiry (rare), so the vast
+  // majority of requests pay ZERO extra round-trips here. Fire-and-forget
+  // so the response isn't blocked by the renewal write.
   try {
     const now = Date.now();
-    if (session.expiresAt - now < SESSION_RENEW_WINDOW) {
+    if (row.expiresAt - now < SESSION_RENEW_WINDOW) {
       const newExpiry = now + SESSION_TTL;
-      await db.execute({
+      db.execute({
         sql: 'UPDATE sessions SET expiresAt = ? WHERE token = ?',
         args: [newExpiry, token],
-      });
+      }).catch(() => {});
     }
-  } catch {
-    // non-fatal — renewal is best-effort
-  }
-  const userResult = await db.execute({
-    sql: `SELECT u.*, i.name as instituteName, i.short as instituteShort, b.name as branchName
-          FROM users u LEFT JOIN institutes i ON u.instituteId = i.id LEFT JOIN branches b ON u.branchId = b.id
-          WHERE u.id = ?`,
-    args: [session.userId],
-  });
-  if (userResult.rows.length === 0) throw { status: 401, error: 'User not found' };
-  const user = userResult.rows[0] as any;
+  } catch {}
+
+  const user = row;
   if (user.status !== 'Active' || user.blocked === 1) {
     throw { status: 403, error: 'Account is blocked or inactive' };
   }
-  // Check institute/branch blocked cascade
+  // Check institute/branch blocked cascade (from JOINed columns — no extra query)
   if (user.instituteId && user.role !== 'super-admin') {
-    const inst = await db.execute({ sql: 'SELECT blocked FROM institutes WHERE id = ?', args: [user.instituteId] });
-    if (inst.rows.length > 0 && (inst.rows[0] as any).blocked === 1) {
+    if (user.instituteBlocked === 1) {
       throw { status: 403, error: 'Institute access has been blocked' };
     }
   }
   if (user.branchId && user.role !== 'super-admin') {
-    const br = await db.execute({ sql: 'SELECT blocked FROM branches WHERE id = ?', args: [user.branchId] });
-    if (br.rows.length > 0 && (br.rows[0] as any).blocked === 1) {
+    if (user.branchBlocked === 1) {
       throw { status: 403, error: 'Branch access has been blocked' };
     }
   }

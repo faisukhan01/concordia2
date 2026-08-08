@@ -51,8 +51,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const token = (req.headers.get('authorization') || '').substring(7);
 
       try {
+        // ── PERF: single query with blocked columns JOINed in ──
+        // Previously this did user lookup + 2 extra sequential queries
+        // (institute blocked + branch blocked). Now all in one query.
         const result = await db.execute({
-          sql: `SELECT u.*, i.name as instituteName, i.short as instituteShort, b.name as branchName
+          sql: `SELECT u.*, i.name as instituteName, i.short as instituteShort,
+                       i.blocked as instituteBlocked, i.blockedReason as instituteBlockedReason,
+                       b.name as branchName, b.blocked as branchBlocked, b.blockedReason as branchBlockedReason
                 FROM users u
                 LEFT JOIN institutes i ON u.instituteId = i.id
                 LEFT JOIN branches b ON u.branchId = b.id
@@ -87,50 +92,24 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         if (u.status !== 'Active') return NextResponse.json({ error: 'Account is ' + u.status }, { status: 403 });
 
         // ── v4.6.4: COLLEGE / BRANCH / USER ACCESS BLOCK ──────────────
-        // When the Super Admin blocks an institute (or a branch, or a single
-        // user), NO ONE from that institute/branch/user can log in. The login
-        // HARD-FAILS with HTTP 403 + a clear "contact your administration"
-        // message — no session token is issued, no portal access is granted.
-        //
-        // The super-admin is ALWAYS exempted so the platform owner can still
-        // log in to unblock. The cascade block endpoint
-        // (PATCH /api/institutes/:id/block) also deletes every active session
-        // for the blocked institute, so users already logged in get kicked
-        // out on their next API call (requireAuth re-checks institute.blocked).
-        //
-        // Message wording is intentionally the same for institute- and
-        // branch-level blocks so users see one consistent "contact your
-        // administration" message regardless of which level was blocked.
+        // Now uses JOINed columns (instituteBlocked, branchBlocked) — zero
+        // extra queries. Previously 2 sequential round-trips.
         if (u.role !== 'super-admin') {
-          // Check institute → branch → user in that order so the MOST SPECIFIC
-          // message wins. The cascade block endpoint sets blocked=1 on the
-          // institute AND all its users/branches simultaneously — so when an
-          // institute is blocked, every user in it has BOTH u.blocked=1 AND
-          // institute.blocked=1. Checking institute first ensures the user
-          // sees "Your college access has been blocked" (accurate) instead of
-          // the generic "Your account has been blocked" message.
-          //
           // 1. Institute-level block (super admin blocked the whole college).
-          if (u.instituteId) {
-            const inst = await db.execute({ sql: 'SELECT blocked, blockedReason FROM institutes WHERE id = ?', args: [u.instituteId] });
-            if (inst.rows.length > 0 && (inst.rows[0] as any).blocked === 1) {
-              const reason = (inst.rows[0] as any).blockedReason;
-              const msg = reason
-                ? `Your college access has been blocked. Please contact your administration. (${reason})`
-                : 'Your college access has been blocked. Please contact your administration.';
-              return NextResponse.json({ error: msg }, { status: 403 });
-            }
+          if (u.instituteId && u.instituteBlocked === 1) {
+            const reason = u.instituteBlockedReason;
+            const msg = reason
+              ? `Your college access has been blocked. Please contact your administration. (${reason})`
+              : 'Your college access has been blocked. Please contact your administration.';
+            return NextResponse.json({ error: msg }, { status: 403 });
           }
           // 2. Branch-level block (institute admin blocked a specific campus).
-          if (u.branchId) {
-            const br = await db.execute({ sql: 'SELECT blocked, blockedReason FROM branches WHERE id = ?', args: [u.branchId] });
-            if (br.rows.length > 0 && (br.rows[0] as any).blocked === 1) {
-              const reason = (br.rows[0] as any).blockedReason;
-              const msg = reason
-                ? `Your campus access has been blocked. Please contact your administration. (${reason})`
-                : 'Your campus access has been blocked. Please contact your administration.';
-              return NextResponse.json({ error: msg }, { status: 403 });
-            }
+          if (u.branchId && u.branchBlocked === 1) {
+            const reason = u.branchBlockedReason;
+            const msg = reason
+              ? `Your campus access has been blocked. Please contact your administration. (${reason})`
+              : 'Your campus access has been blocked. Please contact your administration.';
+            return NextResponse.json({ error: msg }, { status: 403 });
           }
           // 3. User-level block (admin blocked this specific account only).
           if (u.blocked === 1) {
@@ -1892,15 +1871,39 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'GET' && path === 'scoped/stats') {
       const user = await requireAuth(req);
       const { instituteId, branchId } = query;
+      // ── PERF: batch COUNT queries into a single Turso round-trip ──
+      // (previously 2-3 sequential round-trips, each 50-200ms on Turso)
       if (branchId) {
-        const stuR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE branchId = ? AND role = ?', args: [branchId, 'student'] });
-        const tchR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE branchId = ? AND role = ?', args: [branchId, 'teacher'] });
-        return NextResponse.json({ students: (stuR.rows[0] as any).count, teachers: (tchR.rows[0] as any).count });
+        try {
+          const batchResult = await db.batch([
+            { sql: 'SELECT COUNT(*) as count FROM users WHERE branchId = ? AND role = ?', args: [branchId, 'student'] },
+            { sql: 'SELECT COUNT(*) as count FROM users WHERE branchId = ? AND role = ?', args: [branchId, 'teacher'] },
+          ]);
+          const stuR = batchResult[0].rows[0] as any;
+          const tchR = batchResult[1].rows[0] as any;
+          return NextResponse.json({ students: stuR.count, teachers: tchR.count });
+        } catch {
+          const stuR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE branchId = ? AND role = ?', args: [branchId, 'student'] });
+          const tchR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE branchId = ? AND role = ?', args: [branchId, 'teacher'] });
+          return NextResponse.json({ students: (stuR.rows[0] as any).count, teachers: (tchR.rows[0] as any).count });
+        }
       } else if (instituteId) {
-        const stuR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'student'] });
-        const staffR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE instituteId = ? AND role IN (?, ?)', args: [instituteId, 'teacher', 'branch-manager'] });
-        const brR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM branches WHERE instituteId = ?', args: [instituteId] });
-        return NextResponse.json({ students: (stuR.rows[0] as any).count, staff: (staffR.rows[0] as any).count, branches: (brR.rows[0] as any).count });
+        try {
+          const batchResult = await db.batch([
+            { sql: 'SELECT COUNT(*) as count FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'student'] },
+            { sql: 'SELECT COUNT(*) as count FROM users WHERE instituteId = ? AND role IN (?, ?)', args: [instituteId, 'teacher', 'branch-manager'] },
+            { sql: 'SELECT COUNT(*) as count FROM branches WHERE instituteId = ?', args: [instituteId] },
+          ]);
+          const stuR = batchResult[0].rows[0] as any;
+          const staffR = batchResult[1].rows[0] as any;
+          const brR = batchResult[2].rows[0] as any;
+          return NextResponse.json({ students: stuR.count, staff: staffR.count, branches: brR.count });
+        } catch {
+          const stuR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'student'] });
+          const staffR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM users WHERE instituteId = ? AND role IN (?, ?)', args: [instituteId, 'teacher', 'branch-manager'] });
+          const brR = await db.execute({ sql: 'SELECT COUNT(*) as count FROM branches WHERE instituteId = ?', args: [instituteId] });
+          return NextResponse.json({ students: (stuR.rows[0] as any).count, staff: (staffR.rows[0] as any).count, branches: (brR.rows[0] as any).count });
+        }
       } else {
         return NextResponse.json({ students: 0, staff: 0, branches: 0 });
       }
@@ -1914,23 +1917,39 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (!instituteId) return NextResponse.json({ kpi: {}, monthlyRevenue: [], branchPerformance: [], recentTransactions: [] });
 
       try {
-        const revR = await db.execute({ sql: 'SELECT * FROM manual_revenue WHERE instituteId = ? AND enteredByRole = ? ORDER BY year DESC, createdAt DESC', args: [instituteId, 'institute-admin'] });
-        const revenueEntries = revR.rows as any[];
-
-        const salR = await db.execute({ sql: 'SELECT id, teacherId, teacherName, branchId, month, year, amount, status, paidDate, paymentMethod, createdAt FROM salary_payments WHERE instituteId = ? ORDER BY createdAt DESC', args: [instituteId] });
-        const salaries = salR.rows as any[];
-
-        const brR = await db.execute({ sql: 'SELECT id, name, city, manager, students, teachers, status, blocked FROM branches WHERE instituteId = ?', args: [instituteId] });
-        const branches = brR.rows as any[];
-
-        const tchR = await db.execute({ sql: 'SELECT id, name, email, branchId, status, blocked FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'teacher'] });
-        const teachers = tchR.rows as any[];
-
-        const salStructR = await db.execute({ sql: 'SELECT teacherId, monthlySalary FROM teacher_salaries WHERE instituteId = ?', args: [instituteId] });
-        const salaryStruct = salStructR.rows as any[];
-
-        const stuR = await db.execute({ sql: 'SELECT id, name, class, section, branchId, status, blocked FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'student'] });
-        const students = stuR.rows as any[];
+        // ── PERF: batch all 6 SELECTs into a SINGLE Turso round-trip ──
+        // (previously 6 sequential round-trips = 300ms-1.2s on Turso)
+        let revenueEntries: any[], salaries: any[], branches: any[], teachers: any[], salaryStruct: any[], students: any[];
+        try {
+          const batchResult = await db.batch([
+            { sql: 'SELECT * FROM manual_revenue WHERE instituteId = ? AND enteredByRole = ? ORDER BY year DESC, createdAt DESC', args: [instituteId, 'institute-admin'] },
+            { sql: 'SELECT id, teacherId, teacherName, branchId, month, year, amount, status, paidDate, paymentMethod, createdAt FROM salary_payments WHERE instituteId = ? ORDER BY createdAt DESC', args: [instituteId] },
+            { sql: 'SELECT id, name, city, manager, students, teachers, status, blocked FROM branches WHERE instituteId = ?', args: [instituteId] },
+            { sql: 'SELECT id, name, email, branchId, status, blocked FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'teacher'] },
+            { sql: 'SELECT teacherId, monthlySalary FROM teacher_salaries WHERE instituteId = ?', args: [instituteId] },
+            { sql: 'SELECT id, name, class, section, branchId, status, blocked FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'student'] },
+          ]);
+          revenueEntries = batchResult[0].rows as any[];
+          salaries = batchResult[1].rows as any[];
+          branches = batchResult[2].rows as any[];
+          teachers = batchResult[3].rows as any[];
+          salaryStruct = batchResult[4].rows as any[];
+          students = batchResult[5].rows as any[];
+        } catch {
+          // Fallback: sequential execution if batch unsupported
+          const revR = await db.execute({ sql: 'SELECT * FROM manual_revenue WHERE instituteId = ? AND enteredByRole = ? ORDER BY year DESC, createdAt DESC', args: [instituteId, 'institute-admin'] });
+          revenueEntries = revR.rows as any[];
+          const salR = await db.execute({ sql: 'SELECT id, teacherId, teacherName, branchId, month, year, amount, status, paidDate, paymentMethod, createdAt FROM salary_payments WHERE instituteId = ? ORDER BY createdAt DESC', args: [instituteId] });
+          salaries = salR.rows as any[];
+          const brR = await db.execute({ sql: 'SELECT id, name, city, manager, students, teachers, status, blocked FROM branches WHERE instituteId = ?', args: [instituteId] });
+          branches = brR.rows as any[];
+          const tchR = await db.execute({ sql: 'SELECT id, name, email, branchId, status, blocked FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'teacher'] });
+          teachers = tchR.rows as any[];
+          const salStructR = await db.execute({ sql: 'SELECT teacherId, monthlySalary FROM teacher_salaries WHERE instituteId = ?', args: [instituteId] });
+          salaryStruct = salStructR.rows as any[];
+          const stuR = await db.execute({ sql: 'SELECT id, name, class, section, branchId, status, blocked FROM users WHERE instituteId = ? AND role = ?', args: [instituteId, 'student'] });
+          students = stuR.rows as any[];
+        }
 
         const totalRevenue = revenueEntries.reduce((s, r) => s + (Number(r.amount) || 0), 0);
         const totalSalaryPaid = salaries.reduce((s, p) => s + (Number(p.amount) || 0), 0);
