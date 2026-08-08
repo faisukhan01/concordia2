@@ -780,22 +780,17 @@ export function RolePortal() {
   // showed the scary "Access Blocked" screen (reported bug). Now users just
   // see the login page and can sign back in.
   //
-  // ── STALE-401 GUARD (fixes "login as student → kicked back to login") ──
-  // The api.ts layer already ignores 401s from stale tokens + 401s within the
-  // login grace window. But as a belt-and-suspenders safety net, we ALSO
-  // check here: if the user STILL has a valid token + user object in the
-  // store (i.e. they just logged in successfully), do NOT redirect — the 401
-  // was almost certainly from a stale in-flight request. Only redirect if the
-  // session is genuinely gone from the store.
+  // ── STALE-401 HANDLING ──
+  // The api.ts layer does ALL the stale-401 filtering (token comparison +
+  // login grace period). By the time this callback fires, the 401 has already
+  // been confirmed as a REAL session expiry (not a stale request). So we
+  // always logout + redirect here — no additional guard needed. Adding a
+  // "is the user still logged in?" check here would be WRONG, because when a
+  // session genuinely expires the store still holds the (now-invalid) token
+  // until logout() clears it — such a check would block the legitimate
+  // redirect and leave the user stuck on a broken portal.
   useEffect(() => {
     setOnSessionExpired(() => {
-      // Read the CURRENT store state (not the closure-captured value).
-      const state = useApp.getState();
-      if (state.token && state.user && state.view === 'portal') {
-        // The user is still logged in — this 401 is stale. Ignore it.
-        // Don't logout, don't redirect. The new session is valid.
-        return;
-      }
       try {
         logout();
       } catch {}
