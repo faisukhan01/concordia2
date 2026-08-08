@@ -260,6 +260,18 @@ export const api = {
     invalidateCache();
     return r;
   },
+  // Bulk-generate logins for EVERY student in the caller's branch who is
+  // missing a rollNo / email / has the placeholder import password. One-click
+  // fix for "students can't log in because they were imported without roll
+  // numbers". Returns { generated, skipped, total, credentials[] }.
+  bulkGenerateStudentLogins: async () => {
+    const r = await request<{ generated: number; skipped: number; total: number; credentials: { id: string; name: string; rollNo: string; email: string; password: string }[] }>(
+      'platform/students/bulk-generate-logins',
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    invalidateCache();
+    return r;
+  },
   scopedStats: (instituteId?: string, branchId?: string) => {
     const q = new URLSearchParams();
     if (instituteId) q.set('instituteId', instituteId);

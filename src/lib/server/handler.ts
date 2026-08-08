@@ -1286,6 +1286,106 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
     }
 
+    // ── Bulk Generate Logins (Accountant / Academic / Admissions / Admin) ──
+    // POST platform/students/bulk-generate-logins
+    //
+    // Iterates EVERY student in the caller's branch (or all branches for
+    // super-admin) who is missing a rollNo OR an email OR has the placeholder
+    // import password, and generates a real login for them — assigning a
+    // branch-sequential roll number, a `rollNo@concordia.edu.pk` email, and a
+    // random `concordia####` password. Skips students who already have a real
+    // login (rollNo + email + non-placeholder password).
+    //
+    // This is the one-click fix for "students can't log in because they were
+    // imported without roll numbers". Returns the count of newly-issued logins
+    // plus the full credentials list so the officer can print / distribute.
+    //
+    // Returns: { generated: number, skipped: number, total: number, credentials: [{id,name,rollNo,email,password}] }
+    if (method === 'POST' && path === 'platform/students/bulk-generate-logins') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const branchFilter = user.role === 'super-admin' ? '' : 'AND branchId = ?';
+      const branchArgs: any[] = user.role === 'super-admin' ? [] : [user.branchId];
+
+      // Pull every student in scope. We intentionally fetch ALL columns so we
+      // can inspect rollNo / email / password to decide who needs a login.
+      const r = await db.execute({
+        sql: `SELECT id, name, rollNo, email, password, branchId FROM users
+              WHERE role = 'student' ${branchFilter}
+              ORDER BY name`,
+        args: branchArgs,
+      });
+
+      // A student needs a login if ANY of:
+      //   - rollNo is null/empty
+      //   - email is null/empty
+      //   - password is the placeholder import password ("concordia-import-pending")
+      //     OR matches the legacy placeholder format
+      const needsLogin = (s: any) => {
+        const pwd = String(s.password || '');
+        const isPlaceholder =
+          pwd === 'concordia-import-pending' ||
+          pwd.startsWith('import-pending-') ||
+          pwd === '' ||
+          pwd === 'pending';
+        return !s.rollNo || !s.email || isPlaceholder;
+      };
+
+      const targets = r.rows.filter((s: any) => needsLogin(s));
+      const skipped = r.rows.length - targets.length;
+
+      // Pre-compute the starting roll number per branch so we can assign
+      // sequential numbers without N+1 queries.
+      const branchMaxRoll: Record<string, number> = {};
+      const branches = Array.from(new Set(targets.map((t: any) => t.branchId).filter(Boolean)));
+      for (const brId of branches) {
+        try {
+          const maxR = await db.execute({
+            sql: `SELECT rollNo FROM users
+                  WHERE branchId = ? AND role = 'student'
+                    AND rollNo IS NOT NULL AND rollNo != ''
+                    AND CAST(rollNo AS INTEGER) = rollNo
+                  ORDER BY CAST(rollNo AS INTEGER) DESC LIMIT 1`,
+            args: [brId],
+          });
+          const maxNum = maxR.rows.length > 0 ? parseInt(String((maxR.rows[0] as any).rollNo), 10) : 1000;
+          branchMaxRoll[brId] = Number.isFinite(maxNum) ? maxNum : 1000;
+        } catch {
+          branchMaxRoll[brId] = 1000;
+        }
+      }
+
+      const credentials: any[] = [];
+      for (const t of targets) {
+        const s = t as any;
+        const brId = s.branchId;
+        // Resolve roll number: existing > next sequential.
+        let rollNo = (s.rollNo && String(s.rollNo).trim()) || '';
+        if (!rollNo) {
+          branchMaxRoll[brId] = (branchMaxRoll[brId] || 1000) + 1;
+          rollNo = String(Math.max(1001, branchMaxRoll[brId]));
+        }
+        const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
+        const password = 'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
+        try {
+          await db.execute({
+            sql: `UPDATE users SET rollNo = ?, email = ?, password = ?, mustChangePassword = 1 WHERE id = ?`,
+            args: [rollNo, email, password, s.id],
+          });
+          credentials.push({ id: s.id, name: s.name, rollNo, email, password });
+        } catch {
+          // Skip on clash / error — the officer can retry individually.
+        }
+      }
+
+      return NextResponse.json({
+        generated: credentials.length,
+        skipped,
+        total: r.rows.length,
+        credentials,
+      });
+    }
+
     // ===================== CLASSES & COURSES =====================
     if (method === 'GET' && path === 'classes') {
       const user = await requireAuth(req);

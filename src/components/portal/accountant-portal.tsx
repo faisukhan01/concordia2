@@ -2893,6 +2893,15 @@ function LoginsView({
   const [manageBusy, setManageBusy] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
+  // --- Bulk generate logins state ---
+  // One-click "Generate All Missing Logins" — iterates every student in the
+  // branch who lacks a rollNo / email / has a placeholder password and issues
+  // them a real login. The result sheet shows the full credentials list so
+  // the officer can print or distribute to students.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<any | null>(null);
+  const [bulkCopied, setBulkCopied] = useState(false);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return students.filter((s) => {
@@ -2941,6 +2950,53 @@ function LoginsView({
     } finally {
       setCreating('');
     }
+  };
+
+  // Bulk-generate logins for every student in the branch who is missing
+  // credentials. The result sheet (bulkResult) shows the full credentials
+  // list so the officer can print or copy them. This is the one-click fix
+  // for "students can't log in because they were imported without roll
+  // numbers".
+  const bulkGenerate = async () => {
+    setBulkBusy(true);
+    setBulkCopied(false);
+    try {
+      const r = await api.bulkGenerateStudentLogins();
+      setBulkResult(r);
+      // Refresh every student in the local list so the UI reflects the
+      // newly-assigned roll numbers + login-active badges.
+      for (const c of r.credentials) {
+        const existing = students.find((s) => s.id === c.id);
+        if (existing) onUpdate({ ...existing, rollNo: c.rollNo, email: c.email, password: c.password });
+      }
+      toast({
+        title: r.generated > 0 ? `${r.generated} logins generated` : 'All students already have logins',
+        description:
+          r.generated > 0
+            ? `${r.generated} of ${r.total} students received credentials. ${r.skipped} already had logins.`
+            : `All ${r.total} students already have credentials.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Bulk generate failed',
+        description: e?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const copyBulkToClipboard = () => {
+    if (!bulkResult?.credentials?.length) return;
+    const lines = ['Roll No,Name,Email,Password'];
+    for (const c of bulkResult.credentials) {
+      lines.push(`${c.rollNo},"${c.name}",${c.email},${c.password}`);
+    }
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setBulkCopied(true);
+      setTimeout(() => setBulkCopied(false), 2000);
+    });
   };
 
   // ─── Student edit + block helpers ───
@@ -3173,6 +3229,139 @@ function LoginsView({
           sub="Awaiting first payment"
         />
       </div>
+
+      {/* Bulk generate logins — one-click fix for "students can't log in".
+          Shows when there are students without logins. Generates a real roll
+          number + email + password for every student in the branch who is
+          missing credentials. The result sheet lists all newly-issued
+          credentials so the officer can print / distribute. */}
+      {stats.without > 0 && (
+        <div className="rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 p-4 sm:p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#F26522] to-[#D4541E] grid place-items-center shrink-0 shadow-sm">
+                <KeyRound className="h-5 w-5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">
+                  {stats.without} student{stats.without === 1 ? '' : 's'} can&apos;t log in yet
+                </p>
+                <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">
+                  Generate login credentials (roll number + password) for all of them in one click.
+                  Students will use their roll number as the username.
+                </p>
+              </div>
+            </div>
+            <Button
+              className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-10 px-4 text-sm font-medium shadow-sm shrink-0"
+              onClick={bulkGenerate}
+              disabled={bulkBusy}
+            >
+              {bulkBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <KeyRound className="h-4 w-4 mr-2" />
+                  Generate All Missing Logins
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk generate result sheet — shows the full credentials list after
+          a bulk generate run, with a "copy all to clipboard" button so the
+          officer can paste into Excel / print for distribution. */}
+      {bulkResult && (
+        <div className="rounded-xl border border-emerald-200 bg-white p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="h-9 w-9 rounded-lg bg-emerald-100 grid place-items-center shrink-0">
+                <Check className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  {bulkResult.generated > 0
+                    ? `${bulkResult.generated} login${bulkResult.generated === 1 ? '' : 's'} generated`
+                    : 'All students already have logins'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {bulkResult.generated} new · {bulkResult.skipped} already had logins · {bulkResult.total} total students
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {bulkResult.credentials?.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs"
+                  onClick={copyBulkToClipboard}
+                >
+                  {bulkCopied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5 mr-1.5" />
+                      Copy all
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-3 text-xs"
+                onClick={() => setBulkResult(null)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+          {bulkResult.credentials?.length > 0 ? (
+            <div className="max-h-80 overflow-y-auto pr-1 -mr-1 space-y-1.5">
+              {bulkResult.credentials.map((c: any) => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-gray-100 bg-gray-50/50 hover:bg-white hover:border-gray-200 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-7 w-7 rounded-md bg-gradient-to-br from-[#F26522]/10 to-[#F26522]/5 grid place-items-center shrink-0">
+                      <GraduationCap className="h-3.5 w-3.5 text-[#F26522]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
+                      <p className="text-[11px] text-gray-500">Roll #{c.rollNo}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px]">
+                      <span className="text-[9px] uppercase tracking-wider text-gray-400 block leading-none mb-0.5">User</span>
+                      <span className="font-mono font-semibold text-gray-900">{c.rollNo}</span>
+                    </div>
+                    <div className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px]">
+                      <span className="text-[9px] uppercase tracking-wider text-gray-400 block leading-none mb-0.5">Pass</span>
+                      <span className="font-mono font-semibold text-gray-900">{c.password}</span>
+                    </div>
+                    <CopyButton text={`Roll #: ${c.rollNo}\nPassword: ${c.password}`} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 text-center py-6">
+              No new logins needed — every student already has credentials.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="rounded-xl border border-gray-200 bg-white p-4">
