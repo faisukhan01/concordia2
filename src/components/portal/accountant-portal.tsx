@@ -117,6 +117,8 @@ import {
   PieChart,
 } from 'lucide-react';
 import { buildFeeChallan, savePdf } from '@/lib/pdf-utils';
+import jsPDF from 'jspdf';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -488,10 +490,10 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
     return Array.from(set).sort();
   }, [classes, student.program]);
 
-  const [rollNo, setRollNo] = useState(student.rollNo || '');
-  const [section, setSection] = useState(student.section || sectionOptions[0] || '');
+  const [rollNo, setRollNo] = useState(student.rollNo && !String(student.rollNo).startsWith('TMP-') ? student.rollNo : '');
+  const [section, setSection] = useState(sectionOptions.includes(String(student.section || '').toUpperCase()) ? String(student.section).toUpperCase() : (sectionOptions[0] || ''));
+  const [wizStep, setWizStep] = useState<1 | 2 | 3>(1);
   const [savingPlacement, setSavingPlacement] = useState(false);
-  const [placementSaved, setPlacementSaved] = useState(!!(student.rollNo && student.section));
   const [amounts, setAmounts] = useState<number[]>(computeInstallmentPlan(student.baseFee));
   const [generating, setGenerating] = useState(false);
   const [payAmt, setPayAmt] = useState<string>('');
@@ -522,7 +524,7 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
       try { await api.createClass(student.program, sec, user?.branchId, student.program, student.part || '1'); } catch {}
       await api.editUser(student.id, { rollNo: rollTrim, section: sec, class: student.program, part: student.part || '1' });
       onStudentUpdate({ ...student, rollNo: rollTrim, section: sec, class: student.program });
-      setPlacementSaved(true);
+      setWizStep(2);
       toast({ title: 'Roll number + section assigned', description: `${rollTrim} · Section ${sec}` });
     } catch (e: any) {
       toast({ title: 'Failed to assign', description: e?.message || 'Try again', variant: 'destructive' });
@@ -571,113 +573,157 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
     } finally { setCreatingLogin(false); }
   };
 
+  const downloadLoginPdf = () => {
+    if (!creds) return;
+    const doc = new jsPDF();
+    doc.setFontSize(20); doc.setTextColor('#F26522'); doc.text('Concordia College', 20, 26);
+    doc.setTextColor('#111827'); doc.setFontSize(13); doc.text('Student Login Credentials', 20, 37);
+    doc.setDrawColor('#e5e7eb'); doc.line(20, 42, 190, 42);
+    doc.setFontSize(11); doc.setTextColor('#374151');
+    doc.text(`Student:  ${student.name}`, 20, 56);
+    doc.text(`Program:  ${deptLabel(student.program)} — Section ${student.section || section} (Part 1)`, 20, 66);
+    doc.setFontSize(14); doc.setTextColor('#111827');
+    doc.text(`Roll No / Username:   ${creds.rollNo}`, 20, 86);
+    doc.text(`Password:   ${creds.password}`, 20, 98);
+    doc.setFontSize(9); doc.setTextColor('#6b7280');
+    doc.text('Sign in at the Concordia portal with the above. Please change your password after first sign-in.', 20, 116);
+    savePdf(doc, `Login-${creds.rollNo}.pdf`);
+  };
+
+  const steps = [{ n: 1, label: 'Roll & Section' }, { n: 2, label: 'Fees' }, { n: 3, label: 'Login' }] as const;
+
   return (
-    <div className="rounded-xl border border-[#F26522]/30 bg-[#FFF9F5] p-4 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-gray-900">{student.name}</h3>
-          <p className="text-xs text-gray-500">{student.fatherName || student.guardian || '—'} · {deptLabel(student.program) || 'No program'} · Base fee {fmtMoney(Number(student.baseFee || 0))}</p>
-        </div>
-        <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-800">Close</button>
-      </div>
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Process Enrollment — {student.name}</DialogTitle>
+          <DialogDescription>
+            {student.fatherName || student.guardian || '—'} · {deptLabel(student.program) || 'No program'} · Base fee {fmtMoney(Number(student.baseFee || 0))} · Part 1
+          </DialogDescription>
+        </DialogHeader>
 
-      {/* Step 1 — Roll number + Section */}
-      <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">1 · Roll number &amp; section</p>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex-1 min-w-[140px]">
-            <label className="block text-[11px] text-gray-500 mb-1">Roll Number</label>
-            <Input value={rollNo} onChange={(e) => setRollNo(e.target.value)} placeholder="e.g. 1024" className={`${inputCls} ${rollTaken ? 'border-red-400' : ''}`} />
-            {rollTaken && <p className="text-[11px] text-red-500 mt-1">This roll number already exists.</p>}
-          </div>
-          <div className="w-40">
-            <label className="block text-[11px] text-gray-500 mb-1">Section (Part 1)</label>
-            {sectionOptions.length === 0 ? (
-              <div className={`${inputCls} flex items-center text-xs text-amber-600`}>No sections yet</div>
-            ) : (
-              <Select value={section} onValueChange={setSection}>
-                <SelectTrigger className={inputCls}><SelectValue placeholder="Select section" /></SelectTrigger>
-                <SelectContent>
-                  {sectionOptions.map((s: string) => <SelectItem key={s} value={s}>Section {s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          <Button onClick={savePlacement} disabled={savingPlacement || rollTaken || !section} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-10">
-            {savingPlacement ? <Loader2 className="h-4 w-4 animate-spin" /> : (placementSaved ? <CheckCircle2 className="h-4 w-4" /> : null)}
-            <span className="ml-1.5">{placementSaved ? 'Update' : 'Assign'}</span>
-          </Button>
-        </div>
-        {sectionOptions.length === 0 && (
-          <p className="text-[11px] text-amber-600">Create sections for {deptLabel(student.program)} on the <span className="font-semibold">Classes &amp; Sections</span> page first.</p>
-        )}
-      </div>
-
-      {/* Step 2 — Fee installments */}
-      <div className={`rounded-lg border border-gray-200 bg-white p-3 space-y-2 ${placementSaved ? '' : 'opacity-50 pointer-events-none'}`}>
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">2 · Fee installments (Rs 10,000 admission folded into installment 1)</p>
-        {!generated ? (
-          <>
-            <div className="grid grid-cols-3 gap-2">
-              {amounts.map((a, i) => (
-                <div key={i}>
-                  <label className="block text-[11px] text-gray-500 mb-1">Installment {i + 1}{i === 0 ? ' (+admission)' : ''}</label>
-                  <Input type="number" value={a} onChange={(e) => setAmounts((prev) => prev.map((x, j) => j === i ? Number(e.target.value) : x))} className={inputCls} />
-                </div>
-              ))}
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 mb-1">
+          {steps.map((s, i) => (
+            <div key={s.n} className="flex items-center gap-2">
+              <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${wizStep >= s.n ? 'bg-[#F26522] text-white' : 'bg-gray-100 text-gray-400'}`}>
+                {wizStep > s.n ? <CheckCircle2 className="h-4 w-4" /> : s.n}
+              </div>
+              <span className={`text-xs font-medium ${wizStep === s.n ? 'text-gray-900' : 'text-gray-400'}`}>{s.label}</span>
+              {i < steps.length - 1 && <ChevronRight className="h-4 w-4 text-gray-300" />}
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Total: <span className="font-semibold text-gray-800">{fmtMoney(totalPlanned)}</span></span>
-              <Button onClick={generatePlan} disabled={generating} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
-                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}<span className="ml-1.5">Create Plan</span>
+          ))}
+        </div>
+
+        {/* ── Step 1: Roll number + Section ── */}
+        {wizStep === 1 && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Roll Number</label>
+              <Input value={rollNo} onChange={(e) => setRollNo(e.target.value)} placeholder="e.g. 1024" className={`${inputCls} ${rollTaken ? 'border-red-400' : ''}`} />
+              {rollTaken && <p className="text-[11px] text-red-500 mt-1">This roll number already exists.</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Section (Part 1)</label>
+              {sectionOptions.length === 0 ? (
+                <p className="text-xs text-amber-600">No sections yet — create them on the <span className="font-semibold">Classes &amp; Sections</span> page first.</p>
+              ) : (
+                <Select value={section} onValueChange={setSection}>
+                  <SelectTrigger className={inputCls}><SelectValue placeholder="Select section" /></SelectTrigger>
+                  <SelectContent>{sectionOptions.map((s: string) => <SelectItem key={s} value={s}>Section {s}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+            </div>
+            <div className="flex justify-end pt-1">
+              <Button onClick={savePlacement} disabled={savingPlacement || rollTaken || !rollTrim || !section} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+                {savingPlacement ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span className="ml-1.5">Continue</span><ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
-          </>
-        ) : (
-          <div className="space-y-1.5">
-            {myInvoices.map((inv: any, i: number) => {
-              const paid = String(inv.status || '').toLowerCase() === 'paid';
-              return (
-                <div key={inv.id} className="flex items-center gap-2 text-xs">
-                  <span className="w-20 text-gray-500">Inst. {i + 1}</span>
-                  <span className="w-24 font-medium text-gray-800">{fmtMoney(Number(inv.amount))}</span>
-                  {paid ? (
-                    <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">Paid {inv.paidAmount ? `· ${fmtMoney(Number(inv.paidAmount))}` : ''}</span>
-                  ) : i === 0 ? (
-                    <div className="flex items-center gap-1.5">
-                      <Input value={payAmt} onChange={(e) => setPayAmt(e.target.value)} placeholder={String(inv.amount)} className={`${inputCls} h-8 w-24`} />
-                      <Button onClick={() => markPaid(inv)} disabled={payingId === inv.id} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs">
-                        {payingId === inv.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Mark Paid'}
-                      </Button>
-                    </div>
-                  ) : (
-                    <span className="text-gray-400">Pending</span>
-                  )}
-                </div>
-              );
-            })}
           </div>
         )}
-      </div>
 
-      {/* Step 3 — Login */}
-      {firstPaid && !hasLogin && (
-        <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">3 · Create student login</p>
-          <p className="text-xs text-gray-600">First installment paid. Issue the login — username is the roll number, password is <span className="font-mono font-semibold">{DEFAULT_STUDENT_PASSWORD}</span> (student changes it after first sign-in).</p>
-          <Button onClick={createLogin} disabled={creatingLogin} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
-            {creatingLogin ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}<span className="ml-1.5">Create Login</span>
-          </Button>
-        </div>
-      )}
-      {creds && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 space-y-1">
-          <p className="font-semibold">Login created — share with the student:</p>
-          <p>Roll No / Username: <span className="font-mono font-bold">{creds.rollNo}</span></p>
-          <p>Password: <span className="font-mono font-bold">{creds.password}</span></p>
-        </div>
-      )}
-    </div>
+        {/* ── Step 2: Fee installments ── */}
+        {wizStep === 2 && (
+          <div className="space-y-3">
+            {!generated ? (
+              <>
+                <p className="text-xs text-gray-500">Rs 10,000 admission fee is folded into installment 1. Edit any amount if needed.</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {amounts.map((a, i) => (
+                    <div key={i}>
+                      <label className="block text-[11px] text-gray-500 mb-1">Installment {i + 1}{i === 0 ? ' (+adm.)' : ''}</label>
+                      <Input type="number" value={a} onChange={(e) => setAmounts((prev) => prev.map((x, j) => j === i ? Number(e.target.value) : x))} className={inputCls} />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Total: <span className="font-semibold text-gray-800">{fmtMoney(totalPlanned)}</span></span>
+                  <Button onClick={generatePlan} disabled={generating} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
+                    {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}<span className="ml-1.5">Create Plan</span>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-1.5">
+                {myInvoices.map((inv: any, i: number) => {
+                  const paid = String(inv.status || '').toLowerCase() === 'paid';
+                  return (
+                    <div key={inv.id} className="flex items-center gap-2 text-sm">
+                      <span className="w-20 text-gray-500">Inst. {i + 1}</span>
+                      <span className="w-28 font-medium text-gray-800">{fmtMoney(Number(inv.amount))}</span>
+                      {paid ? (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> Paid {inv.paidAmount ? `· ${fmtMoney(Number(inv.paidAmount))}` : ''}</span>
+                      ) : i === 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <Input value={payAmt} onChange={(e) => setPayAmt(e.target.value)} placeholder={String(inv.amount)} className={`${inputCls} h-8 w-28`} />
+                          <Button onClick={() => markPaid(inv)} disabled={payingId === inv.id} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs">{payingId === inv.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Mark Paid'}</Button>
+                        </div>
+                      ) : (<span className="text-gray-400 text-xs">Pending</span>)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex justify-between pt-2 border-t border-gray-100">
+              <Button variant="outline" onClick={() => setWizStep(1)} className="h-9"><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+              <Button onClick={() => setWizStep(3)} disabled={!firstPaid} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Continue <ChevronRight className="h-4 w-4 ml-1" /></Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Create login (popup result + PDF) ── */}
+        {wizStep === 3 && (
+          <div className="space-y-3">
+            {!creds ? (
+              <>
+                <p className="text-sm text-gray-600">Issue the student login. Username is the roll number; password is <span className="font-mono font-semibold">{DEFAULT_STUDENT_PASSWORD}</span> (changed on first sign-in).</p>
+                <div className="flex justify-end">
+                  <Button onClick={createLogin} disabled={creatingLogin} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+                    {creatingLogin ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}<span className="ml-1.5">Create Login</span>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+                  <CheckCircle2 className="h-9 w-9 text-emerald-600 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-gray-900">Login created &amp; saved</p>
+                  <div className="mt-3 inline-block text-left">
+                    <p className="text-sm">Roll No / Username: <span className="font-mono font-bold text-gray-900">{creds.rollNo}</span></p>
+                    <p className="text-sm">Password: <span className="font-mono font-bold text-gray-900">{creds.password}</span></p>
+                  </div>
+                  <p className="text-[11px] text-emerald-700 mt-3">The student now appears in Student Records and can sign in.</p>
+                </div>
+                <div className="flex justify-between">
+                  <Button variant="outline" onClick={downloadLoginPdf} className="h-9"><Download className="h-4 w-4 mr-1.5" /> Download PDF</Button>
+                  <Button onClick={onClose} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Done</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -735,24 +781,29 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
             <div className="space-y-2">
               {inDept.map((s: any) => (
                 <div key={s.id}>
-                  <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:border-[#F26522]/40">
+                  <button onClick={() => setOpenId(s.id)} className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:border-[#F26522]/40 hover:shadow-sm transition-all">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
-                      <p className="text-xs text-gray-500 truncate">{s.fatherName || s.guardian || '—'} · Base fee {fmtMoney(Number(s.baseFee || 0))}</p>
+                      <p className="text-xs text-gray-500 truncate">{s.fatherName || s.guardian || '—'} · {deptLabel(s.program)} · Base fee {fmtMoney(Number(s.baseFee || 0))}</p>
                     </div>
-                    <span className="text-xs font-semibold text-[#F26522] shrink-0">{openId === s.id ? 'Hide' : 'Process'}</span>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#F26522] shrink-0">Process <ChevronRight className="h-3.5 w-3.5" /></span>
                   </button>
-                  {openId === s.id && (
-                    <div className="mt-2">
-                      <ProcessEnrollmentCard student={s} allStudents={students} classes={classes} invoices={invoices} user={user} onStudentUpdate={onStudentUpdate} onRefresh={onRefresh} onClose={() => setOpenId(null)} />
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
       )}
+
+      {/* Processing wizard modal — rendered once, from the full student list so
+          it persists through the "login created" step (the student leaves the
+          pending list the moment the login is issued). */}
+      {openId && (() => {
+        const s = (students || []).find((x: any) => x.id === openId);
+        return s ? (
+          <ProcessEnrollmentCard student={s} allStudents={students} classes={classes} invoices={invoices} user={user} onStudentUpdate={onStudentUpdate} onRefresh={onRefresh} onClose={() => setOpenId(null)} />
+        ) : null;
+      })()}
     </div>
   );
 }
