@@ -281,6 +281,9 @@ export const api = {
     const qs = q.toString();
     return cachedGet<any[]>(qs ? `platform/users?${qs}` : 'platform/users');
   },
+  // Force-clear the client GET cache so the next fetch is fresh (used by
+  // "Refresh" buttons that must show just-created records immediately).
+  clearCache: () => invalidateCache(),
   createPlatformUser: async (body: any) => { const r = await request<any>('platform/users', { method: 'POST', body: JSON.stringify(body) }); invalidateCache(); return r; },
   editUser: async (id: string, body: any) => { const r = await request<any>(`platform/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }); invalidateCache(); return r; },
   blockUser: async (id: string, blocked: boolean, reason?: string) =>

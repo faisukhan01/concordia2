@@ -937,7 +937,10 @@ function NewEnrollmentView({
 
     const body: any = {
       name: form.name.trim(),
-      rollNo: rollNoTrim || null,
+      // Temporary roll number so the record always saves + shows in the
+      // Accountant's New Enrollments list. The Accountant edits it to the real
+      // college roll number while processing. (Not a login yet — see email.)
+      rollNo: rollNoTrim || ('TMP-' + Date.now().toString(36).toUpperCase()),
       password: genTempPassword(),
       // Unique pending email → no real login yet (Accountant provisions later).
       email: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@pending.concordia.edu.pk`,

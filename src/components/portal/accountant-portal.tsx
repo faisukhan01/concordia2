@@ -685,12 +685,15 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
   const [dept, setDept] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // "New enrollments" = students the Admission Office added who don't yet have
-  // a roll number (the Accountant assigns it here). New students are Part 1.
+  // "New enrollments" = students the Admission Office added who don't have a
+  // login yet (they carry a temporary roll number + @pending email). They stay
+  // here until the Accountant assigns the real roll + section, collects the
+  // first fee, and issues the login. New students are Part 1.
   const pending = useMemo(
-    () => (students || []).filter((s: any) => !(s.rollNo && String(s.rollNo).trim())),
+    () => (students || []).filter((s: any) => !hasRealLogin(s)),
     [students],
   );
+  const refreshNow = () => { api.clearCache(); onRefresh(); };
   const countByDept = useMemo(() => {
     const m: Record<string, number> = {};
     for (const d of DEPARTMENTS) m[d] = 0;
@@ -701,7 +704,15 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
 
   return (
     <div className="space-y-6">
-      <PageHeader title="New Enrollments" subtitle="Process students enrolled by the Admission Office — assign roll number + section, collect the first fee, and issue the login." />
+      <PageHeader
+        title="New Enrollments"
+        subtitle="Process students enrolled by the Admission Office — assign roll number + section, collect the first fee, and issue the login."
+        action={
+          <button onClick={refreshNow} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 text-sm font-medium">
+            <Loader2 className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} /> Refresh
+          </button>
+        }
+      />
       {!dept ? (
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">Select a department</h2>
