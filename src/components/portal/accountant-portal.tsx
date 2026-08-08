@@ -2854,6 +2854,10 @@ function LoginsView({
   const [generated, setGenerated] = useState<
     Record<string, { rollNo: string; password: string }>
   >({});
+  // Per-student optional manual roll-number input (shown inline next to the
+  // "Generate Login" button). If left blank, the server auto-assigns the next
+  // branch-sequential roll number.
+  const [rollInputs, setRollInputs] = useState<Record<string, string>>({});
 
   // --- Student edit + block state ---
   // The accountant can edit a student's portal details (name, roll #,
@@ -2912,43 +2916,18 @@ function LoginsView({
   const generate = async (s: any) => {
     setCreating(s.id);
     try {
-      const password = genDefaultPassword();
-      const rollNo = s.rollNo || s.email?.split('@')[0] || s.id;
-      const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
-      // Pre-check: the auto-generated email must not already belong to
-      // another user. The server enforces this too, but we surface it here
-      // with a clearer message.
-      const emailClash = students.find(
-        (x) => x.id !== s.id && (x.email || '').toLowerCase() === email.toLowerCase(),
-      );
-      if (emailClash) {
-        toast({
-          title: 'Email clash',
-          description: `The generated email "${email}" is already used by ${emailClash.name}. Change the student's roll number first.`,
-          variant: 'destructive',
-        });
-        return;
-      }
-      try {
-        // PATCH the existing student row with real credentials.
-        await api.editUser(s.id, { email, password });
-      } catch {
-        // Fall back to createPlatformUser if the row is somehow missing.
-        await api.createPlatformUser({
-          name: s.name,
-          email,
-          rollNo: s.rollNo,
-          password,
-          role: 'student',
-          branchId: s.branchId || user?.branchId,
-          instituteId: s.instituteId || user?.instituteId,
-          class: s.class,
-          section: s.section,
-          guardian: s.guardian,
-        });
-      }
-      onUpdate({ ...s, email, password });
-      setGenerated((prev) => ({ ...prev, [s.id]: { rollNo: String(rollNo), password } }));
+      // Use the new server-side generate-login endpoint. This GUARANTEES the
+      // student gets a real roll number (either the one the officer typed, or
+      // an auto-generated branch-sequential one) — fixing the bug where
+      // students had no roll number and could not log in.
+      const manualRoll = (rollInputs[s.id] || '').trim();
+      const r = await api.generateStudentLogin(s.id, manualRoll || undefined);
+      const rollNo = r.rollNo;
+      const password = r.password;
+      const email = r.email;
+      onUpdate({ ...s, rollNo, email, password });
+      setGenerated((prev) => ({ ...prev, [s.id]: { rollNo, password } }));
+      setRollInputs((prev) => ({ ...prev, [s.id]: '' }));
       toast({
         title: 'Login generated',
         description: `${s.name} — username ${rollNo}`,
@@ -3297,22 +3276,39 @@ function LoginsView({
                         <Check className="h-3 w-3" /> Login Active
                       </Badge>
                     ) : (
-                      <Button
-                        size="sm"
-                        className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-8 px-3 text-xs font-medium"
-                        onClick={() => generate(s)}
-                        disabled={creating === s.id}
-                      >
-                        {creating === s.id ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Generating…
-                          </>
-                        ) : (
-                          <>
-                            <KeyRound className="h-3.5 w-3.5 mr-1" /> Generate Login
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Optional manual roll-number override. If left blank,
+                            the server auto-assigns the next branch-sequential
+                            roll number (1001, 1002, …). This fixes the bug
+                            where students had no roll number and could not
+                            log in. */}
+                        <input
+                          type="text"
+                          value={rollInputs[s.id] || ''}
+                          onChange={(e) =>
+                            setRollInputs((prev) => ({ ...prev, [s.id]: e.target.value }))
+                          }
+                          placeholder="Roll # (auto)"
+                          className="h-8 w-[120px] rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-900 outline-none focus:border-[#F26522] focus:ring-2 focus:ring-[#F26522]/30 placeholder:text-gray-400"
+                        />
+                        <Button
+                          size="sm"
+                          className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-8 px-3 text-xs font-medium"
+                          onClick={() => generate(s)}
+                          disabled={creating === s.id}
+                          title="Generate login. Leave roll # blank to auto-assign the next sequential number."
+                        >
+                          {creating === s.id ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Generating…
+                            </>
+                          ) : (
+                            <>
+                              <KeyRound className="h-3.5 w-3.5 mr-1" /> Generate Login
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     )}
 
                     {/* Edit portal details */}

@@ -1186,6 +1186,106 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ password: target.password, mustChangePassword: target.mustChangePassword === 1 });
     }
 
+    // ── Generate Login (Accountant / Academic / Admissions / Admin) ──
+    // POST platform/users/:id/generate-login
+    //
+    // BUG FIX (student login not working): previously, when the Accountant
+    // clicked "Generate Login" on a student with no rollNo, the client fell
+    // back to using the student's internal ID (e.g. "U-c5f5cc49") as the
+    // username — but the rollNo column stayed NULL forever. The student was
+    // then told to log in "by roll number" but had no roll number, so login
+    // ALWAYS failed. This endpoint fixes it by guaranteeing a real roll number
+    // is assigned (either the one the officer typed, or an auto-generated
+    // branch-sequential one) when the login is generated.
+    //
+    // Body: { rollNo?: string }  — optional manual roll number. If omitted /
+    // blank, the server auto-generates the next sequential roll number for the
+    // branch (format: 4-digit, starting at 1001).
+    //
+    // Returns: { rollNo, password, email, mustChangePassword: true }
+    if (method === 'POST' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments[3] === 'generate-login') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const id = pathSegments[2];
+      const r = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
+      if (r.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      const target = r.rows[0] as any;
+      if (target.role !== 'student') return NextResponse.json({ error: 'Login generation is for students only' }, { status: 400 });
+      if (user.role === 'branch-manager' && target.branchId !== user.branchId) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+      if (user.role === 'institute-admin' && target.instituteId !== user.instituteId) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+      const brId = target.branchId;
+
+      // 1) Resolve the roll number: explicit > existing > auto-generated.
+      let rollNo = (body?.rollNo != null ? String(body.rollNo).trim() : '');
+      if (!rollNo) rollNo = (target.rollNo && String(target.rollNo).trim()) || '';
+      if (!rollNo) {
+        // Auto-generate the next sequential numeric roll number for this branch.
+        // Finds the max numeric rollNo already in the branch and adds 1; starts
+        // at 1001 if none exist. Zero-padded to 4 digits (1001, 1002, …, 9999,
+        // then 10000+ unpadded).
+        try {
+          const maxR = await db.execute({
+            sql: `SELECT rollNo FROM users
+                  WHERE branchId = ? AND role = 'student'
+                    AND rollNo IS NOT NULL AND rollNo != ''
+                    AND CAST(rollNo AS INTEGER) = rollNo
+                  ORDER BY CAST(rollNo AS INTEGER) DESC LIMIT 1`,
+            args: [brId],
+          });
+          const maxNum = maxR.rows.length > 0 ? parseInt(String((maxR.rows[0] as any).rollNo), 10) : 1000;
+          rollNo = String(Math.max(1001, (Number.isFinite(maxNum) ? maxNum : 1000) + 1));
+        } catch {
+          // Fallback: timestamp-based unique suffix (extremely unlikely to clash).
+          rollNo = String(1000 + Math.floor(Date.now() / 1000) % 9000);
+        }
+      }
+
+      // 2) Validate roll number uniqueness within the branch (excluding self).
+      const rollClash = await db.execute({
+        sql: `SELECT id, name FROM users WHERE rollNo = ? AND branchId = ? AND id != ?`,
+        args: [rollNo, brId, target.id],
+      });
+      if (rollClash.rows.length > 0) {
+        const c = rollClash.rows[0] as any;
+        return NextResponse.json({
+          error: `Roll Number "${rollNo}" is already used by ${c.name || 'another student'} in this branch. Use a different roll number.`,
+        }, { status: 409 });
+      }
+
+      // 3) Build the email + password.
+      const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
+      const emailClash = await db.execute({
+        sql: `SELECT id, name FROM users WHERE LOWER(email) = ? AND id != ?`,
+        args: [email.toLowerCase(), target.id],
+      });
+      if (emailClash.rows.length > 0) {
+        const c = emailClash.rows[0] as any;
+        return NextResponse.json({
+          error: `Email "${email}" is already used by ${c.name || 'another user'}. Use a different roll number.`,
+        }, { status: 409 });
+      }
+      // Random memorable password: "concordia" + 4 digits. Matches the
+      // accountant portal's genDefaultPassword() format so existing UI copy
+      // ("Login Ready", copy button, etc.) keeps working unchanged.
+      const password = 'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
+
+      // 4) Persist — set rollNo + email + password + mustChangePassword in one
+      //    round-trip. mustChangePassword=1 forces the student to set their own
+      //    password on first login (handled by the portal's change-password
+      //    prompt).
+      await db.execute({
+        sql: `UPDATE users SET rollNo = ?, email = ?, password = ?, mustChangePassword = 1 WHERE id = ?`,
+        args: [rollNo, email, password, target.id],
+      });
+
+      return NextResponse.json({
+        rollNo,
+        email,
+        password,
+        mustChangePassword: true,
+      });
+    }
+
     // ===================== CLASSES & COURSES =====================
     if (method === 'GET' && path === 'classes') {
       const user = await requireAuth(req);

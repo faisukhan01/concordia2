@@ -249,6 +249,17 @@ export const api = {
   deleteUser: async (id: string) =>
     { const r = await request<any>(`platform/users/${id}`, { method: 'DELETE' }); invalidateCache(); return r; },
   getUserPassword: (id: string) => request<any>(`platform/users/${id}/password`),
+  // Generate (or regenerate) a student's login. Auto-assigns a branch-sequential
+  // roll number if `rollNo` is omitted, so students imported without a roll
+  // number can finally log in. Returns { rollNo, email, password }.
+  generateStudentLogin: async (id: string, rollNo?: string) => {
+    const r = await request<{ rollNo: string; email: string; password: string; mustChangePassword: boolean }>(
+      `platform/users/${id}/generate-login`,
+      { method: 'POST', body: JSON.stringify(rollNo ? { rollNo } : {}) },
+    );
+    invalidateCache();
+    return r;
+  },
   scopedStats: (instituteId?: string, branchId?: string) => {
     const q = new URLSearchParams();
     if (instituteId) q.set('instituteId', instituteId);
