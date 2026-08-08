@@ -859,7 +859,9 @@ function NewEnrollmentView({
       return true;
     }
     if (n === 2) {
-      const required: (keyof EnrollForm)[] = ['program', 'classId', 'rollNo'];
+      // Class + Roll Number are assigned later by the Accountant — Admission
+      // only records the program at enrollment.
+      const required: (keyof EnrollForm)[] = ['program'];
       const missing = required.filter((k) => !form[k].trim());
       if (missing.length) {
         setTouched((t) => {
@@ -868,8 +870,8 @@ function NewEnrollmentView({
           return next;
         });
         toast({
-          title: 'Please complete academic placement',
-          description: 'Program, class, and roll number are required.',
+          title: 'Please select a program',
+          description: 'Program is required for enrollment.',
           variant: 'destructive',
         });
         return false;
@@ -916,29 +918,34 @@ function NewEnrollmentView({
     const selectedClass = classes.find((c) => c.id === form.classId);
 
     const rollNoTrim = form.rollNo.trim();
-    const dupStudent = students.find(
-      (s) => (s.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase(),
-    );
-    if (dupStudent) {
-      toast({
-        title: 'Duplicate Roll Number',
-        description: `Roll Number "${rollNoTrim}" is already used by ${dupStudent.name}. Please use a different roll number.`,
-        variant: 'destructive',
-      });
-      setStep(2);
-      return;
+    // Roll number is optional at admission (assigned by the Accountant). Only
+    // guard against duplicates when one was actually entered.
+    if (rollNoTrim) {
+      const dupStudent = students.find(
+        (s) => (s.rollNo || '').toLowerCase() === rollNoTrim.toLowerCase(),
+      );
+      if (dupStudent) {
+        toast({
+          title: 'Duplicate Roll Number',
+          description: `Roll Number "${rollNoTrim}" is already used by ${dupStudent.name}. Please use a different roll number.`,
+          variant: 'destructive',
+        });
+        setStep(2);
+        return;
+      }
     }
 
     const body: any = {
       name: form.name.trim(),
-      rollNo: rollNoTrim,
+      rollNo: rollNoTrim || null,
       password: genTempPassword(),
-      email: `${rollNoTrim.toLowerCase()}@pending.concordia.edu.pk`,
+      // Unique pending email → no real login yet (Accountant provisions later).
+      email: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@pending.concordia.edu.pk`,
       role: 'student',
       instituteId: user?.instituteId,
       branchId: user?.branchId,
       class: selectedClass?.name || null,
-      classId: form.classId,
+      classId: form.classId || null,
       section: form.section || selectedClass?.section || 'A',
       guardian: form.guardian.trim() || null,
       fatherName: form.guardian.trim(),
@@ -1366,67 +1373,13 @@ function NewEnrollmentView({
               </Select>
               {err('program', 'Program')}
             </Field>
-            <Field label="Class" required>
-              <Select
-                value={form.classId}
-                onValueChange={(v) => {
-                  const c = classes.find((x) => x.id === v);
-                  set('classId', v);
-                  if (c?.section) set('section', c.section);
-                  markTouched('classId');
-                }}
-              >
-                <SelectTrigger className={`${inputCls} w-full`}>
-                  <SelectValue placeholder="Select class" />
-                </SelectTrigger>
-                <SelectContent>
-                  {classes.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500">
-                      No classes in this branch.
-                    </div>
-                  )}
-                  {classes.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                      {c.section ? ` — ${c.section}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {err('classId', 'Class')}
-            </Field>
-            <Field label="Section">
-              <Select value={form.section} onValueChange={(v) => set('section', v)}>
-                <SelectTrigger className={`${inputCls} w-full`}>
-                  <SelectValue placeholder="Select section" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(reference.sections.length ? reference.sections : ['A', 'B', 'C']).map(
-                    (s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ),
-                  )}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Roll Number" required>
-              <div className="relative">
-                <Hash className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input
-                  value={form.rollNo}
-                  onChange={(e) => set('rollNo', e.target.value)}
-                  onBlur={() => markTouched('rollNo')}
-                  placeholder="Auto-suggested from class"
-                  className={`${inputCls} pl-9 font-mono text-sm`}
-                />
-              </div>
-              {err('rollNo', 'Roll number')}
-              <p className="text-[11px] text-gray-500 mt-1">
-                Auto-suggested from this class — edit if needed.
-              </p>
-            </Field>
+            {/* Class + Roll Number are NOT set here — the Accountant assigns them
+                later when collecting the fee / providing the login. */}
+            <div className="sm:col-span-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-500">
+              <span className="font-medium text-gray-700">Class &amp; Roll Number</span> are
+              assigned later by the Accountant (when the fee is collected). Admission only
+              records the program here.
+            </div>
           </div>
 
           <div className="flex gap-2 justify-between mt-6">
