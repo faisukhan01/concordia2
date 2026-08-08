@@ -856,11 +856,32 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const brId = body?.branchId || user.branchId;
       if (!brId) return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
 
-      // NOTE: imported students are RECORDS ONLY — NO auto roll number and NO
-      // login. The college assigns its own roll number, and the Accountant /
-      // Academic Office provide the login (real password) later, AFTER the fee
-      // is marked Paid on the student's detail page. We only use the sheet's
-      // "Roll No" column if it happens to be filled in.
+      // NOTE: imported students get an AUTO-GENERATED roll number + email +
+      // real password immediately, so they can log in as soon as they're
+      // imported. Previously they were imported as "records only" with a
+      // placeholder password and no rollNo/email — the Accountant then had
+      // to click "Generate Login" on each one. This caused the "students
+      // can't log in" bug every time a new batch was imported. Now every
+      // imported student gets working credentials on day one.
+      // If the sheet's "Roll No" column is filled in, we use it; otherwise
+      // we auto-generate the next branch-sequential roll number.
+
+      // Pre-compute the max numeric rollNo in the branch for auto-generation.
+      let branchMaxRoll = 1000;
+      try {
+        const maxR = await db.execute({
+          sql: `SELECT rollNo FROM users
+                WHERE branchId = ? AND role = 'student'
+                  AND rollNo IS NOT NULL AND rollNo != ''
+                  AND CAST(rollNo AS INTEGER) = rollNo
+                ORDER BY CAST(rollNo AS INTEGER) DESC LIMIT 1`,
+          args: [brId],
+        });
+        if (maxR.rows.length > 0) {
+          const n = parseInt(String((maxR.rows[0] as any).rollNo), 10);
+          if (Number.isFinite(n)) branchMaxRoll = n;
+        }
+      } catch {}
 
       // Dedupe sets (by CNIC digits, and by name|father) for this branch.
       const existingStudents = await db.execute({ sql: "SELECT name, fatherName, cnic FROM users WHERE branchId = ? AND role = 'student'", args: [brId] });
@@ -905,18 +926,25 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         }
         try {
           await ensureClass(program, part, section);
-          // Roll number only if the sheet provided one — otherwise left blank
-          // for the Accountant/Academic to assign when providing the login.
-          const rollNo = (row.rollNo && String(row.rollNo).trim()) || null;
-          // Placeholder password → hasRealLogin=false, i.e. NO login yet. The
-          // real password is set when the Accountant provides the login.
-          const password = 'tmp-' + Math.random().toString(36).slice(2, 10);
+          // Roll number: use the sheet's value if provided, otherwise
+          // auto-generate the next branch-sequential number (1001, 1002, …).
+          let rollNo = (row.rollNo && String(row.rollNo).trim()) || '';
+          if (!rollNo) {
+            branchMaxRoll = Math.max(1001, branchMaxRoll + 1);
+            rollNo = String(branchMaxRoll);
+          }
+          // Email derived from roll number — ensures login by roll number
+          // always works (login query matches email OR rollNo).
+          const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
+          // Real password — student can log in immediately. mustChangePassword
+          // is set to 1 so they're prompted to set their own on first login.
+          const password = 'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
           const id = nextId('U');
           const baseFee = row.baseFee != null && row.baseFee !== '' && !Number.isNaN(Number(row.baseFee)) ? Number(row.baseFee) : null;
           await db.execute({
             sql: `INSERT INTO users (id, name, email, rollNo, password, role, status, title, mustChangePassword, blocked, instituteId, branchId, class, section, part, guardianPhone, fatherName, cnic, fatherCnic, gender, address, prevResult, program, baseFee, baseFeeLocked, createdById)
                   VALUES (?, ?, ?, ?, ?, 'student', 'Active', 'Student', 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [id, name, null, rollNo, password, instId, brId, program || null, section, part,
+            args: [id, name, email, rollNo, password, instId, brId, program || null, section, part,
               String(row.phone || '').trim() || null, fatherName, String(row.cnic || '').trim() || null,
               String(row.fatherCnic || '').trim() || null, String(row.gender || '').trim() || null,
               String(row.address || '').trim() || null, String(row.prevResult || '').trim() || null,
@@ -925,7 +953,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           if (cnicDigits) cnicSet.add(cnicDigits);
           nameFatherSet.add(nf);
           await db.execute({ sql: 'UPDATE branches SET students = students + 1 WHERE id = ?', args: [brId] });
-          created.push({ id, name, rollNo, program: program || null });
+          created.push({ id, name, rollNo, email, password, program: program || null });
         } catch (e: any) {
           errors.push({ index: i, name, error: e?.message || 'insert failed' });
         }

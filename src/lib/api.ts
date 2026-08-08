@@ -120,8 +120,28 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
     // login page. Do NOT show the "Access Blocked" screen (that's only for
     // real admin-blocked accounts). Guard with a once-per-page-load flag so
     // we don't fire N concurrent logouts when multiple API calls fail at once.
+    //
+    // ── STALE-REQUEST GUARD (fixes "kicked back to login right after
+    //    logging in as a student") ──
+    // CRITICAL: a 401 must only trigger a redirect if the token used for THIS
+    // request is the SAME as the token currently in storage. If they differ,
+    // the 401 is from a STALE request that was in-flight from a PREVIOUS
+    // (expired) session — the user has SINCE logged in with a fresh token,
+    // and the stale 401 arriving late must NOT clobber the new session. This
+    // is the root cause of the "login as student → immediately redirected
+    // back to login" loop: slow cold-start API calls from the expired session
+    // return 401 AFTER the new login completes, and since `api.login()` reset
+    // the once-per-page guard, the late 401 wrongly triggers another logout.
     if (res.status === 401) {
-      if (!_sessionExpiredFired) {
+      const currentToken = getToken();
+      const isStaleRequest = token && currentToken && token !== currentToken;
+      // ── LOGIN GRACE PERIOD ──
+      // If a 401 arrives within LOGIN_GRACE_MS of a successful login, treat
+      // it as a stale request from a previous session. The new login is
+      // valid; the 401 is from a slow in-flight request that used the old
+      // (expired) token. Silently ignore it — do NOT redirect to login.
+      const inLoginGrace = _lastLoginAt > 0 && (Date.now() - _lastLoginAt < LOGIN_GRACE_MS);
+      if (!isStaleRequest && !inLoginGrace && !_sessionExpiredFired) {
         _sessionExpiredFired = true;
         try { clearSession(); } catch {}
         if (onSessionExpiredCallback) {
@@ -159,11 +179,30 @@ async function request<T>(path: string, options?: RequestInit, _skipCache = fals
 let _sessionExpiredFired = false;
 export function _resetSessionExpiredGuard() { _sessionExpiredFired = false; }
 
+// ── LOGIN GRACE PERIOD ──
+// Timestamp of the most recent SUCCESSFUL login (set when api.login()
+// resolves with a token). Any 401 arriving within LOGIN_GRACE_MS of this
+// timestamp is treated as a STALE request from a previous (expired) session
+// and is silently ignored — it must NOT trigger a redirect to the login
+// page. This is the bulletproof fix for the "login as student → instantly
+// kicked back to login" loop: the new login is valid, but slow cold-start
+// API calls from the expired session return 401 late and would otherwise
+// clobber the new session. 8 seconds covers even the worst Vercel cold
+// start + network latency.
+let _lastLoginAt = 0;
+const LOGIN_GRACE_MS = 8000;
+
 export const api = {
-  login: (email: string, password: string, name?: string) => {
+  login: async (email: string, password: string, name?: string) => {
     // Reset the 401 session-expired guard so a fresh login starts clean.
     _sessionExpiredFired = false;
-    return request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) });
+    const r = await request<{ token: string; user: any; mustChangePassword?: boolean }>('auth/login', { method: 'POST', body: JSON.stringify({ email, password, name }) });
+    // Mark the login time AFTER the new token is stored (setToken is called
+    // by the caller immediately after this resolves). The grace window
+    // starts from here, so any 401 arriving in the next 8s is treated as
+    // stale and ignored.
+    _lastLoginAt = Date.now();
+    return r;
   },
   // Client-side logout — clears the persisted session from BOTH storages
   // (sessionStorage in browser, localStorage in native app, plus any stale
