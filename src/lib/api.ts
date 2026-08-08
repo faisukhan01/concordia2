@@ -355,6 +355,12 @@ export const api = {
     request<any>('class-courses', { method: 'POST', body: JSON.stringify({ classId, courseId }) }),
   assignClassCourses: (classId: string, courseIds: string[]) =>
     request<any>(`classes/${classId}/courses`, { method: 'POST', body: JSON.stringify({ courseIds }) }),
+  // Fetch every (teacher, course) pair assigned to a class — powers the
+  // Academic Office class-detail sheet so officers see exactly what the
+  // teacher's portal will show.  WITHOUT this, assigning a teacher to a
+  // class never writes to teacher_class_courses and the teacher's portal
+  // stays empty (the "assigned to class but not to course" bug).
+  getClassTeacherCourses: (classId: string) => cachedGet<any[]>(`classes/${classId}/teacher-courses`),
   // Create a new section (e.g. Class 1B) inside an existing class. Inherits the parent's course assignments.
   createClassSection: (classId: string, section?: string) =>
     request<any>(`classes/${classId}/sections`, { method: 'POST', body: JSON.stringify({ section }) }),

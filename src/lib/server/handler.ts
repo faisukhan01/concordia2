@@ -940,7 +940,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'PATCH' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments.length === 3) {
       const user = await requireAuth(req);
       const id = pathSegments[2];
-      const { name, email, password, blocked, classId, addCourseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, baseFeePaid, fatherCnic, gender, class: cls, section, part, subjects, classes, rollNo } = body || {};
+      const { name, email, password, blocked, classId, addCourseIds, removeClassId, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, baseFeePaid, fatherCnic, gender, class: cls, section, part, subjects, classes, rollNo } = body || {};
       const r = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
       if (r.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
       const target = r.rows[0] as any;
@@ -1004,10 +1004,25 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (classes !== undefined) await db.execute({ sql: 'UPDATE users SET classes = ? WHERE id = ?', args: [classes ? JSON.stringify(classes) : null, target.id] });
       if (rollNo !== undefined) await db.execute({ sql: 'UPDATE users SET rollNo = ? WHERE id = ?', args: [rollNo || null, target.id] });
       if (classId && addCourseIds && addCourseIds.length > 0) {
+        // Dedupe against existing TCC rows for this (teacher, class) so re-adding
+        // a course that's already assigned is a silent no-op instead of a
+        // UNIQUE-violation error.
+        const existingR = await db.execute({
+          sql: 'SELECT courseId FROM teacher_class_courses WHERE teacherId = ? AND classId = ?',
+          args: [target.id, classId],
+        });
+        const existing = new Set((existingR.rows as any[]).map((r) => String(r.courseId)));
         for (const courseId of addCourseIds) {
+          if (existing.has(String(courseId))) continue;
           const tccId = nextId('TCC');
           await db.execute({ sql: 'INSERT INTO teacher_class_courses (id, teacherId, classId, courseId) VALUES (?, ?, ?, ?)', args: [tccId, target.id, classId, courseId] });
         }
+      }
+      // removeClassId: wipe ALL teacher_class_courses rows for this (teacher, class).
+      // Used by the Academic Office "Remove teacher from class" action so the
+      // teacher's portal stops showing the class + its courses.
+      if (removeClassId) {
+        await db.execute({ sql: 'DELETE FROM teacher_class_courses WHERE teacherId = ? AND classId = ?', args: [target.id, removeClassId] });
       }
       return NextResponse.json({ success: true });
     }
@@ -1346,6 +1361,30 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         await db.execute({ sql: 'INSERT INTO class_courses (id, classId, courseId) VALUES (?, ?, ?)', args: [ccId, id, courseId] });
       }
       return NextResponse.json({ success: true, count: courseIds.length });
+    }
+
+    // ── GET classes/:id/teacher-courses ──────────────────────────────────
+    // Returns the full teacher↔course assignment map for one class. Powers the
+    // Academic Office class-detail sheet: shows which teacher teaches which
+    // course(s) in the class, and which courses are still unassigned. This is
+    // the source of truth that the teacher's portal also reads (via
+    // teacher_class_courses) — so the academic officer always sees exactly
+    // what the teacher will see on sign-in.
+    if (method === 'GET' && pathSegments[0] === 'classes' && pathSegments[2] === 'teacher-courses') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const classId = pathSegments[1];
+      const r = await db.execute({
+        sql: `SELECT tcc.teacherId, tcc.courseId,
+                     u.name AS teacherName, u.rollNo AS teacherRollNo,
+                     c.name AS courseName, c.code AS courseCode
+              FROM teacher_class_courses tcc
+              LEFT JOIN users u ON tcc.teacherId = u.id
+              LEFT JOIN courses c ON tcc.courseId = c.id
+              WHERE tcc.classId = ?`,
+        args: [classId],
+      });
+      return NextResponse.json(r.rows);
     }
 
     if (method === 'POST' && pathSegments[0] === 'classes' && pathSegments[2] === 'sections') {

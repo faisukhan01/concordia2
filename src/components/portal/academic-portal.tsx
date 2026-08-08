@@ -37,6 +37,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -83,7 +84,7 @@ import {
   Bell, Plus, Lock, AlertCircle,
   UserPlus, UserMinus, Trash2, Download, CalendarPlus, Clock,
   Printer, Pencil, ShieldAlert, KeyRound, ArrowLeft,
-  TrendingUp, FileSpreadsheet,
+  TrendingUp, FileSpreadsheet, BookCopy, Layers,
 } from 'lucide-react';
 import {
   buildReportCard,
@@ -631,6 +632,19 @@ function ClassesAndTeachersView({ user }: { user: any }) {
   const [assignSaving, setAssignSaving] = useState(false);
   const [removingTeacherId, setRemovingTeacherId] = useState<string | null>(null);
 
+  // Course-assignment state for the class detail sheet.  WITHOUT this, the
+  // "Assign Teacher" button only wrote the teacher's `classes` JSON tag —
+  // the teacher's portal reads `teacher_class_courses` and saw nothing.
+  // Now the officer must pick ≥1 course when assigning, and we also show
+  // each assigned teacher's course list with an inline "+ Add courses"
+  // control for already-assigned teachers.
+  const [classCourses, setClassCourses] = useState<any[]>([]);        // courses available for this class (class_courses)
+  const [classTcc, setClassTcc] = useState<any[]>([]);                // teacher_class_courses rows for this class
+  const [assignCourseIds, setAssignCourseIds] = useState<string[]>([]); // courses for the NEW teacher being assigned
+  const [addClassTeacherId, setAddClassTeacherId] = useState<string | null>(null); // teacher getting extra courses
+  const [extraCourseIds, setExtraCourseIds] = useState<string[]>([]); // courses being added to an existing teacher
+  const [addingCourses, setAddingCourses] = useState(false);
+
   // Delete class dialog
   const [deleteTarget, setDeleteTarget] = useState<ClassRow | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -690,6 +704,31 @@ function ClassesAndTeachersView({ user }: { user: any }) {
     }).finally(() => setLoading(false));
   }, [user?.branchId]);
   useEffect(() => { load(); }, [load]);
+
+  // ── Load courses + teacher↔course assignments whenever the officer opens a
+  // class detail sheet.  `classCourses` is the catalog of courses available
+  // for this class (from class_courses); `classTcc` is the live
+  // teacher_class_courses map so the officer sees exactly what the teacher's
+  // portal will show.  Both are refreshed after every assign/remove/add.
+  useEffect(() => {
+    if (!detailClass?.id) {
+      setClassCourses([]); setClassTcc([]); setAssignCourseIds([]); setAddClassTeacherId(null); setExtraCourseIds([]);
+      return;
+    }
+    Promise.all([
+      api.getCourses({ classId: detailClass.id }).catch(() => []),
+      api.getClassTeacherCourses(detailClass.id).catch(() => []),
+    ]).then(([co, tcc]) => {
+      setClassCourses(Array.isArray(co) ? co : []);
+      setClassTcc(Array.isArray(tcc) ? tcc : []);
+    });
+  }, [detailClass?.id]);
+
+  const refreshTcc = (classId: string) => {
+    api.getClassTeacherCourses(classId)
+      .then((tcc) => setClassTcc(Array.isArray(tcc) ? tcc : []))
+      .catch(() => {});
+  };
 
   // ── Add-class single submit — passes program + part so the new class shows
   // up in the Timetable / Result Cards hierarchy drill-downs.
@@ -865,6 +904,14 @@ function ClassesAndTeachersView({ user }: { user: any }) {
   const assignTeacher = async () => {
     if (!detailClass) return;
     if (!assignTeacherId) { toast({ title: 'Pick a teacher to assign', variant: 'destructive' }); return; }
+    // FIX: a teacher assigned to a class MUST also be assigned to ≥1 course —
+    // otherwise the teacher's portal (which reads teacher_class_courses) shows
+    // an empty class list.  This is the "assigned to class but not to course"
+    // bug being fixed.
+    if (assignCourseIds.length === 0) {
+      toast({ title: 'Select at least one course', description: 'The teacher must be linked to one or more courses so their portal shows this class.', variant: 'destructive' });
+      return;
+    }
     const teacher = teachers.find((t) => t.id === assignTeacherId);
     if (!teacher) return;
     const current = parseTeacherField(teacher.classes);
@@ -877,27 +924,59 @@ function ClassesAndTeachersView({ user }: { user: any }) {
     const next = [...current, combinedDash];
     setAssignSaving(true);
     try {
-      await api.editUser(teacher.id, { classes: next });
-      toast({ title: 'Teacher assigned', description: `${teacher.name} now teaches ${detailClass.name} — Section ${detailClass.section}` });
+      // One PATCH does three things at once: (1) updates the teacher's
+      // `classes` JSON tag (for the class-detail display), (2) sets classId
+      // + addCourseIds so the backend inserts teacher_class_courses rows,
+      // (3) the backend dedupes already-assigned courses.
+      await api.editUser(teacher.id, { classes: next, classId: detailClass.id, addCourseIds: assignCourseIds });
+      toast({
+        title: 'Teacher assigned',
+        description: `${teacher.name} now teaches ${assignCourseIds.length} course${assignCourseIds.length === 1 ? '' : 's'} in ${detailClass.name} — Section ${detailClass.section}`,
+      });
       setAssignTeacherId('');
+      setAssignCourseIds([]);
       load();
+      refreshTcc(detailClass.id);
     } catch (e: any) {
       toast({ title: 'Failed to assign teacher', description: e?.message || 'Please try again', variant: 'destructive' });
     } finally { setAssignSaving(false); }
   };
 
+  // Add more courses to a teacher who is ALREADY assigned to this class.
+  // Uses the same classId + addCourseIds channel; the backend dedupes so
+  // picking an already-assigned course is a silent no-op.
+  const addCoursesToTeacher = async (teacherId: string) => {
+    if (!detailClass) return;
+    if (extraCourseIds.length === 0) { toast({ title: 'Select at least one course', variant: 'destructive' }); return; }
+    setAddingCourses(true);
+    try {
+      await api.editUser(teacherId, { classId: detailClass.id, addCourseIds: extraCourseIds });
+      toast({ title: 'Courses added', description: `${extraCourseIds.length} course${extraCourseIds.length === 1 ? '' : 's'} linked to this teacher.` });
+      setAddClassTeacherId(null);
+      setExtraCourseIds([]);
+      load();
+      refreshTcc(detailClass.id);
+    } catch (e: any) {
+      toast({ title: 'Failed to add courses', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally { setAddingCourses(false); }
+  };
+
   const removeTeacher = async (teacher: any) => {
     if (!detailClass || !teacher?.id) return;
-    if (!confirm(`Remove ${teacher.name} from ${detailClass.name} — Section ${detailClass.section}?`)) return;
+    if (!confirm(`Remove ${teacher.name} from ${detailClass.name} — Section ${detailClass.section}?\n\nThis also unlinks all their course assignments for this class. The teacher's portal will stop showing this class.`)) return;
     const current = parseTeacherField(teacher.classes);
     const combinedDash = `${detailClass.name}-${detailClass.section}`;
     const combinedSpace = `${detailClass.name} ${detailClass.section}`;
     const next = current.filter((c) => c !== detailClass.name && c !== combinedDash && c !== combinedSpace);
     setRemovingTeacherId(teacher.id);
     try {
-      await api.editUser(teacher.id, { classes: next });
+      // FIX: also wipe teacher_class_courses rows for this (teacher, class) —
+      // previously the JSON tag was cleared but TCC rows lingered, leaving
+      // ghost assignments in the teacher's portal.
+      await api.editUser(teacher.id, { classes: next, removeClassId: detailClass.id });
       toast({ title: 'Teacher removed', description: `${teacher.name} unassigned from ${detailClass.name} — Section ${detailClass.section}` });
       load();
+      refreshTcc(detailClass.id);
     } catch (e: any) {
       toast({ title: 'Failed to remove teacher', description: e?.message || 'Please try again', variant: 'destructive' });
     } finally { setRemovingTeacherId(null); }
@@ -1268,32 +1347,119 @@ function ClassesAndTeachersView({ user }: { user: any }) {
 
                   <div>
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Subjects &amp; Teachers</h4>
+
+                    {/* Course catalog hint — if the class has no courses linked
+                        yet, the officer can't assign a teacher to any course.
+                        Surface that early instead of letting the assign button
+                        fail with "Select at least one course". */}
+                    {classCourses.length === 0 ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 mb-3">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                          <div className="text-[11px] text-amber-800 leading-relaxed">
+                            <span className="font-semibold">No courses linked to this class yet.</span> Add courses to this class first (from the Courses page or by assigning class courses) — then assign teachers to those courses. A teacher must be linked to ≥1 course or their portal won't show this class.
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {clsTeachers.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center">
                         <p className="text-xs text-gray-500 mb-1">No teachers assigned to this class yet.</p>
                         <p className="text-[11px] text-gray-400">Use the Assign Teacher control below to add one.</p>
                       </div>
                     ) : (
-                      <div className="space-y-1">
+                      <div className="space-y-2">
                         {clsTeachers.map((t) => {
                           const subs = parseTeacherField(t.subjects);
+                          // Live course list for THIS teacher in THIS class,
+                          // straight from teacher_class_courses — matches what
+                          // the teacher's portal will show.
+                          const myTcc = classTcc.filter((row) => row.teacherId === t.id);
+                          const unassignedCourses = classCourses.filter((cc) => !myTcc.some((row) => row.courseId === cc.id));
                           return (
-                            <div key={t.id} className="flex items-center justify-between gap-2 rounded-md border border-gray-100 px-3 py-2 hover:bg-gray-50">
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium text-gray-900 truncate">{t.name}</div>
-                                <div className="text-[11px] text-gray-500 mt-0.5">
-                                  {subs.length > 0 ? subs.join(', ') : 'No subjects assigned'}
-                                  {t.rollNo ? ` • ${t.rollNo}` : ''}
+                            <div key={t.id} className="rounded-md border border-gray-200 bg-white px-3 py-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-gray-900 truncate">{t.name}</div>
+                                  <div className="text-[11px] text-gray-500 mt-0.5">
+                                    {t.rollNo ? `ID ${t.rollNo}` : ''}
+                                    {t.rollNo && subs.length > 0 ? ' • ' : ''}
+                                    {subs.length > 0 ? `Subjects: ${subs.join(', ')}` : ''}
+                                  </div>
                                 </div>
+                                <button onClick={() => removeTeacher(t)} disabled={removingTeacherId === t.id} className="shrink-0 h-7 px-2 text-[11px] font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50 border border-gray-200 rounded inline-flex items-center gap-1 disabled:opacity-60">
+                                  {removingTeacherId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserMinus className="h-3 w-3" />} Remove
+                                </button>
                               </div>
-                              <button onClick={() => removeTeacher(t)} disabled={removingTeacherId === t.id} className="shrink-0 h-7 px-2 text-[11px] font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50 border border-gray-200 rounded inline-flex items-center gap-1 disabled:opacity-60">
-                                {removingTeacherId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserMinus className="h-3 w-3" />} Remove
-                              </button>
+
+                              {/* Assigned courses (live from TCC) */}
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {myTcc.length === 0 ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+                                    <AlertCircle className="h-3 w-3" /> No courses linked — teacher's portal won't show this class
+                                  </span>
+                                ) : (
+                                  myTcc.map((row) => (
+                                    <span key={row.courseId} className="inline-flex items-center gap-1 text-[10px] font-medium text-[#9a3a0f] bg-orange-50 border border-orange-200 rounded px-2 py-0.5">
+                                      <BookCopy className="h-3 w-3" />
+                                      {row.courseName || row.courseCode || 'Course'}
+                                      {row.courseCode ? <span className="text-orange-400 font-normal">· {row.courseCode}</span> : null}
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+
+                              {/* Inline "Add courses" control for already-assigned teachers */}
+                              {addClassTeacherId === t.id ? (
+                                <div className="mt-2.5 rounded-md border border-orange-200 bg-orange-50/40 p-2.5">
+                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Add courses</div>
+                                  {unassignedCourses.length === 0 ? (
+                                    <p className="text-[11px] text-gray-500">This teacher is already linked to every course in this class. 🎉</p>
+                                  ) : (
+                                    <>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto concordia-scroll pr-1">
+                                        {unassignedCourses.map((cc) => {
+                                          const checked = extraCourseIds.includes(cc.id);
+                                          return (
+                                            <label key={cc.id} className={cn('flex items-center gap-2 rounded border px-2 py-1.5 cursor-pointer transition-colors', checked ? 'border-[#F26522] bg-white' : 'border-gray-200 bg-white hover:bg-gray-50')}>
+                                              <Checkbox
+                                                checked={checked}
+                                                onCheckedChange={(v) => {
+                                                  if (v) setExtraCourseIds((prev) => [...prev, cc.id]);
+                                                  else setExtraCourseIds((prev) => prev.filter((x) => x !== cc.id));
+                                                }}
+                                              />
+                                              <span className="text-[11px] font-medium text-gray-700 truncate">{cc.name}{cc.code ? <span className="text-gray-400 font-normal"> · {cc.code}</span> : null}</span>
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                      <div className="flex gap-2 mt-2">
+                                        <button onClick={() => addCoursesToTeacher(t.id)} disabled={addingCourses || extraCourseIds.length === 0} className={cn(btnPrimary, 'h-7 px-3 text-[11px]')}>
+                                          {addingCourses ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Add {extraCourseIds.length > 0 ? `${extraCourseIds.length} ` : ''}course{extraCourseIds.length === 1 ? '' : 's'}
+                                        </button>
+                                        <button onClick={() => { setAddClassTeacherId(null); setExtraCourseIds([]); }} className="h-7 px-3 text-[11px] font-medium text-gray-600 hover:text-gray-900 border border-gray-200 bg-white rounded">Cancel</button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => { setAddClassTeacherId(t.id); setExtraCourseIds([]); }}
+                                  disabled={classCourses.length === 0}
+                                  className="mt-2 h-6 px-2 text-[10px] font-medium text-[#F26522] hover:bg-orange-50 border border-orange-200 rounded inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  <Plus className="h-3 w-3" /> Add courses
+                                </button>
+                              )}
                             </div>
                           );
                         })}
                       </div>
                     )}
+
+                    {/* Assign NEW teacher — now requires course selection */}
                     <div className="mt-3 rounded-md border border-gray-200 bg-gray-50/50 p-3">
                       <div className="flex items-center gap-2 mb-2">
                         <UserPlus className="h-3.5 w-3.5 text-[#F26522]" />
@@ -1303,21 +1469,56 @@ function ClassesAndTeachersView({ user }: { user: any }) {
                         const assignedIds = new Set(clsTeachers.map((t) => t.id));
                         const available = teachers.filter((t) => !assignedIds.has(t.id));
                         if (available.length === 0) return <p className="text-[11px] text-gray-500">All teachers in this branch are already assigned to this class.</p>;
+                        if (classCourses.length === 0) {
+                          return (
+                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                              Add courses to this class first — a teacher must be linked to ≥1 course so their portal shows this class.
+                            </p>
+                          );
+                        }
                         return (
-                          <div className="flex flex-col sm:flex-row gap-2">
+                          <div className="space-y-2.5">
                             <Select value={assignTeacherId} onValueChange={setAssignTeacherId}>
                               <SelectTrigger className={cn(inputCls, 'h-9 flex-1')}><SelectValue placeholder="Select a teacher…" /></SelectTrigger>
                               <SelectContent>
                                 {available.map((t) => (<SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>))}
                               </SelectContent>
                             </Select>
-                            <button onClick={assignTeacher} disabled={!assignTeacherId || assignSaving} className={cn(btnPrimary, 'h-9 shrink-0')}>
-                              {assignSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Assign
+
+                            {/* Course multi-select — REQUIRED. The fix for
+                                "teacher assigned to class but not to course". */}
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-1.5">
+                                <Layers className="h-3 w-3 text-gray-400" />
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Courses to teach (pick ≥1)</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto concordia-scroll pr-1">
+                                {classCourses.map((cc) => {
+                                  const checked = assignCourseIds.includes(cc.id);
+                                  return (
+                                    <label key={cc.id} className={cn('flex items-center gap-2 rounded border px-2 py-1.5 cursor-pointer transition-colors', checked ? 'border-[#F26522] bg-white' : 'border-gray-200 bg-white hover:bg-gray-50')}>
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={(v) => {
+                                          if (v) setAssignCourseIds((prev) => [...prev, cc.id]);
+                                          else setAssignCourseIds((prev) => prev.filter((x) => x !== cc.id));
+                                        }}
+                                      />
+                                      <span className="text-[11px] font-medium text-gray-700 truncate">{cc.name}{cc.code ? <span className="text-gray-400 font-normal"> · {cc.code}</span> : null}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <button onClick={assignTeacher} disabled={!assignTeacherId || assignSaving || assignCourseIds.length === 0} className={cn(btnPrimary, 'h-9 w-full justify-center')}>
+                              {assignSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                              Assign {assignCourseIds.length > 0 ? `· ${assignCourseIds.length} course${assignCourseIds.length === 1 ? '' : 's'}` : ''}
                             </button>
                           </div>
                         );
                       })()}
-                      <p className="text-[11px] text-gray-400 mt-2">Assigned teachers will see this class in their portal.</p>
+                      <p className="text-[11px] text-gray-400 mt-2">The teacher will see this class + the selected courses in their portal immediately.</p>
                     </div>
                   </div>
                 </div>
