@@ -2597,7 +2597,7 @@ function StudentFeeLoginPanel({
     if (!rn) { toast({ title: 'Enter the roll number first', variant: 'destructive' }); return; }
     setBusy(true);
     try {
-      const password = genStudentPassword();
+      const password = 'concordia1234'; // default first-time password
       const email = `${rn.toLowerCase()}@concordia.edu.pk`;
       await api.editUser(student.id, { rollNo: rn, email, password });
       setHasLogin(true);
@@ -2606,6 +2606,22 @@ function StudentFeeLoginPanel({
       toast({ title: 'Login provided', description: `Roll no ${rn}` });
     } catch (e: any) {
       toast({ title: 'Could not provide login', description: e?.message || 'Try again', variant: 'destructive' });
+    } finally { setBusy(false); }
+  };
+
+  // Reset a forgotten login back to the default password (roll number kept).
+  const resetLogin = async () => {
+    const rn = (student.rollNo || rollNoInput).trim();
+    if (!rn) { toast({ title: 'No roll number on file', variant: 'destructive' }); return; }
+    setBusy(true);
+    try {
+      const password = 'concordia1234';
+      await api.editUser(student.id, { password });
+      setCreds({ rollNo: rn, password });
+      onUpdated({ ...student, password });
+      toast({ title: 'Login reset', description: `Password reset to the default for ${rn}` });
+    } catch (e: any) {
+      toast({ title: 'Could not reset login', description: e?.message || 'Try again', variant: 'destructive' });
     } finally { setBusy(false); }
   };
 
@@ -2632,9 +2648,19 @@ function StudentFeeLoginPanel({
           Only the Accountant / Academic Office can mark the fee paid and provide the login.
         </p>
       ) : hasLogin ? (
-        <p className="text-xs text-emerald-700">
-          Login is active. The student signs in with their roll number and changes the password on first login.
-        </p>
+        <div className="space-y-2">
+          <p className="text-xs text-emerald-700">
+            Login is active. The student signs in with their roll number and changes the password on first login.
+          </p>
+          <button
+            onClick={resetLogin}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 text-xs font-semibold disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+            Reset Login (to default)
+          </button>
+        </div>
       ) : (
         <div className="space-y-2.5">
           {!feePaid ? (

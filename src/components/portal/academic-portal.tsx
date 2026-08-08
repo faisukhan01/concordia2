@@ -607,7 +607,9 @@ function AnnouncementsView({ user }: { user: any }) {
 type ClassRow = { id: string; name: string; section: string; branchId?: string; program?: string | null; part?: string | null } & Record<string, any>;
 
 function ClassesAndTeachersView({ user }: { user: any }) {
-  const [tab, setTab] = useState<'class' | 'teacher'>('class');
+  // Add-class removed — sections are now assigned by the Accountant in New
+  // Enrollments. Academic only manages teachers here.
+  const [tab, setTab] = useState<'class' | 'teacher'>('teacher');
 
   // Shared loaded data
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -1025,21 +1027,8 @@ function ClassesAndTeachersView({ user }: { user: any }) {
         <StatCard icon={Users} label="Total Teachers" value={teachers.length} sub="Active faculty" />
       </div>
 
-      {/* Tab switcher — Add Class / Add Teacher */}
-      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
-        <button
-          onClick={() => setTab('class')}
-          className={cn('px-4 py-1.5 rounded-md text-sm font-medium transition-colors', tab === 'class' ? 'bg-[#F26522] text-white' : 'text-gray-600 hover:bg-gray-50')}
-        >
-          Add Class
-        </button>
-        <button
-          onClick={() => setTab('teacher')}
-          className={cn('px-4 py-1.5 rounded-md text-sm font-medium transition-colors', tab === 'teacher' ? 'bg-[#F26522] text-white' : 'text-gray-600 hover:bg-gray-50')}
-        >
-          Add Teacher
-        </button>
-      </div>
+      {/* Add-class removed — sections are assigned by the Accountant during
+          New Enrollments. Academic manages teachers here. */}
 
       {tab === 'class' && (
         <div className="rounded-xl border border-gray-200 bg-white p-5">

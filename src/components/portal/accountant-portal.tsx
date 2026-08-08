@@ -446,6 +446,278 @@ const sumOutstanding = (invoices: any[]) =>
 
 // ───────────────────────── Main router ─────────────────────────
 
+// ═══════════════════════════════════════════════════════════════════════
+// NEW ENROLLMENTS (Accountant)
+//
+// Students enrolled by the Admission Office arrive here (no login yet). The
+// Accountant, per department:
+//   1. assigns a Roll Number (typed; duplicate → "already exists")
+//   2. assigns a Section
+//   3. reviews/edits the fee installment plan and collects the FIRST payment:
+//        • Rs 10,000 admission fee is folded into the FIRST of 3 installments
+//        • the remaining fee is split into 3 equal installments
+//        • everything is editable (supports partial payment)
+//   4. once the first installment is paid, issues the login
+//        (username = roll number, password = concordia1234)
+// After the login is issued the student drops off this page and can sign in.
+// ═══════════════════════════════════════════════════════════════════════
+const DEFAULT_STUDENT_PASSWORD = 'concordia1234';
+const ADMISSION_FEE = 10000;
+
+// 10,000 admission fee folded into the first of 3 equal installments.
+//   40,000 → [20,000, 10,000, 10,000] ; 55,000 → [25,000, 15,000, 15,000]
+function computeInstallmentPlan(baseFee: number): number[] {
+  const total = Math.max(0, Math.round(Number(baseFee) || 0));
+  const fixed = Math.min(ADMISSION_FEE, total);
+  const remaining = Math.max(0, total - fixed);
+  const each = Math.round(remaining / 3);
+  const firstThird = remaining - 2 * each; // keep the sum exact
+  return [fixed + firstThird, each, each];
+}
+
+function ProcessEnrollmentCard({ student, allStudents, invoices, user, onStudentUpdate, onRefresh, onClose }: any) {
+  const [rollNo, setRollNo] = useState(student.rollNo || '');
+  const [section, setSection] = useState(student.section || 'A');
+  const [savingPlacement, setSavingPlacement] = useState(false);
+  const [placementSaved, setPlacementSaved] = useState(!!(student.rollNo && student.section));
+  const [amounts, setAmounts] = useState<number[]>(computeInstallmentPlan(student.baseFee));
+  const [generating, setGenerating] = useState(false);
+  const [payAmt, setPayAmt] = useState<string>('');
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [creds, setCreds] = useState<{ rollNo: string; password: string } | null>(null);
+  const [creatingLogin, setCreatingLogin] = useState(false);
+
+  const rollTrim = rollNo.trim();
+  const rollTaken = !!rollTrim && allStudents.some(
+    (s: any) => s.id !== student.id && String(s.rollNo || '').toLowerCase() === rollTrim.toLowerCase(),
+  );
+  const myInvoices = invoices
+    .filter((inv: any) => inv.studentId === student.id && inv.type === 'Installment')
+    .sort((a: any, b: any) => String(a.challanNo || '').localeCompare(String(b.challanNo || '')));
+  const generated = myInvoices.length > 0;
+  const firstInv = myInvoices[0];
+  const firstPaid = !!firstInv && String(firstInv.status || '').toLowerCase() === 'paid';
+  const hasLogin = hasRealLogin(student) || !!creds;
+  const totalPlanned = amounts.reduce((s, a) => s + (Number(a) || 0), 0);
+
+  const savePlacement = async () => {
+    if (!rollTrim) { toast({ title: 'Enter a roll number', variant: 'destructive' }); return; }
+    if (rollTaken) { toast({ title: 'Roll number already exists', description: 'Choose a different one.', variant: 'destructive' }); return; }
+    const sec = section.trim().toUpperCase() || 'A';
+    setSavingPlacement(true);
+    try {
+      // Ensure the (program, section) class row exists so the student shows in drill-downs.
+      try { await api.createClass(student.program, sec, user?.branchId, student.program, student.part || '1'); } catch {}
+      await api.editUser(student.id, { rollNo: rollTrim, section: sec, class: student.program, part: student.part || '1' });
+      onStudentUpdate({ ...student, rollNo: rollTrim, section: sec, class: student.program });
+      setPlacementSaved(true);
+      toast({ title: 'Roll number + section assigned', description: `${rollTrim} · Section ${sec}` });
+    } catch (e: any) {
+      toast({ title: 'Failed to assign', description: e?.message || 'Try again', variant: 'destructive' });
+    } finally { setSavingPlacement(false); }
+  };
+
+  const generatePlan = async () => {
+    const list = amounts.map((a) => Number(a) || 0).filter((a) => a > 0);
+    if (list.length === 0) { toast({ title: 'Enter installment amounts', variant: 'destructive' }); return; }
+    setGenerating(true);
+    try {
+      await api.createInstallments(student.id, list.map((a) => ({ amount: a, dueDate: '' })));
+      toast({ title: 'Installment plan created', description: `${list.length} installments · ${fmtMoney(totalPlanned)}` });
+      onRefresh();
+    } catch (e: any) {
+      toast({ title: 'Failed to create installments', description: e?.message, variant: 'destructive' });
+    } finally { setGenerating(false); }
+  };
+
+  const markPaid = async (inv: any) => {
+    const amt = payAmt.trim() ? Number(payAmt) : Number(inv.amount);
+    if (!amt || amt <= 0) { toast({ title: 'Enter a valid amount', variant: 'destructive' }); return; }
+    setPayingId(inv.id);
+    try {
+      await api.markInvoicePaid(inv.id, amt, 'Cash');
+      toast({ title: 'Payment recorded', description: fmtMoney(amt) });
+      setPayAmt('');
+      onRefresh();
+    } catch (e: any) {
+      toast({ title: 'Failed to record payment', description: e?.message, variant: 'destructive' });
+    } finally { setPayingId(null); }
+  };
+
+  const createLogin = async () => {
+    const rn = (student.rollNo || rollTrim).trim();
+    if (!rn) { toast({ title: 'Assign a roll number first', variant: 'destructive' }); return; }
+    setCreatingLogin(true);
+    try {
+      const email = `${rn.toLowerCase()}@concordia.edu.pk`;
+      await api.editUser(student.id, { rollNo: rn, email, password: DEFAULT_STUDENT_PASSWORD, baseFeePaid: true });
+      setCreds({ rollNo: rn, password: DEFAULT_STUDENT_PASSWORD });
+      onStudentUpdate({ ...student, rollNo: rn, email, baseFeePaid: 1 });
+      toast({ title: 'Login created', description: `Roll no ${rn}` });
+    } catch (e: any) {
+      toast({ title: 'Failed to create login', description: e?.message, variant: 'destructive' });
+    } finally { setCreatingLogin(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-[#F26522]/30 bg-[#FFF9F5] p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900">{student.name}</h3>
+          <p className="text-xs text-gray-500">{student.fatherName || student.guardian || '—'} · {deptLabel(student.program) || 'No program'} · Base fee {fmtMoney(Number(student.baseFee || 0))}</p>
+        </div>
+        <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-800">Close</button>
+      </div>
+
+      {/* Step 1 — Roll number + Section */}
+      <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">1 · Roll number &amp; section</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-[11px] text-gray-500 mb-1">Roll Number</label>
+            <Input value={rollNo} onChange={(e) => setRollNo(e.target.value)} placeholder="e.g. 1024" className={`${inputCls} ${rollTaken ? 'border-red-400' : ''}`} />
+            {rollTaken && <p className="text-[11px] text-red-500 mt-1">This roll number already exists.</p>}
+          </div>
+          <div className="w-24">
+            <label className="block text-[11px] text-gray-500 mb-1">Section</label>
+            <Input value={section} onChange={(e) => setSection(e.target.value)} maxLength={3} placeholder="A" className={inputCls} />
+          </div>
+          <Button onClick={savePlacement} disabled={savingPlacement || rollTaken} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-10">
+            {savingPlacement ? <Loader2 className="h-4 w-4 animate-spin" /> : (placementSaved ? <CheckCircle2 className="h-4 w-4" /> : null)}
+            <span className="ml-1.5">{placementSaved ? 'Update' : 'Assign'}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Step 2 — Fee installments */}
+      <div className={`rounded-lg border border-gray-200 bg-white p-3 space-y-2 ${placementSaved ? '' : 'opacity-50 pointer-events-none'}`}>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">2 · Fee installments (Rs 10,000 admission folded into installment 1)</p>
+        {!generated ? (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              {amounts.map((a, i) => (
+                <div key={i}>
+                  <label className="block text-[11px] text-gray-500 mb-1">Installment {i + 1}{i === 0 ? ' (+admission)' : ''}</label>
+                  <Input type="number" value={a} onChange={(e) => setAmounts((prev) => prev.map((x, j) => j === i ? Number(e.target.value) : x))} className={inputCls} />
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Total: <span className="font-semibold text-gray-800">{fmtMoney(totalPlanned)}</span></span>
+              <Button onClick={generatePlan} disabled={generating} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}<span className="ml-1.5">Create Plan</span>
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-1.5">
+            {myInvoices.map((inv: any, i: number) => {
+              const paid = String(inv.status || '').toLowerCase() === 'paid';
+              return (
+                <div key={inv.id} className="flex items-center gap-2 text-xs">
+                  <span className="w-20 text-gray-500">Inst. {i + 1}</span>
+                  <span className="w-24 font-medium text-gray-800">{fmtMoney(Number(inv.amount))}</span>
+                  {paid ? (
+                    <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">Paid {inv.paidAmount ? `· ${fmtMoney(Number(inv.paidAmount))}` : ''}</span>
+                  ) : i === 0 ? (
+                    <div className="flex items-center gap-1.5">
+                      <Input value={payAmt} onChange={(e) => setPayAmt(e.target.value)} placeholder={String(inv.amount)} className={`${inputCls} h-8 w-24`} />
+                      <Button onClick={() => markPaid(inv)} disabled={payingId === inv.id} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs">
+                        {payingId === inv.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Mark Paid'}
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">Pending</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Step 3 — Login */}
+      {firstPaid && !hasLogin && (
+        <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">3 · Create student login</p>
+          <p className="text-xs text-gray-600">First installment paid. Issue the login — username is the roll number, password is <span className="font-mono font-semibold">{DEFAULT_STUDENT_PASSWORD}</span> (student changes it after first sign-in).</p>
+          <Button onClick={createLogin} disabled={creatingLogin} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
+            {creatingLogin ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}<span className="ml-1.5">Create Login</span>
+          </Button>
+        </div>
+      )}
+      {creds && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 space-y-1">
+          <p className="font-semibold">Login created — share with the student:</p>
+          <p>Roll No / Username: <span className="font-mono font-bold">{creds.rollNo}</span></p>
+          <p>Password: <span className="font-mono font-bold">{creds.password}</span></p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewEnrollmentsView({ user, students, invoices, loading, onRefresh, onStudentUpdate }: any) {
+  const [dept, setDept] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  // "New enrollments" = students who don't have a login yet (awaiting processing).
+  const pending = useMemo(() => (students || []).filter((s: any) => !hasRealLogin(s)), [students]);
+  const countByDept = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const d of DEPARTMENTS) m[d] = 0;
+    for (const s of pending) { const p = (s.program || '').trim(); if (m[p] != null) m[p] += 1; }
+    return m;
+  }, [pending]);
+  const inDept = useMemo(() => pending.filter((s: any) => (s.program || '').trim() === dept), [pending, dept]);
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="New Enrollments" subtitle="Process students enrolled by the Admission Office — assign roll number + section, collect the first fee, and issue the login." />
+      {!dept ? (
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900 mb-3">Select a department</h2>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-32 rounded-2xl bg-gray-100 animate-pulse" />)}</div>
+          ) : (
+            <DeptCardGrid onSelect={(d) => { setDept(d); setOpenId(null); }} studentCounts={countByDept} />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm">
+            <button onClick={() => { setDept(null); setOpenId(null); }} className="text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> All departments</button>
+            <ChevronRight className="h-3.5 w-3.5 text-gray-300" />
+            <span className="font-semibold text-gray-900">{deptLabel(dept)}</span>
+          </div>
+          {inDept.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">No new enrollments awaiting processing in {deptLabel(dept)}.</div>
+          ) : (
+            <div className="space-y-2">
+              {inDept.map((s: any) => (
+                <div key={s.id}>
+                  <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:border-[#F26522]/40">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{s.fatherName || s.guardian || '—'} · Base fee {fmtMoney(Number(s.baseFee || 0))}</p>
+                    </div>
+                    <span className="text-xs font-semibold text-[#F26522] shrink-0">{openId === s.id ? 'Hide' : 'Process'}</span>
+                  </button>
+                  {openId === s.id && (
+                    <div className="mt-2">
+                      <ProcessEnrollmentCard student={s} allStudents={students} invoices={invoices} user={user} onStudentUpdate={onStudentUpdate} onRefresh={onRefresh} onClose={() => setOpenId(null)} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AccountantPortal({ activeModule, user }: Props) {
   const [students, setStudents] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
@@ -528,6 +800,17 @@ export function AccountantPortal({ activeModule, user }: Props) {
   if (activeModule && activeModule.includes(':')) {
     const [, modId] = activeModule.split(':', 2);
     content = <AdmissionsPortal activeModule={modId || ''} user={user} />;
+  } else if (activeModule === 'accountant-new') {
+    content = (
+      <NewEnrollmentsView
+        user={user}
+        students={students}
+        invoices={invoices}
+        loading={loading}
+        onRefresh={refresh}
+        onStudentUpdate={upsertStudent}
+      />
+    );
   } else if (
     activeModule === 'accountant-challans' ||
     activeModule === 'accountant-collect' ||
