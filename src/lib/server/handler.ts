@@ -791,8 +791,11 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
       const { name, email, password, role, instituteId, branchId, rollNo, class: cls, section, part, subjects, classes, classId, courseIds, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked } = body || {};
       if (!name || !password || !role) return NextResponse.json({ error: 'Name, password and role required' }, { status: 400 });
-      if (role === 'teacher' || role === 'student') {
-        if (!rollNo) return NextResponse.json({ error: 'Roll Number/ID is required' }, { status: 400 });
+      // Teachers still need an ID up front. Students no longer do — the
+      // Admission Office enrolls them with NO roll number; the Accountant
+      // assigns it later during New Enrollments.
+      if (role === 'teacher' && !rollNo) {
+        return NextResponse.json({ error: 'Teacher ID is required' }, { status: 400 });
       }
       const instId = instituteId || user.instituteId;
       const brId = branchId || user.branchId;

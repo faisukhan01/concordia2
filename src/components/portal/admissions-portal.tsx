@@ -1113,11 +1113,8 @@ function NewEnrollmentView({
             <span className="font-medium text-gray-900">{created.program}</span>.
           </p>
           <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-4 text-left text-sm space-y-2">
-            <Row label="Roll Number" value={created.rollNo} mono />
-            <Row
-              label="Class"
-              value={`${created.class || '—'}${created.section ? ' · ' + created.section : ''}`}
-            />
+            <Row label="Program" value={deptLabel(created.program) || '—'} />
+            <Row label="Roll No & Section" value="Assigned by Accountant" />
             <Row
               label="Base Fee"
               value={
@@ -1477,16 +1474,8 @@ function NewEnrollmentView({
               <Row label="Student" value={form.name || '—'} />
               <Row label="Father / Guardian" value={form.guardian || '—'} />
               <Row label="CNIC" value={form.cnic || '—'} mono />
-              <Row label="Program" value={form.program || '—'} />
-              <Row
-                label="Class"
-                value={
-                  form.classId
-                    ? `${classes.find((c) => c.id === form.classId)?.name || '—'}${form.section ? ' · ' + form.section : ''}`
-                    : '—'
-                }
-              />
-              <Row label="Roll #" value={form.rollNo || '—'} mono />
+              <Row label="Program" value={deptLabel(form.program) || '—'} />
+              <Row label="Roll No & Section" value="Assigned by Accountant" />
               <Row
                 label="Base Fee"
                 value={
