@@ -116,7 +116,7 @@ import {
   Zap,
   PieChart,
 } from 'lucide-react';
-import { buildFeeChallan, savePdf } from '@/lib/pdf-utils';
+import { buildFeeChallan, savePdf, printPdf } from '@/lib/pdf-utils';
 import jsPDF from 'jspdf';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
@@ -544,53 +544,44 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
     } finally { setGenerating(false); }
   };
 
-  const markPaid = async (inv: any) => {
-    const amt = payAmt.trim() ? Number(payAmt) : Number(inv.amount);
-    if (!amt || amt <= 0) { toast({ title: 'Enter a valid amount', variant: 'destructive' }); return; }
-    setPayingId(inv.id);
-    try {
-      await api.markInvoicePaid(inv.id, amt, 'Cash');
-      toast({ title: 'Payment recorded', description: fmtMoney(amt) });
-      setPayAmt('');
-      onRefresh();
-    } catch (e: any) {
-      toast({ title: 'Failed to record payment', description: e?.message, variant: 'destructive' });
-    } finally { setPayingId(null); }
+  const [challanBusy, setChallanBusy] = useState(false);
+  const [challanReady, setChallanReady] = useState(false);
+
+  // Build the first-installment fee challan for this student.
+  const buildChallanDoc = async () => {
+    const inv = myInvoices[0];
+    let data: any = inv || {};
+    if (inv) { try { const full = await api.getChallanData(inv.id); data = { ...inv, ...full }; } catch {} }
+    return buildFeeChallan({
+      instituteName: data.instituteName || user?.instituteName,
+      branchName: data.branchName || user?.branchName,
+      docTitle: 'Fee Challan', docSubtitle: 'Accountant Office',
+      refLabel: 'Challan #', refValue: data.challanNo || String(data.id || '').slice(0, 12),
+      studentName: student.name,
+      rollNo: student.rollNo || rollTrim,
+      className: deptLabel(student.program),
+      section: student.section || section,
+      challanNo: data.challanNo || String(data.id || '').slice(0, 12),
+      amount: data.amount ?? myInvoices[0]?.amount ?? totalPlanned,
+      type: data.type || 'Installment',
+      status: data.status || 'Unpaid',
+      dueDate: data.dueDate, month: data.month, year: data.year,
+    });
+  };
+  const downloadChallan = async () => {
+    setChallanBusy(true);
+    try { const doc = await buildChallanDoc(); savePdf(doc, `Challan-${student.rollNo || rollTrim}.pdf`); setChallanReady(true); }
+    catch (e: any) { toast({ title: 'Could not build challan', description: e?.message, variant: 'destructive' }); }
+    finally { setChallanBusy(false); }
+  };
+  const printChallan = async () => {
+    setChallanBusy(true);
+    try { const doc = await buildChallanDoc(); printPdf(doc); setChallanReady(true); }
+    catch (e: any) { toast({ title: 'Could not build challan', description: e?.message, variant: 'destructive' }); }
+    finally { setChallanBusy(false); }
   };
 
-  const createLogin = async () => {
-    const rn = (student.rollNo || rollTrim).trim();
-    if (!rn) { toast({ title: 'Assign a roll number first', variant: 'destructive' }); return; }
-    setCreatingLogin(true);
-    try {
-      const email = `${rn.toLowerCase()}@concordia.edu.pk`;
-      await api.editUser(student.id, { rollNo: rn, email, password: DEFAULT_STUDENT_PASSWORD, baseFeePaid: true });
-      setCreds({ rollNo: rn, password: DEFAULT_STUDENT_PASSWORD });
-      onStudentUpdate({ ...student, rollNo: rn, email, baseFeePaid: 1 });
-      toast({ title: 'Login created', description: `Roll no ${rn}` });
-    } catch (e: any) {
-      toast({ title: 'Failed to create login', description: e?.message, variant: 'destructive' });
-    } finally { setCreatingLogin(false); }
-  };
-
-  const downloadLoginPdf = () => {
-    if (!creds) return;
-    const doc = new jsPDF();
-    doc.setFontSize(20); doc.setTextColor('#F26522'); doc.text('Concordia College', 20, 26);
-    doc.setTextColor('#111827'); doc.setFontSize(13); doc.text('Student Login Credentials', 20, 37);
-    doc.setDrawColor('#e5e7eb'); doc.line(20, 42, 190, 42);
-    doc.setFontSize(11); doc.setTextColor('#374151');
-    doc.text(`Student:  ${student.name}`, 20, 56);
-    doc.text(`Program:  ${deptLabel(student.program)} — Section ${student.section || section} (Part 1)`, 20, 66);
-    doc.setFontSize(14); doc.setTextColor('#111827');
-    doc.text(`Roll No / Username:   ${creds.rollNo}`, 20, 86);
-    doc.text(`Password:   ${creds.password}`, 20, 98);
-    doc.setFontSize(9); doc.setTextColor('#6b7280');
-    doc.text('Sign in at the Concordia portal with the above. Please change your password after first sign-in.', 20, 116);
-    savePdf(doc, `Login-${creds.rollNo}.pdf`);
-  };
-
-  const steps = [{ n: 1, label: 'Roll & Section' }, { n: 2, label: 'Fees' }, { n: 3, label: 'Login' }] as const;
+  const steps = [{ n: 1, label: 'Roll & Section' }, { n: 2, label: 'Fees & Challan' }] as const;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -642,7 +633,7 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
           </div>
         )}
 
-        {/* ── Step 2: Fee installments ── */}
+        {/* ── Step 2: Fee installments → generate challan (no login here) ── */}
         {wizStep === 2 && (
           <div className="space-y-3">
             {!generated ? (
@@ -656,69 +647,42 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
                     </div>
                   ))}
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between pt-1">
                   <span className="text-xs text-gray-500">Total: <span className="font-semibold text-gray-800">{fmtMoney(totalPlanned)}</span></span>
-                  <Button onClick={generatePlan} disabled={generating} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
-                    {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}<span className="ml-1.5">Create Plan</span>
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="space-y-1.5">
-                {myInvoices.map((inv: any, i: number) => {
-                  const paid = String(inv.status || '').toLowerCase() === 'paid';
-                  return (
-                    <div key={inv.id} className="flex items-center gap-2 text-sm">
-                      <span className="w-20 text-gray-500">Inst. {i + 1}</span>
-                      <span className="w-28 font-medium text-gray-800">{fmtMoney(Number(inv.amount))}</span>
-                      {paid ? (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> Paid {inv.paidAmount ? `· ${fmtMoney(Number(inv.paidAmount))}` : ''}</span>
-                      ) : i === 0 ? (
-                        <div className="flex items-center gap-1.5">
-                          <Input value={payAmt} onChange={(e) => setPayAmt(e.target.value)} placeholder={String(inv.amount)} className={`${inputCls} h-8 w-28`} />
-                          <Button onClick={() => markPaid(inv)} disabled={payingId === inv.id} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs">{payingId === inv.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Mark Paid'}</Button>
-                        </div>
-                      ) : (<span className="text-gray-400 text-xs">Pending</span>)}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <div className="flex justify-between pt-2 border-t border-gray-100">
-              <Button variant="outline" onClick={() => setWizStep(1)} className="h-9"><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-              <Button onClick={() => setWizStep(3)} disabled={!firstPaid} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Continue <ChevronRight className="h-4 w-4 ml-1" /></Button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 3: Create login (popup result + PDF) ── */}
-        {wizStep === 3 && (
-          <div className="space-y-3">
-            {!creds ? (
-              <>
-                <p className="text-sm text-gray-600">Issue the student login. Username is the roll number; password is <span className="font-mono font-semibold">{DEFAULT_STUDENT_PASSWORD}</span> (changed on first sign-in).</p>
-                <div className="flex justify-end">
-                  <Button onClick={createLogin} disabled={creatingLogin} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
-                    {creatingLogin ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}<span className="ml-1.5">Create Login</span>
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
-                  <CheckCircle2 className="h-9 w-9 text-emerald-600 mx-auto mb-2" />
-                  <p className="text-sm font-bold text-gray-900">Login created &amp; saved</p>
-                  <div className="mt-3 inline-block text-left">
-                    <p className="text-sm">Roll No / Username: <span className="font-mono font-bold text-gray-900">{creds.rollNo}</span></p>
-                    <p className="text-sm">Password: <span className="font-mono font-bold text-gray-900">{creds.password}</span></p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setWizStep(1)} className="h-9"><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                    <Button onClick={generatePlan} disabled={generating} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">
+                      {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}<span className="ml-1.5">Create Plan</span>
+                    </Button>
                   </div>
-                  <p className="text-[11px] text-emerald-700 mt-3">The student now appears in Student Records and can sign in.</p>
                 </div>
-                <div className="flex justify-between">
-                  <Button variant="outline" onClick={downloadLoginPdf} className="h-9"><Download className="h-4 w-4 mr-1.5" /> Download PDF</Button>
-                  <Button onClick={onClose} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Done</Button>
+              </>
+            ) : (
+              <>
+                <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-1.5">
+                  {myInvoices.map((inv: any, i: number) => (
+                    <div key={inv.id} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Installment {i + 1}{i === 0 ? ' (incl. admission)' : ''}</span>
+                      <span className="font-medium text-gray-800">{fmtMoney(Number(inv.amount))}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-sm pt-1.5 border-t border-gray-200">
+                    <span className="font-semibold text-gray-700">Total</span>
+                    <span className="font-bold text-gray-900">{fmtMoney(myInvoices.reduce((s: number, i: any) => s + Number(i.amount || 0), 0))}</span>
+                  </div>
                 </div>
-              </div>
+                <p className="text-xs text-gray-500">Generate the fee challan for the first installment and give it to the student. Payment collection + login happen later on the <span className="font-semibold">Fee &amp; Installments</span> page.</p>
+                {challanReady && (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-700 flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" /> Fee challan generated.</div>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <Button variant="outline" onClick={printChallan} disabled={challanBusy} className="h-9"><Receipt className="h-4 w-4 mr-1.5" /> Print Challan</Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={downloadChallan} disabled={challanBusy} className="h-9">{challanBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Download className="h-4 w-4 mr-1.5" />} Download</Button>
+                    <Button onClick={onClose} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Done</Button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -731,12 +695,15 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
   const [dept, setDept] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // "New enrollments" = students the Admission Office added who don't have a
-  // login yet (they carry a temporary roll number + @pending email). They stay
-  // here until the Accountant assigns the real roll + section, collects the
-  // first fee, and issues the login. New students are Part 1.
+  // "New enrollments" = students the Admission Office added who are NOT yet
+  // placed by the Accountant — they still carry a temporary roll number
+  // (TMP-…) or none. Once the Accountant assigns the real roll number (step 1),
+  // they move to the Fee & Installments page for payment + login. Part 1.
   const pending = useMemo(
-    () => (students || []).filter((s: any) => !hasRealLogin(s)),
+    () => (students || []).filter((s: any) => {
+      const r = String(s.rollNo || '').trim();
+      return !r || r.toUpperCase().startsWith('TMP-');
+    }),
     [students],
   );
   const refreshNow = () => { api.clearCache(); onRefresh(); };
@@ -1521,8 +1488,14 @@ function FeeInstallmentsView({
   const [generatingMonthly, setGeneratingMonthly] = useState(false);
 
   // Students with a locked base fee are the primary audience for this page.
+  // Fee & Installments works on PLACED students only — those the Accountant
+  // has assigned a real roll number + section in New Enrollments (temp "TMP-…"
+  // rolls are still pending placement and belong on the New Enrollments page).
   const lockedStudents = useMemo(
-    () => students.filter((s) => s.baseFeeLocked && s.baseFee != null && s.baseFee !== ''),
+    () => students.filter((s) => {
+      const r = String(s.rollNo || '').trim();
+      return r && !r.toUpperCase().startsWith('TMP-') && (s.section != null && s.section !== '');
+    }),
     [students],
   );
 
