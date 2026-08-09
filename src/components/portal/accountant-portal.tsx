@@ -715,6 +715,21 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
     [students],
   );
   const refreshNow = () => { api.clearCache(); onRefresh(); };
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const removeEnrollment = async (s: any) => {
+    if (typeof window !== 'undefined' &&
+      !window.confirm(`Delete the enrollment for ${s.name}? This permanently removes the student record.`)) return;
+    setDeletingId(s.id);
+    try {
+      await api.deleteUser(s.id);
+      onStudentUpdate({ id: s.id, deleted: true });
+      api.clearCache();
+    } catch (e) {
+      if (typeof window !== 'undefined') window.alert('Could not delete this enrollment. Please try again.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
   const countByDept = useMemo(() => {
     const m: Record<string, number> = {};
     for (const d of DEPARTMENTS) m[d] = 0;
@@ -755,13 +770,21 @@ function NewEnrollmentsView({ user, students, classes, invoices, loading, onRefr
           ) : (
             <div className="space-y-2">
               {inDept.map((s: any) => (
-                <div key={s.id}>
-                  <button onClick={() => setOpenId(s.id)} className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:border-[#F26522]/40 hover:shadow-sm transition-all">
+                <div key={s.id} className="flex items-stretch gap-2 rounded-xl border border-gray-200 bg-white hover:border-[#F26522]/40 hover:shadow-sm transition-all">
+                  <button onClick={() => setOpenId(s.id)} className="flex-1 min-w-0 flex items-center justify-between gap-3 p-3 text-left">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
                       <p className="text-xs text-gray-500 truncate">{s.fatherName || s.guardian || '—'} · {deptLabel(s.program)} · Base fee {fmtMoney(Number(s.baseFee || 0))}</p>
                     </div>
                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#F26522] shrink-0">Process <ChevronRight className="h-3.5 w-3.5" /></span>
+                  </button>
+                  <button
+                    onClick={() => removeEnrollment(s)}
+                    disabled={deletingId === s.id}
+                    title="Delete enrollment"
+                    className="shrink-0 flex items-center justify-center px-3 border-l border-gray-100 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-r-xl transition-colors disabled:opacity-50"
+                  >
+                    {deletingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                   </button>
                 </div>
               ))}
