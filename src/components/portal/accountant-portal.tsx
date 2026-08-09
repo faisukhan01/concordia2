@@ -478,6 +478,9 @@ function computeInstallmentPlan(baseFee: number): number[] {
 }
 
 function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, onStudentUpdate, onRefresh, onClose }: any) {
+  const setActiveModule = useApp((s) => s.setActiveModule);
+  // Close the wizard and jump straight to Fee & Installments to collect payment.
+  const goToFees = () => { onClose(); setActiveModule('accountant-challans'); };
   // Sections available for this student's program (Part 1) — created by the
   // Accountant on the Classes & Sections page.
   const sectionOptions = useMemo(() => {
@@ -679,7 +682,7 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
                   <Button variant="outline" onClick={printChallan} disabled={challanBusy} className="h-9"><Receipt className="h-4 w-4 mr-1.5" /> Print Challan</Button>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={downloadChallan} disabled={challanBusy} className="h-9">{challanBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Download className="h-4 w-4 mr-1.5" />} Download</Button>
-                    <Button onClick={onClose} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Done</Button>
+                    <Button onClick={goToFees} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Done → Fee &amp; Installments <ChevronRight className="h-4 w-4 ml-1" /></Button>
                   </div>
                 </div>
               </>
