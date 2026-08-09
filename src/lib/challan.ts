@@ -81,7 +81,8 @@ function drawCopy(
   qr: string | null,
 ) {
   const BLACK: [number, number, number] = [25, 25, 25];
-  const BLUE: [number, number, number] = [31, 78, 121];
+  // All challan text is black (name/father/class values + notes included).
+  const BLUE: [number, number, number] = [25, 25, 25];
   const GREY: [number, number, number] = [216, 216, 216];
   const rightX = x + w;
 
