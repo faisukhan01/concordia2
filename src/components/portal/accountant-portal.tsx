@@ -480,8 +480,10 @@ function computeInstallmentPlan(baseFee: number): number[] {
 
 function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, onStudentUpdate, onRefresh, onClose }: any) {
   const setActiveModule = useApp((s) => s.setActiveModule);
-  // Close the wizard and jump straight to Fee & Installments to collect payment.
-  const goToFees = () => { onClose(); setActiveModule('accountant-challans'); };
+  const setFeeFocusStudentId = useApp((s) => s.setFeeFocusStudentId);
+  // Close the wizard and jump straight to Fee & Installments, pre-selecting
+  // this exact student so the Accountant lands directly on their record.
+  const goToFees = () => { setFeeFocusStudentId(student.id); onClose(); setActiveModule('accountant-challans'); };
   // Sections available for this student's program (Part 1) — created by the
   // Accountant on the Classes & Sections page.
   const sectionOptions = useMemo(() => {
@@ -1502,6 +1504,9 @@ function FeeInstallmentsView({
     section: { id: string; name: string; section: string } | null;
   };
 
+  const feeFocusStudentId = useApp((s) => s.feeFocusStudentId);
+  const setFeeFocusStudentId = useApp((s) => s.setFeeFocusStudentId);
+
   const [search, setSearch] = useState('');
   const [drill, setDrill] = useNavState<FeeDrill>('accountant-challans', {
     dept: null,
@@ -1597,6 +1602,26 @@ function FeeInstallmentsView({
     setPlanError(null);
     setGeneratedLogin(null);
   }, [activeClassId, isSearching]);
+
+  // ── feeFocusStudentId: jump directly to a student coming from New Enrollments.
+  // When the Accountant clicks "Done → Fee & Installments" in the wizard, the
+  // store holds the just-processed student's id. On mount (or whenever
+  // lockedStudents becomes available), find that student, switch to search mode
+  // so they appear in the list, and select them immediately. Then clear the
+  // store value so a subsequent manual visit to this page starts fresh.
+  useEffect(() => {
+    if (!feeFocusStudentId) return;
+    const target = lockedStudents.find((s) => s.id === feeFocusStudentId);
+    if (!target) return; // not yet in lockedStudents — wait for next render
+    // Use search mode: type the student's name so they appear in displayedStudents.
+    setSearch(target.name || target.rollNo || '');
+    setSelected(target);
+    setRows([]);
+    setPlanError(null);
+    setGeneratedLogin(null);
+    // Consume and clear — next visit starts from the hierarchy picker.
+    setFeeFocusStudentId(null);
+  }, [feeFocusStudentId, lockedStudents, setFeeFocusStudentId]);
 
   // All invoices for the selected student
   const studentInvoices = useMemo(() => {

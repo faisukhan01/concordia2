@@ -49,6 +49,10 @@ type AppState = {
   // the exam name here so the Date Sheet page can pre-fill it. Cleared on
   // consumption / navigation.
   pendingExamName: string | null;
+  // When the Accountant finishes the New Enrollments wizard (challan generated),
+  // we stash the processed student's id here so the Fee & Installments page can
+  // drill straight to that student's record. Cleared on consumption / navigation.
+  feeFocusStudentId: string | null;
   // Per-view drill/navigation state (see NavState). Mirrored to the URL.
   nav: NavState;
   // v4.6.0: App update availability — set by the update-checker hook.
@@ -60,6 +64,7 @@ type AppState = {
   setToken: (t: string | null) => void;
   setActiveModule: (m: string) => void;
   setPendingExamName: (n: string | null) => void;
+  setFeeFocusStudentId: (id: string | null) => void;
   setNav: (key: string, value: unknown | ((prev: unknown) => unknown)) => void;
   setNavAll: (nav: NavState) => void;
   setAppUpdateAvailable: (available: boolean, version?: string | null) => void;
@@ -103,6 +108,7 @@ export const useApp = create<AppState>()(
       token: null,
       activeModule: 'dashboard',
       pendingExamName: null,
+      feeFocusStudentId: null,
       nav: {},
       appUpdateAvailable: false,
       latestAppVersion: null,
@@ -111,6 +117,7 @@ export const useApp = create<AppState>()(
       setToken: (t) => set({ token: t }),
       setActiveModule: (m) => set({ activeModule: m }),
       setPendingExamName: (n) => set({ pendingExamName: n }),
+      setFeeFocusStudentId: (id) => set({ feeFocusStudentId: id }),
       setNav: (key, value) => set((s) => {
         const prev = s.nav[key];
         const next = typeof value === 'function' ? (value as (p: unknown) => unknown)(prev) : value;
@@ -118,7 +125,7 @@ export const useApp = create<AppState>()(
       }),
       setNavAll: (nav) => set({ nav: nav || {} }),
       setAppUpdateAvailable: (available, version = null) => set({ appUpdateAvailable: available, latestAppVersion: version }),
-      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, nav: {}, appUpdateAvailable: false, latestAppVersion: null }),
+      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, feeFocusStudentId: null, nav: {}, appUpdateAvailable: false, latestAppVersion: null }),
     }),
     {
       name: 'concordia-app',
