@@ -1690,9 +1690,10 @@ function FeeInstallmentsView({
         title: 'Marked as paid',
         description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}`,
       });
-      // If first payment (no real login yet), offer to generate one.
+      // If first payment (no real login yet), issue the login. Every student's
+      // first-time password is the SAME default — they change it on first login.
       if (selected && !hasRealLogin(selected)) {
-        const password = genDefaultPassword();
+        const password = 'concordia1234';
         const rollNo = selected.rollNo || selected.email?.split('@')[0] || selected.id;
         try {
           await api.editUser(selected.id, {
@@ -1722,6 +1723,38 @@ function FeeInstallmentsView({
     } finally {
       setMarkingId(null);
     }
+  };
+
+  // ── Download the student record + login credentials as a PDF ──
+  const downloadCredentialsPdf = () => {
+    if (!generatedLogin) return;
+    const s: any = selected || {};
+    const doc = new jsPDF();
+    doc.setFontSize(20); doc.setTextColor('#F26522'); doc.text('Concordia College', 20, 24);
+    doc.setTextColor('#111827'); doc.setFontSize(13); doc.text('Student Record & Login', 20, 35);
+    doc.setDrawColor('#e5e7eb'); doc.line(20, 40, 190, 40);
+    doc.setFontSize(11);
+    let y = 54;
+    const line = (label: string, val: any) => {
+      doc.setTextColor('#6b7280'); doc.text(`${label}:`, 20, y);
+      doc.setTextColor('#111827'); doc.text(String(val ?? '—'), 75, y);
+      y += 10;
+    };
+    line('Student Name', s.name);
+    line('Father / Guardian', s.fatherName || s.guardian);
+    line('Program', deptLabel(s.program));
+    line('Section', s.section);
+    line('CNIC / B-Form', s.cnic);
+    line('Contact', s.guardianPhone);
+    line('Base Fee', s.baseFee != null && s.baseFee !== '' ? fmtMoney(Number(s.baseFee)) : '—');
+    y += 4; doc.setDrawColor('#e5e7eb'); doc.line(20, y, 190, y); y += 12;
+    doc.setFontSize(13); doc.setTextColor('#111827'); doc.text('Login Credentials', 20, y); y += 12;
+    doc.setFontSize(13);
+    doc.text(`Roll No / Username:   ${generatedLogin.rollNo}`, 20, y); y += 11;
+    doc.text(`Password:   ${generatedLogin.password}`, 20, y); y += 12;
+    doc.setFontSize(9); doc.setTextColor('#6b7280');
+    doc.text('Sign in at the Concordia portal with the above. Change your password after first sign-in.', 20, y);
+    savePdf(doc, `Student-${generatedLogin.rollNo}.pdf`);
   };
 
   // ── Download a challan as PDF (branded, with logo) ──
@@ -2168,38 +2201,39 @@ function FeeInstallmentsView({
               )}
             </div>
 
-            {/* Generated login confirmation */}
-            {generatedLogin && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <KeyRound className="h-4 w-4 text-emerald-700" />
-                  <p className="text-sm font-semibold text-emerald-800">
-                    Student login generated — share with the student
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="rounded-lg bg-white border border-emerald-100 p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-400">Username (Roll #)</p>
-                    <div className="flex items-center justify-between gap-2 mt-0.5">
-                      <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.rollNo}</span>
-                      <CopyButton text={generatedLogin.rollNo} />
+            {/* Login credentials popup (with student-record PDF download) */}
+            <Dialog open={!!generatedLogin} onOpenChange={(o) => { if (!o) setGeneratedLogin(null); }}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-600" /> Student login created</DialogTitle>
+                  <DialogDescription>Share these with {selected?.name || 'the student'} — they change the password on first sign-in.</DialogDescription>
+                </DialogHeader>
+                {generatedLogin && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">Username (Roll #)</p>
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.rollNo}</span>
+                          <CopyButton text={generatedLogin.rollNo} />
+                        </div>
+                      </div>
+                      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">Password</p>
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.password}</span>
+                          <CopyButton text={generatedLogin.password} />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <Button variant="outline" onClick={downloadCredentialsPdf} className="h-9"><Download className="h-4 w-4 mr-1.5" /> Download PDF</Button>
+                      <Button onClick={() => setGeneratedLogin(null)} className="bg-[#F26522] hover:bg-[#D4541E] text-white h-9">Done</Button>
                     </div>
                   </div>
-                  <div className="rounded-lg bg-white border border-emerald-100 p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-400">Default Password</p>
-                    <div className="flex items-center justify-between gap-2 mt-0.5">
-                      <span className="font-mono font-semibold text-gray-900 text-sm">{generatedLogin.password}</span>
-                      <CopyButton text={generatedLogin.password} />
-                    </div>
-                  </div>
-                </div>
-                <p className="text-[11px] text-emerald-700 mt-2.5">
-                  The student signs in at the portal with their{' '}
-                  <span className="font-semibold">Roll Number</span> and this{' '}
-                  <span className="font-semibold">password</span> — then changes it on first login.
-                </p>
-              </div>
-            )}
+                )}
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </div>
