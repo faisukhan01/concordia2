@@ -117,6 +117,7 @@ import {
   PieChart,
 } from 'lucide-react';
 import { buildFeeChallan, savePdf, printPdf } from '@/lib/pdf-utils';
+import { buildConcordiaChallan } from '@/lib/challan';
 import jsPDF from 'jspdf';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
@@ -552,23 +553,27 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
 
   // Build the first-installment fee challan for this student.
   const buildChallanDoc = async () => {
-    const inv = myInvoices[0];
-    let data: any = inv || {};
-    if (inv) { try { const full = await api.getChallanData(inv.id); data = { ...inv, ...full }; } catch {} }
-    return buildFeeChallan({
-      instituteName: data.instituteName || user?.instituteName,
-      branchName: data.branchName || user?.branchName,
-      docTitle: 'Fee Challan', docSubtitle: 'Accountant Office',
-      refLabel: 'Challan #', refValue: data.challanNo || String(data.id || '').slice(0, 12),
+    const inv: any = myInvoices[0] || {};
+    const total = myInvoices.length || 3;
+    const within = Number(inv.amount) || totalPlanned;
+    const others = myInvoices.slice(1);
+    const arrearsSum = others.reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
+    const due = inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-GB') : '';
+    return buildConcordiaChallan({
+      studentId: student.rollNo || rollTrim,
+      billNo: inv.challanNo || String(inv.id || '').slice(-6),
       studentName: student.name,
-      rollNo: student.rollNo || rollTrim,
+      fatherName: student.fatherName || student.guardian,
       className: deptLabel(student.program),
       section: student.section || section,
-      challanNo: data.challanNo || String(data.id || '').slice(0, 12),
-      amount: data.amount ?? myInvoices[0]?.amount ?? totalPlanned,
-      type: data.type || 'Installment',
-      status: data.status || 'Unpaid',
-      dueDate: data.dueDate, month: data.month, year: data.year,
+      feeIns: `1 of ${total}`,
+      particulars: inv.month ? `${inv.month} Payable` : 'Installment 1 Payable',
+      items: [{ name: 'College Fee', amount: within }],
+      payableWithin: within,
+      payableAfter: within + Math.round(within * 0.05),
+      dueDate: due,
+      payableBefore: due,
+      arrears: others.length ? `Ins:${others.length} Amount: ${arrearsSum}` : '',
     });
   };
   const downloadChallan = async () => {
@@ -1767,25 +1772,28 @@ function FeeInstallmentsView({
         const full = await api.getChallanData(inv.id);
         data = { ...inv, ...full };
       } catch {}
-      const doc = await buildFeeChallan({
-        instituteName: data.instituteName || user?.instituteName,
-        branchName: data.branchName || user?.branchName,
-        docTitle: 'Fee Challan',
-        docSubtitle: 'Accountant Office',
-        refLabel: 'Challan #',
-        refValue: data.challanNo || String(data.id || '').slice(0, 12),
-        studentName: data.studentName || selected?.name || '—',
-        rollNo: data.rollNo || selected?.rollNo || '—',
-        className: data.className || data.class || selected?.class || '',
+      const insts = studentInstallments;
+      const idx = insts.findIndex((i: any) => i.id === inv.id);
+      const total = insts.length || 1;
+      const within = Number(data.amount) || 0;
+      const others = insts.filter((i: any) => i.id !== inv.id && (i.status || '').toLowerCase() !== 'paid');
+      const arrearsSum = others.reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
+      const due = data.dueDate ? new Date(data.dueDate).toLocaleDateString('en-GB') : '';
+      const doc = await buildConcordiaChallan({
+        studentId: data.rollNo || selected?.rollNo,
+        billNo: data.challanNo || String(data.id || '').slice(-6),
+        studentName: data.studentName || selected?.name,
+        fatherName: selected?.fatherName || selected?.guardian,
+        className: deptLabel(selected?.program) || data.className || data.class,
         section: data.section || selected?.section,
-        challanNo: data.challanNo || String(data.id || '').slice(0, 12),
-        amount: data.amount,
-        type: data.type || 'Tuition',
-        status: data.status || 'Unpaid',
-        dueDate: data.dueDate,
-        month: data.month,
-        year: data.year,
-        paidDate: data.paidDate || data.paidAt,
+        feeIns: `${idx >= 0 ? idx + 1 : 1} of ${total}`,
+        particulars: data.month ? `${data.month} Payable` : 'Installment Payable',
+        items: [{ name: 'College Fee', amount: within }],
+        payableWithin: within,
+        payableAfter: within + Math.round(within * 0.05),
+        dueDate: due,
+        payableBefore: due,
+        arrears: others.length ? `Ins:${others.length} Amount: ${arrearsSum}` : '',
       });
       const fileName = `Challan-${data.challanNo || data.id}.pdf`;
       savePdf(doc, fileName);
