@@ -74,7 +74,8 @@ import {
   Loader2,
   DollarSign,
 } from 'lucide-react';
-import { buildFeeChallan, savePdf, fmtMoney as pdfFmtMoney } from '@/lib/pdf-utils';
+import { savePdf, fmtMoney as pdfFmtMoney } from '@/lib/pdf-utils';
+import { buildConcordiaChallan } from '@/lib/challan';
 
 type Props = { activeModule: string; user: any };
 
@@ -923,26 +924,29 @@ function StudentFees({ user }: { user: any }) {
         const full = await api.getChallanData(inv.id);
         data = { ...inv, ...full };
       } catch {}
-      const doc = await buildFeeChallan({
-        instituteName: data.instituteName || user?.instituteName,
-        branchName: data.branchName || user?.branchName,
-        docTitle: 'Fee Challan',
-        docSubtitle: 'Student Portal',
-        refLabel: 'Challan #',
-        refValue: data.challanNo || String(data.id || '').slice(0, 12),
-        studentName: data.studentName || user?.name || '—',
-        rollNo: data.rollNo || user?.rollNo || '—',
-        className: data.className || data.class || user?.class || '',
+      
+      // Build the 3-copy bank challan (same format as Accountant Portal)
+      const within = Number(data.amount || 0);
+      const after = within + Math.round(within * 0.05);
+      const due = data.dueDate ? new Date(data.dueDate).toLocaleDateString('en-GB') : '';
+      
+      const doc = await buildConcordiaChallan({
+        studentId: data.rollNo || user?.rollNo,
+        billNo: data.challanNo || String(data.id || '').slice(-6),
+        studentName: data.studentName || user?.name,
+        fatherName: data.fatherName || user?.fatherName || user?.guardian,
+        className: data.className || data.class || user?.class,
         section: data.section || user?.section,
-        challanNo: data.challanNo || String(data.id || '').slice(0, 12),
-        amount: data.amount,
-        type: data.type || 'Tuition',
-        status: data.status || 'Unpaid',
-        dueDate: data.dueDate,
-        month: data.month,
-        year: data.year,
-        paidDate: data.paidDate || data.paidAt,
+        feeIns: data.type === 'Installment' ? '1 of 3' : '',
+        particulars: data.month ? `${data.month} Payable` : 'Installment Payable',
+        items: [{ name: 'College Fee', amount: within }],
+        payableWithin: within,
+        payableAfter: after,
+        dueDate: due,
+        payableBefore: due,
+        arrears: '',
       });
+      
       const fileName = `Challan-${data.challanNo || data.id}.pdf`;
       savePdf(doc, fileName);
       toast({ title: 'Challan downloaded', description: fileName });
