@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
+import { deptLabel } from './shared/concordia-hierarchy';
 import { useApp } from '@/lib/store';
 import { readSessionToken } from '@/lib/session-store';
 import { cn } from '@/lib/utils';
@@ -76,8 +77,37 @@ type TeacherClass = {
   name: string;
   section?: string;
   branchId?: string;
+  program?: string;
+  part?: string;
+  /** True when this teacher is the section In-charge (from users.assignments). */
+  incharge?: boolean;
   courses: { id: string; name: string; code?: string }[];
 };
+
+// Build the teacher's class list from the new users.assignments field
+// (one entry per program+part+section, aggregating its courses). This is the
+// source the Academic Office now uses via the "Assign Course" flow.
+function buildClassesFromAssignments(assignments: any[], branchId?: string): TeacherClass[] {
+  const map = new Map<string, TeacherClass>();
+  for (const a of assignments || []) {
+    const program = (a?.program || '').trim();
+    if (!program) continue;
+    const part = String(a?.part || '1');
+    const section = String(a?.section || '').toUpperCase();
+    const key = `${program}||${part}||${section}`;
+    let cls = map.get(key);
+    if (!cls) {
+      cls = { id: key, name: program, section, part, program, branchId, incharge: false, courses: [] };
+      map.set(key, cls);
+    }
+    const course = (a?.course || '').trim();
+    if (course && !cls.courses.some((c) => c.name.toLowerCase() === course.toLowerCase())) {
+      cls.courses.push({ id: `${key}||${course}`, name: course });
+    }
+    if (a?.incharge) cls.incharge = true;
+  }
+  return Array.from(map.values());
+}
 
 type Student = {
   id: string;
@@ -327,6 +357,8 @@ function useTeacherData(user: any) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const branchId = user?.branchId;
+  const assignments = Array.isArray(user?.assignments) ? user.assignments : [];
+  const assignmentsKey = JSON.stringify(assignments);
 
   useEffect(() => {
     let cancelled = false;
@@ -337,10 +369,17 @@ function useTeacherData(user: any) {
     Promise.all([
       api.getTeacherClasses().catch(() => []),
       api.platformUsers({ role: 'student', branchId }).catch(() => []),
+      // Fresh profile so newly-assigned courses appear without a re-login.
+      api.getMe().catch(() => null),
     ])
-      .then(([c, s]) => {
+      .then(([c, s, me]) => {
         if (cancelled) return;
-        setClasses(Array.isArray(c) ? (c as TeacherClass[]) : []);
+        // Prefer the new users.assignments (Academic "Assign Course" flow);
+        // fall back to the legacy teacher_class_courses list when empty.
+        const freshAssignments = Array.isArray((me as any)?.assignments) ? (me as any).assignments : assignments;
+        const fromAssign = buildClassesFromAssignments(freshAssignments, branchId);
+        const legacy = Array.isArray(c) ? (c as TeacherClass[]) : [];
+        setClasses(fromAssign.length > 0 ? fromAssign : legacy);
         setStudents(Array.isArray(s) ? (s as Student[]) : []);
         setError(null);
       })
@@ -354,7 +393,7 @@ function useTeacherData(user: any) {
     return () => {
       cancelled = true;
     };
-  }, [branchId]);
+  }, [branchId, assignmentsKey]);
 
   return { classes, students, loading, error };
 }
@@ -369,7 +408,8 @@ function studentsForClass(students: Student[], cls: TeacherClass): Student[] {
       (s) =>
         s.branchId === cls.branchId &&
         s.class === cls.name &&
-        (!cls.section || s.section === cls.section),
+        (!cls.section || s.section === cls.section) &&
+        (!cls.part || String((s as any).part || '1') === String(cls.part)),
     )
     .sort((a, b) =>
       (a.rollNo || '').localeCompare(b.rollNo || '', undefined, { numeric: true }),
@@ -862,7 +902,13 @@ function TeacherAttendance({
   const [existing, setExisting] = useState<boolean>(false);
   const [loadingExisting, setLoadingExisting] = useState(false);
 
-  const cls = classes.find((c) => c.id === classId) || null;
+  // Attendance is limited to sections this teacher is IN-CHARGE of. When the
+  // classes come from the new assignments (they carry `program`), keep only
+  // incharge sections; legacy allocations (no program tag) stay as-is.
+  const attendanceClasses = classes.some((c) => c.program)
+    ? classes.filter((c) => c.incharge)
+    : classes;
+  const cls = attendanceClasses.find((c) => c.id === classId) || null;
   const list = cls ? studentsForClass(students, cls) : [];
 
   // When class+date changes, check whether attendance was already marked.
@@ -964,9 +1010,11 @@ function TeacherAttendance({
                 <SelectValue placeholder="Select class…" />
               </SelectTrigger>
               <SelectContent>
-                {classes.map((c) => (
+                {attendanceClasses.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-500">You are not the in-charge of any section.</div>
+                ) : attendanceClasses.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.name} · Sec {c.section || 'A'}
+                    {deptLabel(c.name)} · Part {c.part || '1'} · Sec {c.section || 'A'}
                   </SelectItem>
                 ))}
               </SelectContent>

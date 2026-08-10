@@ -232,6 +232,7 @@ export const api = {
   logoutAllDevices: () =>
     request<{ success: boolean; revokedSessions: boolean; clearedTokens: boolean }>('auth/logout-all', { method: 'POST' }),
   // v4.4.0: Account & session info — last login, active sessions, active devices.
+  getMe: () => request<any>('auth/me'),
   getSessionInfo: () =>
     cachedGet<{
       currentSession: { token: string; issuedAt: number; expiresAt: number } | null;

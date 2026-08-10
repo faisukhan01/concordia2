@@ -230,6 +230,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     // session issuedAt for this user, EXCLUDING the current one), active
     // device count, and a list of recent sessions for the Settings page.
     // v4.5.1: Only count ACTIVE (non-expired) sessions.
+    // Fresh profile for the authenticated user — lets a client pick up
+    // server-side changes (e.g. new teacher course assignments) without a
+    // full re-login.
+    if (method === 'GET' && path === 'auth/me') {
+      const u = await requireAuth(req);
+      return NextResponse.json(buildUserProfile(u));
+    }
+
     if (method === 'GET' && path === 'auth/session-info') {
       const user = await requireAuth(req);
       const authHeader = req.headers.get('authorization') || '';
