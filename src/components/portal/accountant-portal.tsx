@@ -116,7 +116,7 @@ import {
   Zap,
   PieChart,
 } from 'lucide-react';
-import { buildFeeChallan, savePdf, printPdf } from '@/lib/pdf-utils';
+import { savePdf, printPdf } from '@/lib/pdf-utils';
 import { buildConcordiaChallan } from '@/lib/challan';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
@@ -1532,6 +1532,9 @@ function FeeInstallmentsView({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingStudent, setDeletingStudent] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [editingInstallment, setEditingInstallment] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [manualPlanMode, setManualPlanMode] = useState(false);
 
   // Delete student function
   const deleteStudent = async () => {
@@ -1648,6 +1651,115 @@ function FeeInstallmentsView({
     } finally {
       setBulkDownloading(false);
     }
+  };
+
+  // Start editing an installment
+  const startEditInstallment = (inv: any) => {
+    setEditingInstallment(inv.id);
+    setEditAmount(String(inv.amount || ''));
+  };
+
+  // Cancel editing
+  const cancelEditInstallment = () => {
+    setEditingInstallment(null);
+    setEditAmount('');
+  };
+
+  // Save edited installment amount with auto-recalculation
+  const saveEditInstallment = async (inv: any) => {
+    if (!selected || !editAmount) return;
+    
+    const newAmount = Number(editAmount);
+    if (newAmount <= 0) {
+      toast({ title: 'Invalid amount', description: 'Amount must be greater than 0', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      // Get all unpaid installments for this student
+      const unpaidInstallments = studentInvoices.filter(i => 
+        i.type === 'Installment' && (i.status || '').toLowerCase() !== 'paid'
+      );
+      
+      const currentInstallment = unpaidInstallments.find(i => i.id === inv.id);
+      if (!currentInstallment) return;
+      
+      // Calculate difference
+      const oldAmount = Number(currentInstallment.amount || 0);
+      const difference = oldAmount - newAmount;
+      
+      // Update current installment
+      await api.editInstallment(inv.id, { amount: newAmount });
+      
+      // If there's a difference, redistribute to other unpaid installments
+      if (difference !== 0 && unpaidInstallments.length > 1) {
+        const otherInstallments = unpaidInstallments.filter(i => i.id !== inv.id);
+        const redistributeAmount = difference / otherInstallments.length;
+        
+        for (const other of otherInstallments) {
+          const newOtherAmount = Number(other.amount || 0) + redistributeAmount;
+          if (newOtherAmount > 0) {
+            await api.editInstallment(other.id, { amount: Math.round(newOtherAmount) });
+          }
+        }
+      }
+      
+      // Update UI
+      onInvoiceUpdate({ ...inv, amount: newAmount });
+      cancelEditInstallment();
+      onRefresh(); // Refresh to get updated amounts
+      
+      toast({ 
+        title: 'Installment updated', 
+        description: `Amount changed to ${fmtMoney(newAmount)}${difference !== 0 ? ' and remaining balance redistributed' : ''}` 
+      });
+      
+    } catch (error: any) {
+      toast({ 
+        title: 'Update failed', 
+        description: error?.message || 'Could not update installment', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
+  // Enable manual plan mode with 4 empty installments
+  const startManualPlan = () => {
+    setManualPlanMode(true);
+    const today = new Date();
+    const emptyRows = Array.from({ length: 4 }, (_, i) => {
+      const dueDate = new Date(today);
+      dueDate.setMonth(today.getMonth() + i + 1); // Due monthly
+      return {
+        id: `manual-${i}`,
+        amount: '',
+        due: dueDate.toISOString().slice(0, 10),
+      };
+    });
+    setRows(emptyRows);
+    setPlanError(null);
+  };
+
+  // Add another manual installment (max 5 total)
+  const addManualInstallment = () => {
+    if (rows.length >= 5) return;
+    const lastRow = rows[rows.length - 1];
+    const lastDate = new Date(lastRow?.due || new Date());
+    const nextDate = new Date(lastDate);
+    nextDate.setMonth(lastDate.getMonth() + 1);
+    
+    setRows([...rows, {
+      id: `manual-${Date.now()}`,
+      amount: '',
+      due: nextDate.toISOString().slice(0, 10),
+    }]);
+  };
+
+  // Cancel manual plan mode
+  const cancelManualPlan = () => {
+    setManualPlanMode(false);
+    setRows([]);
+    setPlanError(null);
   };
 
   // Students with a locked base fee are the primary audience for this page.
@@ -2181,20 +2293,55 @@ function FeeInstallmentsView({
                 />
                 <div className="flex items-center gap-2 flex-wrap mb-3">
                   <span className="text-xs text-gray-500">
-                    Quick split (you can edit dates after):
+                    {manualPlanMode ? 'Manual Plan Mode:' : 'Quick split (you can edit dates after):'}
                   </span>
-                  {[3, 4, 5].map((n) => (
-                    <Button
-                      key={n}
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
-                      onClick={() => autoSplit(n)}
-                      disabled={!baseFee}
-                    >
-                      {n} installments
-                    </Button>
-                  ))}
+                  {!manualPlanMode ? (
+                    <>
+                      {[3, 4, 5].map((n) => (
+                        <Button
+                          key={n}
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-3 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
+                          onClick={() => autoSplit(n)}
+                          disabled={!baseFee}
+                        >
+                          {n} installments
+                        </Button>
+                      ))}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700"
+                        onClick={startManualPlan}
+                        disabled={!baseFee}
+                      >
+                        Manual Plan
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs border-green-200 bg-green-50 hover:bg-green-100 text-green-700"
+                        onClick={addManualInstallment}
+                        disabled={rows.length >= 5}
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1" />
+                        Add Installment
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
+                        onClick={cancelManualPlan}
+                      >
+                        <X className="h-3.5 w-3.5 mr-1" />
+                        Cancel Manual
+                      </Button>
+                    </>
+                  )}
                 </div>
                 {rows.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-gray-500 bg-white">
@@ -2243,9 +2390,12 @@ function FeeInstallmentsView({
                   <Button
                     variant="outline"
                     className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
-                    onClick={addRow}
+                    onClick={manualPlanMode ? addManualInstallment : addRow}
+                    disabled={manualPlanMode && rows.length >= 5}
                   >
-                    <Plus className="h-4 w-4 mr-1.5" /> Add Row
+                    <Plus className="h-4 w-4 mr-1.5" /> 
+                    {manualPlanMode ? 'Add Installment' : 'Add Row'}
+                    {manualPlanMode && ` (${rows.length}/5)`}
                   </Button>
                   <Button
                     className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium ml-auto"
@@ -2267,24 +2417,44 @@ function FeeInstallmentsView({
                 {rows.length > 0 && (
                   <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-1.5 mt-3">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">Base Fee</span>
+                      <span className="text-gray-500">{manualPlanMode ? 'Original Base Fee' : 'Base Fee'}</span>
                       <span className="font-mono text-gray-900">{fmtMoney(baseFee)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">Planned Total</span>
+                      <span className="text-gray-500">{manualPlanMode ? 'Custom Total' : 'Planned Total'}</span>
                       <span className="font-mono text-gray-900">{fmtMoney(totalPlanned)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-200">
-                      <span className="font-semibold text-gray-700">Remaining</span>
-                      <span
-                        className={cn(
-                          'font-bold tabular-nums font-mono',
-                          remaining === 0 ? 'text-emerald-700' : 'text-gray-900',
-                        )}
-                      >
-                        {fmtMoney(remaining)}
-                      </span>
-                    </div>
+                    {!manualPlanMode && (
+                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-200">
+                        <span className="font-semibold text-gray-700">Remaining</span>
+                        <span
+                          className={cn(
+                            'font-bold tabular-nums font-mono',
+                            remaining === 0 ? 'text-emerald-700' : 'text-gray-900',
+                          )}
+                        >
+                          {fmtMoney(remaining)}
+                        </span>
+                      </div>
+                    )}
+                    {manualPlanMode && (
+                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-200">
+                        <span className="font-semibold text-gray-700">Difference</span>
+                        <span
+                          className={cn(
+                            'font-bold tabular-nums font-mono',
+                            remaining === 0 ? 'text-emerald-700' : remaining > 0 ? 'text-blue-700' : 'text-amber-700',
+                          )}
+                        >
+                          {remaining > 0 ? '+' : ''}{fmtMoney(Math.abs(remaining))}
+                          {remaining !== 0 && (
+                            <span className="text-[10px] ml-1 font-normal">
+                              ({remaining > 0 ? 'over' : 'under'} base fee)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {planError && (
@@ -2362,9 +2532,37 @@ function FeeInstallmentsView({
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-sm font-bold text-gray-900 tabular-nums">
-                            {fmtMoney(Number(inv.amount || 0))}
-                          </p>
+                          {editingInstallment === inv.id ? (
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                value={editAmount}
+                                onChange={(e) => setEditAmount(e.target.value)}
+                                className="h-8 w-24 text-sm text-right"
+                                autoFocus
+                              />
+                              <Button
+                                size="sm"
+                                className="h-6 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                onClick={() => saveEditInstallment(inv)}
+                                disabled={!editAmount || Number(editAmount) <= 0}
+                              >
+                                ✓
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs"
+                                onClick={cancelEditInstallment}
+                              >
+                                ✕
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="text-sm font-bold text-gray-900 tabular-nums">
+                              {fmtMoney(Number(inv.amount || 0))}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <Button
@@ -2381,6 +2579,17 @@ function FeeInstallmentsView({
                             )}
                             PDF
                           </Button>
+                          {!isPaid && isInstallment && editingInstallment !== inv.id && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 text-xs border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700"
+                              onClick={() => startEditInstallment(inv)}
+                            >
+                              <Pencil className="h-3.5 w-3.5 mr-1" />
+                              Edit
+                            </Button>
+                          )}
                           {!isPaid && (
                             <Button
                               size="sm"

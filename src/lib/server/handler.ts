@@ -3157,6 +3157,52 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
     }
 
+    // PATCH /api/fee-invoices/[id] - Edit installment amount/due date
+    if (method === 'PATCH' && pathSegments[0] === 'fee-invoices' && pathSegments[1] && !pathSegments[2]) {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin');
+      const id = pathSegments[1];
+      const { amount, dueDate } = body || {};
+      
+      // Check if invoice exists
+      const inv = await db.execute({ sql: 'SELECT * FROM fee_invoices WHERE id = ?', args: [id] });
+      if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+      
+      const invoice = inv.rows[0] as any;
+      
+      // Don't allow editing paid invoices
+      if ((invoice.status || '').toLowerCase() === 'paid') {
+        return NextResponse.json({ error: 'Cannot edit paid invoices' }, { status: 400 });
+      }
+      
+      // Build update query dynamically
+      const updates: string[] = [];
+      const args: any[] = [];
+      
+      if (amount !== undefined) {
+        updates.push('amount = ?');
+        args.push(amount);
+      }
+      
+      if (dueDate !== undefined) {
+        updates.push('dueDate = ?');
+        args.push(dueDate);
+      }
+      
+      if (updates.length === 0) {
+        return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
+      }
+      
+      args.push(id); // for WHERE clause
+      
+      await db.execute({
+        sql: `UPDATE fee_invoices SET ${updates.join(', ')} WHERE id = ?`,
+        args,
+      });
+      
+      return NextResponse.json({ success: true, message: 'Installment updated' });
+    }
+
     // ===================== INSTALLMENTS (split locked base fee) =====================
     // Accountant splits the locked base fee into N installments; each
     // installment becomes a fee_invoice row with type='Installment' and a

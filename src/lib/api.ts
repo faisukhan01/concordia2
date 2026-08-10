@@ -503,6 +503,12 @@ export const api = {
     invalidateCache();
     return r;
   },
+  // Edit an existing installment amount
+  editInstallment: async (installmentId: string, updates: { amount?: number; dueDate?: string }) => {
+    const r = await request<any>(`fee-invoices/${installmentId}`, { method: 'PATCH', body: JSON.stringify(updates) });
+    invalidateCache();
+    return r;
+  },
   generateInvoices: async (month: string, year: number) => {
     const r = await request<any>('fee-invoices/generate', { method: 'POST', body: JSON.stringify({ month, year }) });
     invalidateCache();
