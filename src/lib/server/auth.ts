@@ -102,7 +102,7 @@ export function buildUserProfile(u: any) {
     status: u.status, mustChangePassword: u.mustChangePassword === 1, blocked: u.blocked === 1,
     instituteId: u.instituteId || null, instituteName: u.instituteName || null, instituteShort: u.instituteShort || null,
     branchId: u.branchId || null, branchName: u.branchName || null,
-    class: u.class || null, section: u.section || null,
+    class: u.class || null, section: u.section || null, part: u.part || null,
     guardian: u.guardian || null, ward: u.ward, wardId: u.wardId,
     fatherName: u.fatherName || null,
     guardianPhone: u.guardianPhone || null,
