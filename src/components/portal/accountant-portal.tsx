@@ -119,6 +119,7 @@ import {
 import { buildFeeChallan, savePdf, printPdf } from '@/lib/pdf-utils';
 import { buildConcordiaChallan } from '@/lib/challan';
 import jsPDF from 'jspdf';
+import JSZip from 'jszip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -129,6 +130,12 @@ import {
   AlertDialogDescription,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type Props = { activeModule: string; user: any };
 
@@ -1522,6 +1529,126 @@ function FeeInstallmentsView({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [generatedLogin, setGeneratedLogin] = useState<{ rollNo: string; password: string } | null>(null);
   const [generatingMonthly, setGeneratingMonthly] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingStudent, setDeletingStudent] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+
+  // Delete student function
+  const deleteStudent = async () => {
+    if (!selected) return;
+    setDeletingStudent(true);
+    try {
+      await api.deleteUser(selected.id);
+      onStudentUpdate({ id: selected.id, deleted: true });
+      setSelected(null); // Clear selection
+      setDeleteDialogOpen(false);
+      toast({ title: 'Student deleted', description: `${selected.name} has been removed from the system.` });
+      api.clearCache();
+    } catch (e: any) {
+      toast({ 
+        title: 'Delete failed', 
+        description: e?.message || 'Could not delete student. Please try again.', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setDeletingStudent(false);
+    }
+  };
+
+  // Bulk download all challans for section
+  const downloadAllChallans = async () => {
+    if (!displayedStudents?.length) return;
+    
+    setBulkDownloading(true);
+    try {
+      const zip = new JSZip();
+      const section = drill.section || drill.cls;
+      const sectionName = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}`;
+      
+      // Process each student
+      for (const student of displayedStudents) {
+        try {
+          // Get all invoices for this student
+          const studentInvoices = invoices.filter((inv) => 
+            (inv.studentId === student.id || inv.userId === student.id) && 
+            inv.type === 'Installment'
+          ).sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+          
+          // Find the first unpaid invoice (next due)
+          const nextUnpaid = studentInvoices.find(inv => 
+            (inv.status || '').toLowerCase() !== 'paid'
+          );
+          
+          if (!nextUnpaid) continue; // Skip if all paid or no installments
+          
+          // Calculate installment number
+          const paidCount = studentInvoices.filter(inv => 
+            (inv.status || '').toLowerCase() === 'paid'
+          ).length;
+          const totalInstallments = studentInvoices.length;
+          const installmentNum = paidCount + 1;
+          
+          // Build challan PDF
+          const within = Number(nextUnpaid.amount || 0);
+          const after = within + Math.round(within * 0.05);
+          const due = nextUnpaid.dueDate ? new Date(nextUnpaid.dueDate).toLocaleDateString('en-GB') : '';
+          
+          const doc = await buildConcordiaChallan({
+            studentId: student.rollNo || student.id,
+            billNo: nextUnpaid.challanNo || String(nextUnpaid.id || '').slice(-6),
+            studentName: student.name,
+            fatherName: student.fatherName || student.guardian,
+            className: student.class || drill.cls?.name,
+            section: student.section || section?.section,
+            feeIns: `${installmentNum} of ${totalInstallments}`,
+            particulars: nextUnpaid.month ? `${nextUnpaid.month} Payable` : `Installment ${installmentNum} Payable`,
+            items: [{ name: 'College Fee', amount: within }],
+            payableWithin: within,
+            payableAfter: after,
+            dueDate: due,
+            payableBefore: due,
+            arrears: paidCount > 0 ? `Paid: ${paidCount} installments` : '',
+          });
+          
+          // Get PDF as blob
+          const pdfBlob = doc.output('blob');
+          const fileName = `${student.rollNo || student.name.replace(/[^a-zA-Z0-9]/g, '_')}_Installment_${installmentNum}.pdf`;
+          
+          // Add to ZIP
+          zip.file(fileName, pdfBlob);
+          
+        } catch (error) {
+          console.error(`Failed to generate challan for ${student.name}:`, error);
+          // Continue with other students
+        }
+      }
+      
+      // Generate and download ZIP
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sectionName}_All_Challans_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      toast({ 
+        title: 'All challans downloaded', 
+        description: `ZIP file with ${displayedStudents.length} student challans created.` 
+      });
+      
+    } catch (error: any) {
+      toast({ 
+        title: 'Bulk download failed', 
+        description: error?.message || 'Could not generate ZIP file. Please try again.', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
 
   // Students with a locked base fee are the primary audience for this page.
   // Fee & Installments works on PLACED students only — those the Accountant
@@ -1988,21 +2115,41 @@ function FeeInstallmentsView({
           <div className="space-y-5">
             {/* Student summary */}
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex items-center justify-between gap-3">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-gray-900 truncate">{selected.name}</p>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {selected.rollNo} · {selected.class || '—'}
                   {selected.section ? `-${selected.section}` : ''}
                 </p>
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-[10px] uppercase tracking-wider text-gray-400">
-                  Base Fee (locked)
-                </p>
-                <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5 justify-end mt-0.5">
-                  <Lock className="h-3 w-3 text-gray-400" />
-                  {fmtMoney(baseFee)}
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="text-right shrink-0">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-400">
+                    Base Fee (locked)
+                  </p>
+                  <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5 justify-end mt-0.5">
+                    <Lock className="h-3 w-3 text-gray-400" />
+                    {fmtMoney(baseFee)}
+                  </p>
+                </div>
+                
+                {/* Actions dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem 
+                      onClick={() => setDeleteDialogOpen(true)}
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Student
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
@@ -2496,7 +2643,6 @@ function FeeInstallmentsView({
           <HierarchyBreadcrumb
             dept={drill.dept}
             part={drill.part}
-            cls={drill.cls.name}
             section={(drill.section || drill.cls).section}
             onClear={handleClearHierarchy}
           />
@@ -2510,25 +2656,83 @@ function FeeInstallmentsView({
                 {displayedStudents.length === 1 ? '' : 's'} in this section
               </p>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-              onClick={() =>
-                setDrill((d) => ({
-                  ...d,
-                  cls: d.cls,
-                  section: null,
-                }))
-              }
-            >
-              <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-              Back to sections
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-3 text-xs border-[#F26522] text-[#F26522] hover:bg-[#F26522] hover:text-white"
+                onClick={downloadAllChallans}
+                disabled={bulkDownloading || displayedStudents.length === 0}
+              >
+                {bulkDownloading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3.5 w-3.5 mr-1" />
+                    Download All Challans
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                onClick={() =>
+                  setDrill((d) => ({
+                    ...d,
+                    cls: d.cls,
+                    section: null,
+                  }))
+                }
+              >
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                Back to sections
+              </Button>
+            </div>
           </div>
           {renderStudentPickerAndDetail()}
         </motion.div>
       )}
+      
+      {/* Delete Student Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Student Record</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{selected?.name}</strong>? This will permanently remove:
+              <br />• Student record and profile
+              <br />• All fee installments and invoices
+              <br />• Login credentials and access
+              <br /><br />
+              <strong>This action cannot be undone.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingStudent}>Cancel</AlertDialogCancel>
+            <Button 
+              variant="destructive" 
+              onClick={deleteStudent}
+              disabled={deletingStudent}
+            >
+              {deletingStudent ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Student
+                </>
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -3207,7 +3411,6 @@ function MiscChargesView({
           <HierarchyBreadcrumb
             dept={drill.dept}
             part={drill.part}
-            cls={drill.cls.name}
             section={(drill.section || drill.cls).section}
             onClear={handleClearHierarchy}
           />
