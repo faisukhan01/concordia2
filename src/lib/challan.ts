@@ -70,6 +70,32 @@ export async function buildConcordiaChallan(d: ChallanData): Promise<jsPDF> {
   return doc;
 }
 
+// Combine many students' challans into ONE multi-page PDF — one landscape A4
+// page (3 copies) per student. Ideal for printing a whole section at once.
+// Assets are loaded a single time and reused across every page.
+export async function buildConcordiaChallanBook(list: ChallanData[]): Promise<jsPDF> {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const [logo, qr] = await Promise.all([
+    loadDataUrl('/challan-logo.jpg'),
+    loadDataUrl('/challan-qr.png'),
+  ]);
+
+  const pageW = 297;
+  const margin = 6;
+  const gap = 4;
+  const copyW = (pageW - margin * 2 - gap * 2) / 3;
+  const top = 8;
+  const labels = ['STUDENT COPY', 'COLLEGE COPY', 'BANK COPY'];
+
+  list.forEach((d, idx) => {
+    if (idx > 0) doc.addPage();
+    for (let i = 0; i < 3; i++) {
+      drawCopy(doc, margin + i * (copyW + gap), top, copyW, labels[i], d, logo, qr);
+    }
+  });
+  return doc;
+}
+
 function drawCopy(
   doc: jsPDF,
   x: number,

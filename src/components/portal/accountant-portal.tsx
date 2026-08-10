@@ -117,7 +117,7 @@ import {
   PieChart,
 } from 'lucide-react';
 import { savePdf, printPdf } from '@/lib/pdf-utils';
-import { buildConcordiaChallan } from '@/lib/challan';
+import { buildConcordiaChallan, buildConcordiaChallanBook } from '@/lib/challan';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -1532,6 +1532,7 @@ function FeeInstallmentsView({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingStudent, setDeletingStudent] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [sectionPdfDownloading, setSectionPdfDownloading] = useState(false);
   const [editingInstallment, setEditingInstallment] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [manualPlanMode, setManualPlanMode] = useState(false);
@@ -1650,6 +1651,64 @@ function FeeInstallmentsView({
       });
     } finally {
       setBulkDownloading(false);
+    }
+  };
+
+  // Build the ChallanData for a student's next-due installment (shared by the
+  // ZIP export and the combined-PDF export). Returns null when nothing is due.
+  const buildChallanDataForStudent = (student: any) => {
+    const studentInvoices = invoices.filter((inv) =>
+      (inv.studentId === student.id || inv.userId === student.id) &&
+      inv.type === 'Installment'
+    ).sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+    const nextUnpaid = studentInvoices.find(inv => (inv.status || '').toLowerCase() !== 'paid');
+    if (!nextUnpaid) return null;
+    const paidCount = studentInvoices.filter(inv => (inv.status || '').toLowerCase() === 'paid').length;
+    const totalInstallments = studentInvoices.length;
+    const installmentNum = paidCount + 1;
+    const within = Number(nextUnpaid.amount || 0);
+    const after = within + Math.round(within * 0.05);
+    const due = nextUnpaid.dueDate ? new Date(nextUnpaid.dueDate).toLocaleDateString('en-GB') : '';
+    return {
+      studentId: student.rollNo || student.id,
+      billNo: nextUnpaid.challanNo || String(nextUnpaid.id || '').slice(-6),
+      studentName: student.name,
+      fatherName: student.fatherName || student.guardian,
+      className: student.class || drill.cls?.name,
+      section: student.section || (drill.section || drill.cls)?.section,
+      feeIns: `${installmentNum} of ${totalInstallments}`,
+      particulars: nextUnpaid.month ? `${nextUnpaid.month} Payable` : `Installment ${installmentNum} Payable`,
+      items: [{ name: 'College Fee', amount: within }],
+      payableWithin: within,
+      payableAfter: after,
+      dueDate: due,
+      payableBefore: due,
+      arrears: paidCount > 0 ? `Paid: ${paidCount} installments` : '',
+    };
+  };
+
+  // Download the WHOLE section's challans as ONE multi-page PDF (one page per
+  // student) — ready to print in a single job, no unzipping.
+  const downloadSectionSinglePdf = async () => {
+    if (!displayedStudents?.length) return;
+    setSectionPdfDownloading(true);
+    try {
+      const section = drill.section || drill.cls;
+      const sectionName = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}`;
+      const list = displayedStudents
+        .map((s) => buildChallanDataForStudent(s))
+        .filter(Boolean) as any[];
+      if (list.length === 0) {
+        toast({ title: 'Nothing to print', description: 'No students in this section have an unpaid installment.', variant: 'destructive' });
+        return;
+      }
+      const doc = await buildConcordiaChallanBook(list);
+      doc.save(`${sectionName}_All_Challans_${new Date().toISOString().slice(0, 10)}.pdf`);
+      toast({ title: 'Section challans ready', description: `${list.length} challans in one PDF — ready to print.` });
+    } catch (error: any) {
+      toast({ title: 'Could not build PDF', description: error?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSectionPdfDownloading(false);
     }
   };
 
@@ -2875,6 +2934,24 @@ function FeeInstallmentsView({
             </div>
             <div className="flex items-center gap-2">
               <Button
+                size="sm"
+                className="h-8 px-3 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white"
+                onClick={downloadSectionSinglePdf}
+                disabled={sectionPdfDownloading || displayedStudents.length === 0}
+              >
+                {sectionPdfDownloading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    Building PDF...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-3.5 w-3.5 mr-1" />
+                    Print All (One PDF)
+                  </>
+                )}
+              </Button>
+              <Button
                 variant="outline"
                 size="sm"
                 className="h-8 px-3 text-xs border-[#F26522] text-[#F26522] hover:bg-[#F26522] hover:text-white"
@@ -2889,7 +2966,7 @@ function FeeInstallmentsView({
                 ) : (
                   <>
                     <Download className="h-3.5 w-3.5 mr-1" />
-                    Download All Challans
+                    Download All (ZIP)
                   </>
                 )}
               </Button>
