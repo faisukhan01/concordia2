@@ -995,7 +995,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'PATCH' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments.length === 3) {
       const user = await requireAuth(req);
       const id = pathSegments[2];
-      const { name, email, password, blocked, classId, addCourseIds, removeClassId, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, baseFeePaid, fatherCnic, gender, class: cls, section, part, subjects, classes, rollNo } = body || {};
+      const { name, email, password, blocked, classId, addCourseIds, removeClassId, fatherName, guardian, guardianPhone, cnic, dob, address, prevResult, program, photoUrl, baseFee, baseFeeLocked, baseFeePaid, fatherCnic, gender, class: cls, section, part, subjects, classes, assignments, rollNo } = body || {};
       const r = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
       if (r.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
       const target = r.rows[0] as any;
@@ -1057,6 +1057,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (part !== undefined) await db.execute({ sql: 'UPDATE users SET part = ? WHERE id = ?', args: [part === '2' ? '2' : '1', target.id] });
       if (subjects !== undefined) await db.execute({ sql: 'UPDATE users SET subjects = ? WHERE id = ?', args: [subjects ? JSON.stringify(subjects) : null, target.id] });
       if (classes !== undefined) await db.execute({ sql: 'UPDATE users SET classes = ? WHERE id = ?', args: [classes ? JSON.stringify(classes) : null, target.id] });
+      if (assignments !== undefined) await db.execute({ sql: 'UPDATE users SET assignments = ? WHERE id = ?', args: [assignments ? JSON.stringify(assignments) : null, target.id] });
       if (rollNo !== undefined) await db.execute({ sql: 'UPDATE users SET rollNo = ? WHERE id = ?', args: [rollNo || null, target.id] });
       if (classId && addCourseIds && addCourseIds.length > 0) {
         // Dedupe against existing TCC rows for this (teacher, class) so re-adding

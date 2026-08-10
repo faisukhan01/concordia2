@@ -660,10 +660,31 @@ function ClassesAndTeachersView({ user }: { user: any }) {
   }, [searchInput]);
 
   // ── Add-teacher form state (COPIED from accountant-portal LoginsView Teacher tab)
-  const [teacherForm, setTeacherForm] = useState({ name: '', rollNo: '', email: '', password: '' });
+  const [teacherForm, setTeacherForm] = useState({ name: '', rollNo: '', email: '', phone: '', password: '' });
   const [savingTeacher, setSavingTeacher] = useState(false);
   const [created, setCreated] = useState<{ user: string; pass: string; name: string } | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+
+  // ── Teachers page: Add-teacher sheet, per-teacher delete, Assign-Course + View
+  const [addOpen, setAddOpen] = useState(false);
+  const [deletingTeacherId, setDeletingTeacherId] = useState<string | null>(null);
+  const [assignTarget, setAssignTarget] = useState<any | null>(null);   // teacher getting a course assignment
+  const [viewTarget, setViewTarget] = useState<any | null>(null);       // teacher whose details are shown
+  const [assignForm, setAssignForm] = useState<{ program: string; part: '1' | '2'; section: string; course: string; incharge: boolean }>(
+    { program: DEPARTMENTS[0], part: '1', section: '', course: '', incharge: false },
+  );
+  const [savingAssign, setSavingAssign] = useState(false);
+
+  // Sections available for the Assign-Course form's current program + part.
+  const assignSectionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of classes) {
+      if ((c.program || '').trim() === assignForm.program && String(c.part || '1') === assignForm.part && c.section) {
+        set.add(String(c.section).toUpperCase());
+      }
+    }
+    return Array.from(set).sort();
+  }, [classes, assignForm.program, assignForm.part]);
 
   // Manage-existing-teachers state
   const [teachersSearch, setTeachersSearch] = useState('');
@@ -801,11 +822,14 @@ function ClassesAndTeachersView({ user }: { user: any }) {
     const plannedEmail = teacherForm.email || `${rollNoTrim.toLowerCase()}@concordia.edu.pk`;
     setSavingTeacher(true);
     try {
-      const password = teacherForm.password || 'teacher' + Math.floor(1000 + Math.random() * 9000);
+      // Every teacher's first-time password is the same default (concordia1234);
+      // they change it on first login — matching how student logins work.
+      const password = teacherForm.password || 'concordia1234';
       await api.createPlatformUser({
         name: teacherForm.name,
         email: plannedEmail,
         rollNo: teacherForm.rollNo,
+        guardianPhone: teacherForm.phone.trim() || null,
         password,
         role: 'teacher',
         branchId: user?.branchId,
@@ -814,13 +838,73 @@ function ClassesAndTeachersView({ user }: { user: any }) {
       });
       setCreated({ user: teacherForm.rollNo, pass: password, name: teacherForm.name });
       setFormBlank();
+      setAddOpen(false);
       load();
       toast({ title: 'Teacher login created', description: `${teacherForm.name} — username ${teacherForm.rollNo}` });
     } catch (e: any) {
       toast({ title: 'Failed to create login', description: e?.message || 'Please try again.', variant: 'destructive' });
     } finally { setSavingTeacher(false); }
   };
-  const setFormBlank = () => setTeacherForm({ name: '', rollNo: '', email: '', password: '' });
+  const setFormBlank = () => setTeacherForm({ name: '', rollNo: '', email: '', phone: '', password: '' });
+
+  // Delete a teacher entirely.
+  const deleteTeacher = async (t: any) => {
+    if (typeof window !== 'undefined' &&
+      !window.confirm(`Delete teacher ${t.name}? This permanently removes their login and assignments.`)) return;
+    setDeletingTeacherId(t.id);
+    try {
+      await api.deleteUser(t.id);
+      setTeachers((prev) => prev.filter((x) => x.id !== t.id));
+      toast({ title: 'Teacher deleted', description: t.name });
+    } catch (e: any) {
+      toast({ title: 'Could not delete teacher', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setDeletingTeacherId(null);
+    }
+  };
+
+  // Save the current Assign-Course form as a new assignment on the teacher.
+  const saveAssignment = async () => {
+    if (!assignTarget) return;
+    const course = assignForm.course.trim();
+    const section = assignForm.section.trim().toUpperCase();
+    if (!course) { toast({ title: 'Enter a course name', variant: 'destructive' }); return; }
+    if (!section) { toast({ title: 'Select a section', variant: 'destructive' }); return; }
+    const existing: any[] = Array.isArray(assignTarget.assignments) ? assignTarget.assignments : [];
+    const dup = existing.some((a) =>
+      a.program === assignForm.program && String(a.part) === assignForm.part &&
+      String(a.section).toUpperCase() === section && (a.course || '').toLowerCase() === course.toLowerCase());
+    if (dup) { toast({ title: 'Already assigned', description: `${course} · ${deptLabel(assignForm.program)} · Part ${assignForm.part} · ${section}`, variant: 'destructive' }); return; }
+    const next = [...existing, { program: assignForm.program, part: assignForm.part, section, course, incharge: assignForm.incharge }];
+    setSavingAssign(true);
+    try {
+      await api.editUser(assignTarget.id, { assignments: next });
+      const updated = { ...assignTarget, assignments: next };
+      setAssignTarget(updated);
+      setTeachers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      setAssignForm((f) => ({ ...f, course: '', incharge: false }));
+      toast({ title: 'Course assigned', description: `${course} · ${deptLabel(assignForm.program)} · Part ${assignForm.part} · ${section}` });
+    } catch (e: any) {
+      toast({ title: 'Could not assign course', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSavingAssign(false);
+    }
+  };
+
+  // Remove one assignment (by index) from a teacher.
+  const removeAssignment = async (teacher: any, index: number) => {
+    const existing: any[] = Array.isArray(teacher.assignments) ? teacher.assignments : [];
+    const next = existing.filter((_, i) => i !== index);
+    try {
+      await api.editUser(teacher.id, { assignments: next });
+      const updated = { ...teacher, assignments: next };
+      if (assignTarget?.id === teacher.id) setAssignTarget(updated);
+      if (viewTarget?.id === teacher.id) setViewTarget(updated);
+      setTeachers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (e: any) {
+      toast({ title: 'Could not remove', description: e?.message || 'Please try again.', variant: 'destructive' });
+    }
+  };
 
   // ── Teacher edit helpers (copied from accountant)
   const openEditTeacher = (t: any) => {
@@ -1017,14 +1101,19 @@ function ClassesAndTeachersView({ user }: { user: any }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Classes & Teachers"
-        subtitle="Add sections under each program (Part 1 / Part 2), add teacher logins, and assign teachers to classes."
+        title="Teachers"
+        subtitle="Add teachers, then assign their courses & sections (and mark who is the section In-charge)."
+        action={
+          <button onClick={() => { setFormBlank(); setAddOpen(true); }} className={cn(btnPrimary, 'h-10')}>
+            <Plus className="h-4 w-4" /> Add Teacher
+          </button>
+        }
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard icon={Users} label="Total Teachers" value={teachers.length} sub="Active faculty" />
         <StatCard icon={BookOpen} label="Total Sections" value={totalSections} sub={`${uniqueNames} unique class name(s)`} />
         <StatCard icon={GraduationCap} label="Total Students" value={students.length} sub="Across all classes" />
-        <StatCard icon={Users} label="Total Teachers" value={teachers.length} sub="Active faculty" />
       </div>
 
       {/* Add-class removed — sections are assigned by the Accountant during
@@ -1108,167 +1197,63 @@ function ClassesAndTeachersView({ user }: { user: any }) {
         </div>
       )}
 
-      {tab === 'teacher' && (
-        <>
-          {/* Add-teacher form (COPIED from accountant LoginsView Teacher tab) */}
-          <div className="rounded-xl border border-gray-200 bg-white p-5 max-w-2xl">
-            <SectionHeader
-              title="New Teacher Login"
-              desc="Credentials auto-generate if you leave email / password blank."
-            />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Full Name" required>
-                <Input ref={nameRef} value={teacherForm.name} onChange={(e) => setTeacherForm({ ...teacherForm, name: e.target.value })} className={inputCls} placeholder="Ayesha Khan" />
-              </Field>
-              <Field label="Teacher ID / Roll No" required>
-                <Input value={teacherForm.rollNo} onChange={(e) => setTeacherForm({ ...teacherForm, rollNo: e.target.value })} className={inputCls} placeholder="T001" />
-              </Field>
-              <Field label="Email (optional)">
-                <Input value={teacherForm.email} onChange={(e) => setTeacherForm({ ...teacherForm, email: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
-              </Field>
-              <Field label="Password (optional)">
-                <Input value={teacherForm.password} onChange={(e) => setTeacherForm({ ...teacherForm, password: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
-                {pwLevel === 'empty' ? (
-                  <p className="text-[11px] text-gray-500 mt-1.5">Will be auto-generated (e.g. teacher4827).</p>
-                ) : (
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <div className="h-1 flex-1 rounded-full bg-gray-100 overflow-hidden">
-                      <div className={cn('h-full rounded-full transition-all', sm.bar)} style={{ width: sm.width }} />
-                    </div>
-                    <span className={cn('text-[11px] font-medium tabular-nums', sm.color)}>{sm.label}</span>
-                  </div>
-                )}
-              </Field>
-            </div>
-            <div className="mt-5">
-              <button onClick={submitTeacher} disabled={savingTeacher} className={btnPrimary}>
-                {savingTeacher ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                Generate Login
-              </button>
-            </div>
-          </div>
-
-          {/* Manage Existing Teachers list (COPIED from accountant) */}
-          <div className="rounded-xl border border-gray-200 bg-white p-5">
-            <SectionHeader
-              title="Manage Existing Teachers"
-              desc="Edit portal details or block / unblock any teacher in your branch."
-              action={
-                <button onClick={load} disabled={loading} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-[#F26522] font-medium disabled:opacity-60">
-                  <Loader2 className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
-                </button>
-              }
-            />
-            <div className="relative mb-4">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input value={teachersSearch} onChange={(e) => setTeachersSearch(e.target.value)} placeholder="Search by name or Teacher ID…" className={cn(inputCls, 'pl-9')} />
-            </div>
-            {loading && teachers.length === 0 ? (
-              <SkeletonTable rows={4} />
-            ) : teachers.length === 0 ? (
-              <EmptyState icon={Users} title="No teachers found" desc="Create a new teacher login above — it will appear here once created." />
-            ) : filteredTeachers.length === 0 ? (
-              <EmptyState icon={Search} title="No matching teachers" desc="Try a different search term." />
-            ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto concordia-scroll pr-1">
-                {filteredTeachers.map((t) => {
-                  const blocked = isBlocked(t);
-                  return (
-                    <div key={t.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border border-gray-200">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-9 w-9 rounded-lg border border-gray-200 bg-gray-50 grid place-items-center shrink-0">
-                          <Users className="h-4 w-4 text-gray-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
-                            {blocked ? <BlockedBadge /> : (
-                              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                                <Check className="h-3 w-3" /> Active
-                              </span>
-                            )}
-                            {t.title ? <span className="text-[11px] text-gray-500">{t.title}</span> : null}
-                          </div>
-                          <p className="text-[11px] text-gray-500 truncate">
-                            {t.rollNo || '—'}{t.email ? ` · ${t.email}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Button size="sm" variant="outline" className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-8 px-3 text-xs font-medium" onClick={() => openEditTeacher(t)}>
-                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
-                        </Button>
-                        {blocked ? (
-                          <Button size="sm" variant="outline" className="border border-emerald-100 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg h-8 px-3 text-xs font-medium" onClick={() => toggleTeacherBlock(t)} disabled={blockingTeacherId === t.id}>
-                            {blockingTeacherId === t.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Lock className="h-3.5 w-3.5 mr-1" />} Unblock
-                          </Button>
-                        ) : (
-                          <Button size="sm" variant="outline" className="border border-rose-100 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg h-8 px-3 text-xs font-medium" onClick={() => toggleTeacherBlock(t)} disabled={blockingTeacherId === t.id}>
-                            {blockingTeacherId === t.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Lock className="h-3.5 w-3.5 mr-1" />} Block
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Class list (always visible below the tab forms) */}
+      {/* Teachers table — ID · Name · Email · Phone · Courses + row actions */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <SectionHeader title="All Classes" desc={`${totalSections} section(s) in this campus`} />
+        <SectionHeader
+          title="All Teachers"
+          desc="View, edit or delete a teacher, or assign their courses & sections."
+          action={
+            <button onClick={load} disabled={loading} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-[#F26522] font-medium disabled:opacity-60">
+              <Loader2 className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
+            </button>
+          }
+        />
         <div className="relative mb-4 w-full sm:max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search by class name or section…" className={cn(inputCls, 'pl-9 h-9')} />
+          <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Input value={teachersSearch} onChange={(e) => setTeachersSearch(e.target.value)} placeholder="Search by name or Teacher ID…" className={cn(inputCls, 'pl-9 h-9')} />
         </div>
-        {loading ? (
+        {loading && teachers.length === 0 ? (
           <SkeletonTable rows={4} />
-        ) : classes.length === 0 ? (
-          <EmptyState icon={BookOpen} title="No classes yet" desc="Create your first class section using the Add Class tab above." />
-        ) : filteredClasses.length === 0 ? (
-          <EmptyState icon={Search} title="No matches" desc={`No classes match "${searchQuery}".`} />
+        ) : teachers.length === 0 ? (
+          <EmptyState icon={Users} title="No teachers yet" desc="Click “Add Teacher” to create the first teacher login." />
+        ) : filteredTeachers.length === 0 ? (
+          <EmptyState icon={Search} title="No matching teachers" desc="Try a different search term." />
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Class Name</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Section</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Department</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Part</TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">Students</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Teacher ID</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Name</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Email</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400">Phone</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-center">Courses</TableHead>
                   <TableHead className="text-xs font-medium uppercase tracking-wider text-gray-400 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredClasses.map((c) => {
-                  const count = studentCount(c);
+                {filteredTeachers.map((t) => {
+                  const aCount = Array.isArray(t.assignments) ? t.assignments.length : 0;
                   return (
-                    <TableRow key={c.id} className="border-gray-100 hover:bg-gray-50">
-                      <TableCell className="text-sm font-medium text-gray-900">{c.name}</TableCell>
-                      <TableCell className="text-sm text-gray-700">{c.section}</TableCell>
-                      <TableCell className="text-sm text-gray-600">{c.program || '—'}</TableCell>
-                      <TableCell className="text-sm text-gray-600">{c.part ? `Part ${c.part}` : '—'}</TableCell>
-                      <TableCell className="text-sm text-gray-700 text-center">
-                        <div className="inline-flex items-center gap-1.5">
-                          {count > 0 ? (
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          ) : (
-                            <span className="inline-flex items-center rounded-md border border-gray-200 bg-gray-100 text-gray-500 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">Empty</span>
-                          )}
-                          <span className="tabular-nums">{count}</span>
-                        </div>
-                      </TableCell>
+                    <TableRow key={t.id} className="border-gray-100 hover:bg-gray-50">
+                      <TableCell className="text-sm font-mono text-gray-700">{t.rollNo || '—'}</TableCell>
+                      <TableCell className="text-sm font-medium text-gray-900">{t.name}</TableCell>
+                      <TableCell className="text-sm text-gray-600">{t.email || '—'}</TableCell>
+                      <TableCell className="text-sm text-gray-600">{t.guardianPhone || '—'}</TableCell>
+                      <TableCell className="text-sm text-gray-700 text-center tabular-nums">{aCount}</TableCell>
                       <TableCell className="text-right">
                         <div className="inline-flex items-center gap-1">
-                          <button onClick={() => { setDetailClass(c); setShowAllStudents(false); setAssignTeacherId(''); }} className="h-8 px-2 text-xs text-gray-600 hover:text-[#F26522] hover:bg-orange-50 rounded inline-flex items-center gap-1">
-                            <Users className="h-3.5 w-3.5" /> View
+                          <Button size="sm" className="h-8 px-2.5 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white" onClick={() => { setAssignForm({ program: DEPARTMENTS[0], part: '1', section: '', course: '', incharge: false }); setAssignTarget(t); }}>
+                            <BookOpen className="h-3.5 w-3.5 mr-1" /> Assign Course
+                          </Button>
+                          <button onClick={() => setViewTarget(t)} className="h-8 px-2 text-xs text-gray-600 hover:text-[#F26522] hover:bg-orange-50 rounded inline-flex items-center gap-1">
+                            <ClipboardList className="h-3.5 w-3.5" /> View
                           </button>
-                          <button onClick={() => setDeleteTarget(c)} className="h-8 px-2 text-xs text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded inline-flex items-center gap-1">
-                            <AlertCircle className="h-3.5 w-3.5" /> Delete
+                          <button onClick={() => openEditTeacher(t)} className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded inline-flex items-center gap-1">
+                            <Pencil className="h-3.5 w-3.5" /> Edit
+                          </button>
+                          <button onClick={() => deleteTeacher(t)} disabled={deletingTeacherId === t.id} className="h-8 px-2 text-xs text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded inline-flex items-center gap-1 disabled:opacity-50">
+                            {deletingTeacherId === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete
                           </button>
                         </div>
                       </TableCell>
@@ -1280,6 +1265,145 @@ function ClassesAndTeachersView({ user }: { user: any }) {
           </div>
         )}
       </div>
+
+      {/* ── Add Teacher sheet (opened by the header button) ── */}
+      <Sheet open={addOpen} onOpenChange={(o) => setAddOpen(o)}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white">
+          <SheetHeader>
+            <SheetTitle className="text-base font-semibold text-gray-900">Add Teacher</SheetTitle>
+            <SheetDescription className="text-sm text-gray-500">
+              Default password is <span className="font-semibold">concordia1234</span> — the teacher changes it on first login. Assign courses & sections after creating.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Full Name" required>
+                <Input ref={nameRef} value={teacherForm.name} onChange={(e) => setTeacherForm({ ...teacherForm, name: e.target.value })} className={inputCls} placeholder="Ayesha Khan" />
+              </Field>
+              <Field label="Teacher ID" required>
+                <Input value={teacherForm.rollNo} onChange={(e) => setTeacherForm({ ...teacherForm, rollNo: e.target.value })} className={inputCls} placeholder="T001" />
+              </Field>
+              <Field label="Email (optional)">
+                <Input value={teacherForm.email} onChange={(e) => setTeacherForm({ ...teacherForm, email: e.target.value })} className={inputCls} placeholder="auto-generated if blank" />
+              </Field>
+              <Field label="Phone">
+                <Input value={teacherForm.phone} onChange={(e) => setTeacherForm({ ...teacherForm, phone: e.target.value })} className={inputCls} placeholder="03XXXXXXXXX" />
+              </Field>
+            </div>
+            <Field label="Password (optional)">
+              <Input value={teacherForm.password} onChange={(e) => setTeacherForm({ ...teacherForm, password: e.target.value })} className={inputCls} placeholder="Defaults to concordia1234" />
+            </Field>
+            <div className="flex gap-2 pt-1">
+              <button onClick={submitTeacher} disabled={savingTeacher} className={cn(btnPrimary, 'flex-1 h-10 justify-center')}>
+                {savingTeacher ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} Create Login
+              </button>
+              <button onClick={() => setAddOpen(false)} className={cn(btnSecondary, 'h-10')}>Cancel</button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Assign Course sheet ── */}
+      <Sheet open={!!assignTarget} onOpenChange={(o) => !o && setAssignTarget(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto bg-white">
+          <SheetHeader>
+            <SheetTitle className="text-base font-semibold text-gray-900">Assign Course — {assignTarget?.name}</SheetTitle>
+            <SheetDescription className="text-sm text-gray-500">
+              Pick a program, part and section, type the course, and mark whether this teacher is the section In-charge.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Program" required>
+                <Select value={assignForm.program} onValueChange={(v) => setAssignForm((f) => ({ ...f, program: v, section: '' }))}>
+                  <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Part">
+                <PartToggle value={assignForm.part} onChange={(p) => setAssignForm((f) => ({ ...f, part: p as '1' | '2', section: '' }))} />
+              </Field>
+              <Field label="Section" required>
+                {assignSectionOptions.length > 0 ? (
+                  <Select value={assignForm.section} onValueChange={(v) => setAssignForm((f) => ({ ...f, section: v }))}>
+                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Select section" /></SelectTrigger>
+                    <SelectContent>
+                      {assignSectionOptions.map((s) => <SelectItem key={s} value={s}>Section {s}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input value={assignForm.section} onChange={(e) => setAssignForm((f) => ({ ...f, section: e.target.value }))} className={inputCls} placeholder="No sections — type one (e.g. A)" maxLength={4} />
+                )}
+              </Field>
+              <Field label="Course" required>
+                <Input value={assignForm.course} onChange={(e) => setAssignForm((f) => ({ ...f, course: e.target.value }))} className={inputCls} placeholder="e.g. Biology" />
+              </Field>
+            </div>
+            <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <input type="checkbox" checked={assignForm.incharge} onChange={(e) => setAssignForm((f) => ({ ...f, incharge: e.target.checked }))} className="h-4 w-4 mt-0.5 accent-[#F26522]" />
+              <span className="text-xs text-gray-600">
+                <span className="font-semibold text-gray-900">This teacher is the In-charge of this section.</span> Only section in-charges can mark attendance for it.
+              </span>
+            </label>
+            <button onClick={saveAssignment} disabled={savingAssign} className={cn(btnPrimary, 'w-full h-10 justify-center')}>
+              {savingAssign ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Assign Course
+            </button>
+
+            {/* Existing assignments */}
+            <div className="pt-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Assigned Courses ({Array.isArray(assignTarget?.assignments) ? assignTarget!.assignments.length : 0})</h4>
+              {(!assignTarget?.assignments || assignTarget.assignments.length === 0) ? (
+                <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-500">No courses assigned yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {assignTarget.assignments.map((a: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 p-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{a.course}
+                          {a.incharge && <span className="ml-2 inline-flex items-center rounded-md border border-emerald-100 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Incharge</span>}
+                        </p>
+                        <p className="text-[11px] text-gray-500 truncate">{deptLabel(a.program)} · Part {a.part} · Section {a.section}</p>
+                      </div>
+                      <button onClick={() => removeAssignment(assignTarget, i)} className="shrink-0 text-gray-400 hover:text-rose-600 p-1 rounded"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── View teacher sheet ── */}
+      <Sheet open={!!viewTarget} onOpenChange={(o) => !o && setViewTarget(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto bg-white">
+          <SheetHeader>
+            <SheetTitle className="text-base font-semibold text-gray-900">{viewTarget?.name}</SheetTitle>
+            <SheetDescription className="text-sm text-gray-500">
+              {viewTarget?.rollNo || '—'}{viewTarget?.email ? ` · ${viewTarget.email}` : ''}{viewTarget?.guardianPhone ? ` · ${viewTarget.guardianPhone}` : ''}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6 space-y-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Courses & Sections</h4>
+            {(!viewTarget?.assignments || viewTarget.assignments.length === 0) ? (
+              <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-500">No courses assigned. Use “Assign Course”.</div>
+            ) : (
+              <div className="space-y-2">
+                {viewTarget.assignments.map((a: any, i: number) => (
+                  <div key={i} className="rounded-lg border border-gray-200 p-2.5">
+                    <p className="text-sm font-medium text-gray-900">{a.course}
+                      {a.incharge && <span className="ml-2 inline-flex items-center rounded-md border border-emerald-100 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Incharge</span>}
+                    </p>
+                    <p className="text-[11px] text-gray-500">{deptLabel(a.program)} · Part {a.part} · Section {a.section}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Class detail sheet (kept from old ClassesView) */}
       <Sheet open={!!detailClass} onOpenChange={(o) => !o && setDetailClass(null)}>
@@ -1550,7 +1674,7 @@ function ClassesAndTeachersView({ user }: { user: any }) {
                 <div className="text-sm font-mono font-semibold text-gray-900">{created?.pass}</div>
               </div>
             </div>
-            <button onClick={() => { setCreated(null); setTimeout(() => nameRef.current?.focus(), 200); }} className={cn(btnPrimary, 'w-full justify-center h-10')}>
+            <button onClick={() => { setCreated(null); setFormBlank(); setAddOpen(true); }} className={cn(btnPrimary, 'w-full justify-center h-10')}>
               <Plus className="h-4 w-4" /> Create Another
             </button>
           </div>

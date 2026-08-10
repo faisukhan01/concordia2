@@ -182,6 +182,10 @@ const MIGRATION_STATEMENTS: string[] = [
   // Student-level "base/admission fee paid" flag. The Accountant marks this on
   // the student detail page; a login can only be provided once it's 1.
   `ALTER TABLE users ADD COLUMN baseFeePaid INTEGER NOT NULL DEFAULT 0`,
+  // Teacher course/section assignments — JSON array of
+  // { program, part, section, course, incharge }. One teacher can hold many.
+  // Drives the teacher dashboard and (incharge-only) attendance.
+  `ALTER TABLE users ADD COLUMN assignments TEXT`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===
