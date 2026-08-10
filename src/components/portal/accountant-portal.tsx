@@ -118,6 +118,7 @@ import {
 } from 'lucide-react';
 import { savePdf, printPdf } from '@/lib/pdf-utils';
 import { buildConcordiaChallan, buildConcordiaChallanBook } from '@/lib/challan';
+import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -1720,6 +1721,56 @@ function FeeInstallmentsView({
     else downloadAllChallans(installmentIndex);
   };
 
+  // Export the OPEN section to Excel — one row per student with base fee and
+  // each installment's amount + Paid/Unpaid status, plus paid/outstanding totals.
+  const exportSectionExcel = () => {
+    if (!displayedStudents?.length) return;
+    try {
+      const maxInst = Math.max(3, maxInstallmentsInSection);
+      const rows = displayedStudents.map((s) => {
+        const insts = invoices
+          .filter((i) => (i.studentId === s.id || i.userId === s.id) && i.type === 'Installment')
+          .sort((a, b) =>
+            (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) ||
+            String(a.challanNo || '').localeCompare(String(b.challanNo || '')),
+          );
+        const row: Record<string, any> = {
+          'Roll #': s.rollNo || '',
+          'Name': s.name || '',
+          'Father / Guardian': s.fatherName || s.guardian || '',
+          'CNIC': s.cnic || '',
+          'Contact': s.guardianPhone || s.phone || '',
+          'Base Fee': Number(s.baseFee || 0),
+        };
+        let paidTotal = 0;
+        let outstanding = 0;
+        for (let i = 0; i < maxInst; i++) {
+          const inv = insts[i];
+          const amt = inv ? Number(inv.amount || 0) : '';
+          const isPaid = inv ? (inv.status || '').toLowerCase() === 'paid' : false;
+          row[`Inst ${i + 1} Amount`] = amt;
+          row[`Inst ${i + 1} Status`] = inv ? (isPaid ? 'Paid' : 'Unpaid') : '—';
+          if (inv) {
+            if (isPaid) paidTotal += Number(inv.amount || 0);
+            else outstanding += Number(inv.amount || 0);
+          }
+        }
+        row['Total Paid'] = paidTotal;
+        row['Outstanding'] = outstanding;
+        return row;
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Students');
+      const section = drill.section || drill.cls;
+      const fname = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}_Fees_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fname);
+      toast({ title: 'Excel exported', description: `${rows.length} students with installment status.` });
+    } catch (e: any) {
+      toast({ title: 'Could not export Excel', description: e?.message || 'Please try again.', variant: 'destructive' });
+    }
+  };
+
   // Start editing an installment
   const startEditInstallment = (inv: any) => {
     setEditingInstallment(inv.id);
@@ -2955,6 +3006,16 @@ function FeeInstallmentsView({
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-3 text-xs border-emerald-500 text-emerald-700 hover:bg-emerald-500 hover:text-white"
+                onClick={exportSectionExcel}
+                disabled={displayedStudents.length === 0}
+              >
+                <Sheet className="h-3.5 w-3.5 mr-1" />
+                Export Excel
+              </Button>
               <Button
                 size="sm"
                 className="h-8 px-3 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white"
