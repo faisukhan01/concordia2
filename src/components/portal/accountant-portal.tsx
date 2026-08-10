@@ -1816,10 +1816,14 @@ function FeeInstallmentsView({
       );
     }
     if (!activeClassObj) return [];
+    // Scope by Department (class name) + Part + Section — identical section
+    // letters across programs/parts must never bleed together.
+    const wantPart = String(activeClassObj.part || '1');
     return lockedStudents.filter(
       (s) =>
-        (s.class || '') === activeClassObj.name &&
-        (s.section || '') === activeClassObj.section,
+        (s.class || s.program || '') === activeClassObj.name &&
+        (s.section || '') === activeClassObj.section &&
+        String(s.part || '1') === wantPart,
     );
   }, [lockedStudents, search, activeClassObj, isSearching]);
 
@@ -1827,8 +1831,12 @@ function FeeInstallmentsView({
   const getLockedCountForClass = (clsId: string) => {
     const c = classes.find((x) => x.id === clsId);
     if (!c) return 0;
+    const cPart = String(c.part || '1');
     return lockedStudents.filter(
-      (s) => (s.class || '') === c.name && (s.section || '') === c.section,
+      (s) =>
+        (s.class || s.program || '') === c.name &&
+        (s.section || '') === c.section &&
+        String(s.part || '1') === cPart,
     ).length;
   };
 
@@ -3086,12 +3094,14 @@ function MiscChargesView({
       );
     }
     if (!activeClassObj) return charges;
+    const wantPart = String(activeClassObj.part || '1');
     return charges.filter((c) => {
       const s = studentById[c.studentId];
       if (!s) return false;
       return (
-        (s.class || '') === activeClassObj.name &&
-        (s.section || '') === activeClassObj.section
+        (s.class || s.program || '') === activeClassObj.name &&
+        (s.section || '') === activeClassObj.section &&
+        String(s.part || '1') === wantPart
       );
     });
   }, [charges, search, activeClassObj, isSearching, studentById]);
@@ -3250,8 +3260,12 @@ function MiscChargesView({
   const getStudentCountForClass = (clsId: string) => {
     const c = classes.find((x) => x.id === clsId);
     if (!c) return 0;
+    const cPart = String(c.part || '1');
     return students.filter(
-      (s) => (s.class || '') === c.name && (s.section || '') === c.section,
+      (s) =>
+        (s.class || s.program || '') === c.name &&
+        (s.section || '') === c.section &&
+        String(s.part || '1') === cPart,
     ).length;
   };
 

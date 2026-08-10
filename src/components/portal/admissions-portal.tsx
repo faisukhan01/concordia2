@@ -1633,19 +1633,29 @@ export function StudentRecordsView({
   const tableStudents = useMemo(() => {
     const target = drill.section || drill.cls;
     if (!target) return [];
+    // A section is uniquely identified by Department (program/class name) +
+    // Part + Section letter. Matching on class + section alone let identical
+    // section letters (e.g. FSC Pre Med "MQ" and I.Com "MQ", or Part 1 vs
+    // Part 2 with the same letter) bleed into each other — always include part.
+    const wantPart = String(drill.part || '1');
     return students.filter(
       (s) =>
-        (s.class || '') === target.name &&
-        (s.section || '') === target.section,
+        (s.class || s.program || '') === target.name &&
+        (s.section || '') === target.section &&
+        String(s.part || '1') === wantPart,
     );
-  }, [students, drill.cls, drill.section]);
+  }, [students, drill.cls, drill.section, drill.part]);
 
   // ── Student count helpers for the card grids.
   const getStudentCountForClass = (clsId: string) => {
     const c = classes.find((x) => x.id === clsId);
     if (!c) return 0;
+    const cPart = String(c.part || '1');
     return students.filter(
-      (s) => (s.class || '') === c.name && (s.section || '') === c.section,
+      (s) =>
+        (s.class || s.program || '') === c.name &&
+        (s.section || '') === c.section &&
+        String(s.part || '1') === cPart,
     ).length;
   };
 
