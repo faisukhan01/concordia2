@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { api } from '@/lib/api';
+import { api, type ImportStudentRow } from '@/lib/api';
 import { useApp, useNavState } from '@/lib/store';
 import { isNativeApp } from '@/lib/session-store';
 import { Card } from '@/components/ui/card';
@@ -1557,6 +1557,7 @@ export function StudentRecordsView({
   const [editing, setEditing] = useState<any | null>(null);
   const [docStudent, setDocStudent] = useState<any | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDeleteStudent = async (s: any) => {
@@ -1670,6 +1671,16 @@ export function StudentRecordsView({
   const canImport = !!(drill.section || drill.cls);
   const headerActions = (
     <div className="flex gap-2">
+      {canImport && (
+        <Button
+          variant="outline"
+          onClick={() => setAddOpen(true)}
+          className="border border-[#F26522]/40 bg-white hover:bg-[#FFF7F2] text-[#F26522] rounded-lg h-9 px-4 text-sm font-medium"
+        >
+          <UserPlus className="h-4 w-4 mr-1.5" />
+          Add Student
+        </Button>
+      )}
       {canImport && (
         <Button
           onClick={() => setImportOpen(true)}
@@ -1916,7 +1927,157 @@ export function StudentRecordsView({
         preselectedSection={drill.section?.section || drill.cls?.section || undefined}
         preselectedPart={drill.part as '1' | '2'}
       />
+
+      {/* Add a single student manually — files into the drilled section */}
+      <AddStudentManualDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onAdded={() => { setAddOpen(false); onRefresh(); }}
+        branchId={user?.branchId}
+        program={drill.dept || undefined}
+        part={(drill.part as '1' | '2') || '1'}
+        section={drill.section?.section || drill.cls?.section || 'A'}
+      />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AddStudentManualDialog — add ONE student by hand into the currently drilled
+// program → part → section. Reuses the bulk-import endpoint (single row) so
+// roll-number generation, class creation, dedup and optional installments all
+// behave exactly like the Excel importer. Record only — no login is created.
+// ---------------------------------------------------------------------------
+const ADMISSION_FEE = 10000;
+function computeInstallmentPlan(baseFee: number): { amount: number; dueDate?: string }[] {
+  const total = Math.max(0, Math.round(Number(baseFee) || 0));
+  if (total === 0) return [];
+  const fixed = Math.min(ADMISSION_FEE, total);
+  const remaining = Math.max(0, total - fixed);
+  const each = Math.round(remaining / 3);
+  const firstThird = remaining - 2 * each;
+  return [{ amount: fixed + firstThird }, { amount: each }, { amount: each }];
+}
+
+function AddStudentManualDialog({
+  open, onClose, onAdded, branchId, program, part, section,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onAdded: () => void;
+  branchId?: string;
+  program?: string;
+  part: '1' | '2';
+  section: string;
+}) {
+  const [name, setName] = useState('');
+  const [fatherName, setFatherName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [cnic, setCnic] = useState('');
+  const [gender, setGender] = useState('');
+  const [rollNo, setRollNo] = useState('');
+  const [baseFee, setBaseFee] = useState('');
+  const [genInstallments, setGenInstallments] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setName(''); setFatherName(''); setPhone(''); setCnic('');
+      setGender(''); setRollNo(''); setBaseFee(''); setGenInstallments(true);
+    }
+  }, [open]);
+
+  const submit = async () => {
+    if (!name.trim()) { toast({ title: 'Enter the student name', variant: 'destructive' }); return; }
+    setSaving(true);
+    try {
+      const feeNum = Number(String(baseFee).replace(/[^0-9.]/g, '')) || 0;
+      const row: ImportStudentRow = {
+        name: name.trim(),
+        fatherName: fatherName.trim(),
+        phone: phone.trim(),
+        program,
+        part,
+        section: (section || 'A').trim().toUpperCase() || 'A',
+        baseFee: feeNum || '',
+        cnic: cnic.trim(),
+        gender: gender.trim(),
+        rollNo: rollNo.trim(),
+      };
+      if (genInstallments && feeNum > 0) row.installments = computeInstallmentPlan(feeNum);
+      const res = await api.importStudents([row], branchId);
+      if (res.created > 0) {
+        toast({ title: 'Student added', description: `${name.trim()} · ${deptLabel(program || '')} · Section ${section}` });
+        onAdded();
+      } else {
+        const reason = res.skippedRows?.[0]?.reason || res.errorRows?.[0]?.error || 'Duplicate or invalid record.';
+        toast({ title: 'Not added', description: reason, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Could not add student', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5 text-[#F26522]" /> Add Student
+          </DialogTitle>
+          <DialogDescription>
+            Filed into <span className="font-medium text-gray-700">{deptLabel(program || '')} · Part {part} · Section {section}</span>. Record only — the Accountant issues the login after the first fee.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-1">
+          <div className="col-span-2">
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">Student Name *</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" autoFocus />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">Father / Guardian</Label>
+            <Input value={fatherName} onChange={(e) => setFatherName(e.target.value)} placeholder="Father name" />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">Contact</Label>
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="03XXXXXXXXX" />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">CNIC / B-Form</Label>
+            <Input value={cnic} onChange={(e) => setCnic(e.target.value)} placeholder="Optional" />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">Gender</Label>
+            <Input value={gender} onChange={(e) => setGender(e.target.value)} placeholder="Male / Female" />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">Roll # (optional)</Label>
+            <Input value={rollNo} onChange={(e) => setRollNo(e.target.value)} placeholder="Auto if blank" />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-gray-700 mb-1.5">Tuition / Base Fee</Label>
+            <Input value={baseFee} onChange={(e) => setBaseFee(e.target.value)} placeholder="e.g. 55000" inputMode="numeric" />
+          </div>
+          <div className="col-span-2">
+            <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+              <input type="checkbox" checked={genInstallments} onChange={(e) => setGenInstallments(e.target.checked)} className="h-4 w-4 mt-0.5 accent-[#F26522]" />
+              <span className="text-xs text-gray-600">
+                Auto-create 3 fee installments (Rs 10,000 admission fee + first third, then two equal) so the student appears in Fee &amp; Installments ready to collect.
+              </span>
+            </label>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={submit} disabled={saving || !name.trim()} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+            {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <UserPlus className="h-4 w-4 mr-1.5" />}
+            Add Student
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
