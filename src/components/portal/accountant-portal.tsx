@@ -395,6 +395,24 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+const CH_MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Challan dates + particulars for the installment at 0-based `index`, anchored
+// on the plan's FIRST installment date (`baseIso`, its createdAt/dueDate).
+//   • Each installment is a quarter: created = base + index*3 months.
+//   • Due date = created + 5 days (Payable-on-or-before + Due Date on the challan).
+//   • Particulars = that quarter's 3 months, e.g. "Aug Sep Oct Payable"
+//     (Ins 1 → Aug Sep Oct, Ins 2 → Nov Dec Jan, Ins 3 → Feb Mar Apr).
+function challanInstallmentDates(baseIso: string | undefined | null, index: number) {
+  const parsed = baseIso ? new Date(baseIso) : new Date();
+  const b = isNaN(parsed.getTime()) ? new Date() : parsed;
+  const created = new Date(b.getFullYear(), b.getMonth() + index * 3, b.getDate());
+  const due = new Date(created.getFullYear(), created.getMonth(), created.getDate() + 5);
+  const fmt = (d: Date) => d.toLocaleDateString('en-GB'); // dd/mm/yyyy
+  const months = [0, 1, 2].map((k) => CH_MON_SHORT[(created.getMonth() + k) % 12]).join(' ');
+  return { createdStr: fmt(created), dueStr: fmt(due), particulars: `${months} Payable` };
+}
+
 const fmtMoney = (n: number) => `Rs ${Number(n || 0).toLocaleString('en-PK')}`;
 
 const formatDate = (iso?: string) => {
@@ -567,7 +585,7 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
     const within = Number(inv.amount) || totalPlanned;
     const others = myInvoices.slice(1);
     const arrearsSum = others.reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
-    const due = inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-GB') : '';
+    const dt = challanInstallmentDates(inv.createdAt || inv.dueDate, 0);
     return buildConcordiaChallan({
       studentId: student.rollNo || rollTrim,
       billNo: inv.challanNo || String(inv.id || '').slice(-6),
@@ -576,12 +594,12 @@ function ProcessEnrollmentCard({ student, allStudents, classes, invoices, user, 
       className: deptLabel(student.program),
       section: student.section || section,
       feeIns: `1 of ${total}`,
-      particulars: inv.month ? `${inv.month} Payable` : 'Installment 1 Payable',
+      particulars: dt.particulars,
       items: [{ name: 'College Fee', amount: within }],
       payableWithin: within,
       payableAfter: within + Math.round(within * 0.05),
-      dueDate: due,
-      payableBefore: due,
+      dueDate: dt.dueStr,
+      payableBefore: dt.dueStr,
       arrears: others.length ? `Ins:${others.length} Amount: ${arrearsSum}` : '',
     });
   };
@@ -1533,6 +1551,8 @@ function FeeInstallmentsView({
   const [deletingStudent, setDeletingStudent] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [sectionPdfDownloading, setSectionPdfDownloading] = useState(false);
+  // Bulk-export installment picker: which export (zip/pdf) is being configured.
+  const [bulkPick, setBulkPick] = useState<{ open: boolean; mode: 'zip' | 'pdf' }>({ open: false, mode: 'zip' });
   const [editingInstallment, setEditingInstallment] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [manualPlanMode, setManualPlanMode] = useState(false);
@@ -1560,94 +1580,54 @@ function FeeInstallmentsView({
   };
 
   // Bulk download all challans for section
-  const downloadAllChallans = async () => {
+  // ZIP export — one PDF per student. `installmentIndex` (0-based) targets a
+  // single installment; omit for each student's next-due installment.
+  const downloadAllChallans = async (installmentIndex?: number) => {
     if (!displayedStudents?.length) return;
-    
+
     setBulkDownloading(true);
     try {
       const zip = new JSZip();
       const section = drill.section || drill.cls;
-      const sectionName = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}`;
-      
-      // Process each student
+      const insLabel = installmentIndex != null ? `Installment${installmentIndex + 1}` : 'NextDue';
+      const sectionName = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}-${insLabel}`;
+      let count = 0;
+
       for (const student of displayedStudents) {
         try {
-          // Get all invoices for this student
-          const studentInvoices = invoices.filter((inv) => 
-            (inv.studentId === student.id || inv.userId === student.id) && 
-            inv.type === 'Installment'
-          ).sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-          
-          // Find the first unpaid invoice (next due)
-          const nextUnpaid = studentInvoices.find(inv => 
-            (inv.status || '').toLowerCase() !== 'paid'
-          );
-          
-          if (!nextUnpaid) continue; // Skip if all paid or no installments
-          
-          // Calculate installment number
-          const paidCount = studentInvoices.filter(inv => 
-            (inv.status || '').toLowerCase() === 'paid'
-          ).length;
-          const totalInstallments = studentInvoices.length;
-          const installmentNum = paidCount + 1;
-          
-          // Build challan PDF
-          const within = Number(nextUnpaid.amount || 0);
-          const after = within + Math.round(within * 0.05);
-          const due = nextUnpaid.dueDate ? new Date(nextUnpaid.dueDate).toLocaleDateString('en-GB') : '';
-          
-          const doc = await buildConcordiaChallan({
-            studentId: student.rollNo || student.id,
-            billNo: nextUnpaid.challanNo || String(nextUnpaid.id || '').slice(-6),
-            studentName: student.name,
-            fatherName: student.fatherName || student.guardian,
-            className: student.class || drill.cls?.name,
-            section: student.section || section?.section,
-            feeIns: `${installmentNum} of ${totalInstallments}`,
-            particulars: nextUnpaid.month ? `${nextUnpaid.month} Payable` : `Installment ${installmentNum} Payable`,
-            items: [{ name: 'College Fee', amount: within }],
-            payableWithin: within,
-            payableAfter: after,
-            dueDate: due,
-            payableBefore: due,
-            arrears: paidCount > 0 ? `Paid: ${paidCount} installments` : '',
-          });
-          
-          // Get PDF as blob
+          const built = buildChallanDataForStudent(student, installmentIndex);
+          if (!built) continue; // student has no such installment
+          const doc = await buildConcordiaChallan(built.data);
           const pdfBlob = doc.output('blob');
-          const fileName = `${student.rollNo || student.name.replace(/[^a-zA-Z0-9]/g, '_')}_Installment_${installmentNum}.pdf`;
-          
-          // Add to ZIP
+          const fileName = `${student.rollNo || student.name.replace(/[^a-zA-Z0-9]/g, '_')}_Installment_${built.instNum}.pdf`;
           zip.file(fileName, pdfBlob);
-          
+          count += 1;
         } catch (error) {
           console.error(`Failed to generate challan for ${student.name}:`, error);
-          // Continue with other students
         }
       }
-      
-      // Generate and download ZIP
+
+      if (count === 0) {
+        toast({ title: 'Nothing to download', description: 'No matching installment challans for this section.', variant: 'destructive' });
+        return;
+      }
+
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(zipBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${sectionName}_All_Challans_${new Date().toISOString().slice(0, 10)}.zip`;
+      link.download = `${sectionName}_${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
-      toast({ 
-        title: 'All challans downloaded', 
-        description: `ZIP file with ${displayedStudents.length} student challans created.` 
-      });
-      
+
+      toast({ title: 'Challans downloaded', description: `ZIP with ${count} challan${count === 1 ? '' : 's'} created.` });
     } catch (error: any) {
-      toast({ 
-        title: 'Bulk download failed', 
-        description: error?.message || 'Could not generate ZIP file. Please try again.', 
-        variant: 'destructive' 
+      toast({
+        title: 'Bulk download failed',
+        description: error?.message || 'Could not generate ZIP file. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setBulkDownloading(false);
@@ -1656,60 +1636,98 @@ function FeeInstallmentsView({
 
   // Build the ChallanData for a student's next-due installment (shared by the
   // ZIP export and the combined-PDF export). Returns null when nothing is due.
-  const buildChallanDataForStudent = (student: any) => {
+  // Build a student's challan data. `installmentIndex` (0-based) targets a
+  // SPECIFIC installment (e.g. only Installment 2); when omitted, the next
+  // unpaid installment is used. Returns null when that installment doesn't
+  // exist. `instNum` is the 1-based number for filenames.
+  const buildChallanDataForStudent = (student: any, installmentIndex?: number) => {
     const studentInvoices = invoices.filter((inv) =>
       (inv.studentId === student.id || inv.userId === student.id) &&
       inv.type === 'Installment'
-    ).sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-    const nextUnpaid = studentInvoices.find(inv => (inv.status || '').toLowerCase() !== 'paid');
-    if (!nextUnpaid) return null;
-    const paidCount = studentInvoices.filter(inv => (inv.status || '').toLowerCase() === 'paid').length;
+    ).sort((a, b) =>
+      (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) ||
+      String(a.challanNo || '').localeCompare(String(b.challanNo || ''))
+    );
+    if (studentInvoices.length === 0) return null;
+    let target: any;
+    let idx: number;
+    if (installmentIndex != null) {
+      if (installmentIndex >= studentInvoices.length) return null;
+      idx = installmentIndex;
+      target = studentInvoices[idx];
+    } else {
+      target = studentInvoices.find(inv => (inv.status || '').toLowerCase() !== 'paid');
+      if (!target) return null;
+      idx = studentInvoices.findIndex(inv => inv.id === target.id);
+    }
     const totalInstallments = studentInvoices.length;
-    const installmentNum = paidCount + 1;
-    const within = Number(nextUnpaid.amount || 0);
+    const paidCount = studentInvoices.filter(inv => (inv.status || '').toLowerCase() === 'paid').length;
+    const within = Number(target.amount || 0);
     const after = within + Math.round(within * 0.05);
-    const due = nextUnpaid.dueDate ? new Date(nextUnpaid.dueDate).toLocaleDateString('en-GB') : '';
-    return {
+    const dt = challanInstallmentDates(studentInvoices[0]?.createdAt || target.createdAt, idx);
+    const data = {
       studentId: student.rollNo || student.id,
-      billNo: nextUnpaid.challanNo || String(nextUnpaid.id || '').slice(-6),
+      billNo: target.challanNo || String(target.id || '').slice(-6),
       studentName: student.name,
       fatherName: student.fatherName || student.guardian,
       className: student.class || drill.cls?.name,
       section: student.section || (drill.section || drill.cls)?.section,
-      feeIns: `${installmentNum} of ${totalInstallments}`,
-      particulars: nextUnpaid.month ? `${nextUnpaid.month} Payable` : `Installment ${installmentNum} Payable`,
+      feeIns: `${idx + 1} of ${totalInstallments}`,
+      particulars: dt.particulars,
       items: [{ name: 'College Fee', amount: within }],
       payableWithin: within,
       payableAfter: after,
-      dueDate: due,
-      payableBefore: due,
+      dueDate: dt.dueStr,
+      payableBefore: dt.dueStr,
       arrears: paidCount > 0 ? `Paid: ${paidCount} installments` : '',
     };
+    return { data, instNum: idx + 1 };
   };
 
   // Download the WHOLE section's challans as ONE multi-page PDF (one page per
-  // student) — ready to print in a single job, no unzipping.
-  const downloadSectionSinglePdf = async () => {
+  // student) — ready to print in a single job, no unzipping. `installmentIndex`
+  // targets one installment (0-based); omit for each student's next-due.
+  const downloadSectionSinglePdf = async (installmentIndex?: number) => {
     if (!displayedStudents?.length) return;
     setSectionPdfDownloading(true);
     try {
       const section = drill.section || drill.cls;
-      const sectionName = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}`;
+      const insLabel = installmentIndex != null ? `Installment${installmentIndex + 1}` : 'NextDue';
+      const sectionName = `${drill.cls?.name}-Part${drill.part}-Section${section?.section}-${insLabel}`;
       const list = displayedStudents
-        .map((s) => buildChallanDataForStudent(s))
-        .filter(Boolean) as any[];
+        .map((s) => buildChallanDataForStudent(s, installmentIndex))
+        .filter(Boolean)
+        .map((r) => (r as any).data);
       if (list.length === 0) {
-        toast({ title: 'Nothing to print', description: 'No students in this section have an unpaid installment.', variant: 'destructive' });
+        toast({ title: 'Nothing to print', description: 'No matching installment challans for this section.', variant: 'destructive' });
         return;
       }
       const doc = await buildConcordiaChallanBook(list);
-      doc.save(`${sectionName}_All_Challans_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`${sectionName}_${new Date().toISOString().slice(0, 10)}.pdf`);
       toast({ title: 'Section challans ready', description: `${list.length} challans in one PDF — ready to print.` });
     } catch (error: any) {
       toast({ title: 'Could not build PDF', description: error?.message || 'Please try again.', variant: 'destructive' });
     } finally {
       setSectionPdfDownloading(false);
     }
+  };
+
+  // Largest installment count across the section — drives the picker options.
+  const maxInstallmentsInSection = useMemo(() => {
+    let max = 0;
+    for (const s of displayedStudents) {
+      const n = invoices.filter((i) => (i.studentId === s.id || i.userId === s.id) && i.type === 'Installment').length;
+      if (n > max) max = n;
+    }
+    return max;
+  }, [displayedStudents, invoices]);
+
+  // Run the chosen bulk export for the picked installment (undefined = next due).
+  const runBulkExport = (installmentIndex?: number) => {
+    const mode = bulkPick.mode;
+    setBulkPick({ open: false, mode });
+    if (mode === 'pdf') downloadSectionSinglePdf(installmentIndex);
+    else downloadAllChallans(installmentIndex);
   };
 
   // Start editing an installment
@@ -2132,7 +2150,7 @@ function FeeInstallmentsView({
       const within = Number(data.amount) || 0;
       const others = insts.filter((i: any) => i.id !== inv.id && (i.status || '').toLowerCase() !== 'paid');
       const arrearsSum = others.reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
-      const due = data.dueDate ? new Date(data.dueDate).toLocaleDateString('en-GB') : '';
+      const dt = challanInstallmentDates(insts[0]?.createdAt || data.createdAt, idx >= 0 ? idx : 0);
       const doc = await buildConcordiaChallan({
         studentId: data.rollNo || selected?.rollNo,
         billNo: data.challanNo || String(data.id || '').slice(-6),
@@ -2141,12 +2159,12 @@ function FeeInstallmentsView({
         className: deptLabel(selected?.program) || data.className || data.class,
         section: data.section || selected?.section,
         feeIns: `${idx >= 0 ? idx + 1 : 1} of ${total}`,
-        particulars: data.month ? `${data.month} Payable` : 'Installment Payable',
+        particulars: dt.particulars,
         items: [{ name: 'College Fee', amount: within }],
         payableWithin: within,
         payableAfter: within + Math.round(within * 0.05),
-        dueDate: due,
-        payableBefore: due,
+        dueDate: dt.dueStr,
+        payableBefore: dt.dueStr,
         arrears: others.length ? `Ins:${others.length} Amount: ${arrearsSum}` : '',
       });
       const fileName = `Challan-${data.challanNo || data.id}.pdf`;
@@ -2936,7 +2954,7 @@ function FeeInstallmentsView({
               <Button
                 size="sm"
                 className="h-8 px-3 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white"
-                onClick={downloadSectionSinglePdf}
+                onClick={() => setBulkPick({ open: true, mode: 'pdf' })}
                 disabled={sectionPdfDownloading || displayedStudents.length === 0}
               >
                 {sectionPdfDownloading ? (
@@ -2955,7 +2973,7 @@ function FeeInstallmentsView({
                 variant="outline"
                 size="sm"
                 className="h-8 px-3 text-xs border-[#F26522] text-[#F26522] hover:bg-[#F26522] hover:text-white"
-                onClick={downloadAllChallans}
+                onClick={() => setBulkPick({ open: true, mode: 'zip' })}
                 disabled={bulkDownloading || displayedStudents.length === 0}
               >
                 {bulkDownloading ? (
@@ -3027,6 +3045,38 @@ function FeeInstallmentsView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Bulk export — pick which installment's challan to include */}
+      <Dialog open={bulkPick.open} onOpenChange={(o) => setBulkPick((p) => ({ ...p, open: o }))}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Select installment</DialogTitle>
+            <DialogDescription>
+              Choose which installment's challan to {bulkPick.mode === 'pdf' ? 'include in the combined PDF' : 'download'} for every student in this section.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-2 py-1">
+            {Array.from({ length: Math.max(1, maxInstallmentsInSection) }).map((_, i) => (
+              <Button
+                key={i}
+                variant="outline"
+                className="justify-start h-10 border-gray-200 hover:border-[#F26522] hover:bg-[#FFF7F2]"
+                onClick={() => runBulkExport(i)}
+              >
+                <FileText className="h-4 w-4 mr-2 text-[#F26522]" />
+                Installment {i + 1} only
+              </Button>
+            ))}
+            <Button
+              variant="ghost"
+              className="justify-start h-10 text-gray-600"
+              onClick={() => runBulkExport(undefined)}
+            >
+              Each student's next unpaid installment
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
