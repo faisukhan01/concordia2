@@ -42,7 +42,7 @@ function normPhone(v: any): string {
   return d;
 }
 
-const parseFee = (v: any): number | '' {
+function parseFee(v: any) {
   const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
   return Number.isFinite(n) && n > 0 ? n : '';
 }
