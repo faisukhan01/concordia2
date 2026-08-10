@@ -14,7 +14,7 @@
 //      program → part → section.
 // ─────────────────────────────────────────────────────────────
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -120,6 +120,18 @@ export function StudentImportDialog({
     setPart(preselectedPart || '1'); setSection(preselectedSection || 'A');
   };
 
+  // This dialog stays mounted across every drill-down, so the useState
+  // initializers above only ever run once — leaving a STALE section/part when
+  // the user opens the importer for a different section (the classic "always
+  // imports into the first section" bug). Re-sync from the preselected props
+  // every time the dialog opens (or the drill target changes).
+  useEffect(() => {
+    if (open) {
+      setPart(preselectedPart || '1');
+      setSection(preselectedSection || 'A');
+    }
+  }, [open, preselectedPart, preselectedSection]);
+
   const close = () => { reset(); onClose(); };
 
   const handleFile = async (file: File) => {
@@ -187,6 +199,10 @@ export function StudentImportDialog({
   const doImport = async () => {
     if (included.length === 0) { toast({ title: 'No rows selected', variant: 'destructive' }); return; }
     setImporting(true);
+    // When the section/part is locked from a drill-down, the prop is the single
+    // source of truth — never the (possibly stale) local state.
+    const effPart = preselectedPart || part;
+    const effSection = (preselectedSection || section).trim().toUpperCase() || 'A';
     try {
       const payload: ImportStudentRow[] = included.map((r) => {
         const baseRow: ImportStudentRow = {
@@ -194,8 +210,8 @@ export function StudentImportDialog({
           fatherName: r.fatherName,
           phone: r.phone,
           program: r.program,
-          part,
-          section: section.trim().toUpperCase() || 'A',
+          part: effPart,
+          section: effSection,
           baseFee: r.baseFee,
           cnic: r.cnic,
           fatherCnic: r.fatherCnic,

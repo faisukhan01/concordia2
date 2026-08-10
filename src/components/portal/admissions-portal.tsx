@@ -225,6 +225,8 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
   // catches up.
   const upsertLocal = (s: any) =>
     setStudents((prev) => {
+      // `{ id, deleted: true }` drops the row (optimistic delete).
+      if (s && s.deleted === true) return prev.filter((x) => x.id !== s.id);
       const idx = prev.findIndex((x) => x.id === s.id);
       if (idx === -1) return [s, ...prev];
       const copy = [...prev];
@@ -1555,6 +1557,22 @@ export function StudentRecordsView({
   const [editing, setEditing] = useState<any | null>(null);
   const [docStudent, setDocStudent] = useState<any | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteStudent = async (s: any) => {
+    if (typeof window !== 'undefined' &&
+      !window.confirm(`Delete ${s.name}'s record permanently? This removes the student and cannot be undone.`)) return;
+    setDeletingId(s.id);
+    try {
+      await api.deleteUser(s.id);
+      onLocalUpsert({ id: s.id, deleted: true });
+      api.clearCache();
+    } catch (e: any) {
+      toast({ title: 'Could not delete student', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // ── Counts per department — count students whose program matches one of
   // the canonical 6 departments. Legacy programs (ICS, F.Sc Pre-Medical, …)
@@ -1726,6 +1744,8 @@ export function StudentRecordsView({
             loading={loading}
             onEdit={setEditing}
             onDocs={setDocStudent}
+            onDelete={handleDeleteStudent}
+            deletingId={deletingId}
             emptyTitle={students.length === 0 ? 'No students enrolled yet' : 'No matching records'}
             emptyDesc={
               students.length === 0
@@ -1857,6 +1877,8 @@ export function StudentRecordsView({
               loading={loading}
               onEdit={setEditing}
               onDocs={setDocStudent}
+              onDelete={handleDeleteStudent}
+              deletingId={deletingId}
               emptyTitle="No students in this class yet"
               emptyDesc="Enroll students from the New Enrollment tab to populate this class."
             />
@@ -1907,6 +1929,8 @@ function StudentTable({
   loading,
   onEdit,
   onDocs,
+  onDelete,
+  deletingId,
   emptyTitle,
   emptyDesc,
 }: {
@@ -1914,6 +1938,8 @@ function StudentTable({
   loading: boolean;
   onEdit: (s: any) => void;
   onDocs: (s: any) => void;
+  onDelete?: (s: any) => void;
+  deletingId?: string | null;
   emptyTitle: string;
   emptyDesc: string;
 }) {
@@ -1993,6 +2019,20 @@ function StudentTable({
                   >
                     <FolderOpen className="h-3.5 w-3.5 mr-1" /> Documents
                   </Button>
+                  {onDelete && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs text-gray-400 hover:text-red-600 hover:bg-red-50"
+                      onClick={() => onDelete(s)}
+                      disabled={deletingId === s.id}
+                    >
+                      {deletingId === s.id
+                        ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        : <Trash2 className="h-3.5 w-3.5 mr-1" />}
+                      Delete
+                    </Button>
+                  )}
                 </div>
               </TableCell>
             </TableRow>
