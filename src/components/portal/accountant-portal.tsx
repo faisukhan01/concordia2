@@ -1137,6 +1137,58 @@ function OverviewView({
   );
   const withLogin = useMemo(() => students.filter(hasRealLogin).length, [students]);
 
+  // Which installment the fee dashboard is scoped to ('all' = every installment).
+  const [dashInst, setDashInst] = useState<'all' | 0 | 1 | 2>('all');
+
+  // Fee summary — collected / outstanding / pending students, overall and split
+  // by Part, honouring the selected installment filter. An installment is a
+  // fee_invoice of type 'Installment'; its 1-based number is its sorted order.
+  const feeSummary = useMemo(() => {
+    const studentById = new Map<string, any>(students.map((s: any) => [s.id, s]));
+    const byStudent = new Map<string, any[]>();
+    for (const inv of invoices) {
+      if ((inv.type || '').toLowerCase() !== 'installment') continue;
+      const sid = inv.studentId || inv.userId;
+      if (!sid) continue;
+      let list = byStudent.get(sid);
+      if (!list) { list = []; byStudent.set(sid, list); }
+      list.push(inv);
+    }
+    for (const arr of byStudent.values()) {
+      arr.sort((a, b) =>
+        (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) ||
+        String(a.challanNo || '').localeCompare(String(b.challanNo || '')),
+      );
+    }
+    const mkBucket = () => ({ collected: 0, outstanding: 0, paidStu: 0, pendingStu: 0, total: 0 });
+    const parts: Record<string, ReturnType<typeof mkBucket>> = { '1': mkBucket(), '2': mkBucket() };
+    let collected = 0, outstanding = 0, pendingStudents = 0, paidStudents = 0, totalStudents = 0;
+
+    for (const [sid, arr] of byStudent.entries()) {
+      const stu = studentById.get(sid);
+      const part = String(stu?.part || '1');
+      if (!parts[part]) parts[part] = mkBucket();
+      const bucket = parts[part];
+      const relevant = dashInst === 'all' ? arr : (arr[dashInst] ? [arr[dashInst]] : []);
+      if (relevant.length === 0) continue;
+      let stuOut = 0;
+      for (const inv of relevant) {
+        const isPaid = (inv.status || '').toLowerCase() === 'paid';
+        if (isPaid) {
+          const amt = Number(inv.paidAmount || inv.amount || 0);
+          collected += amt; bucket.collected += amt;
+        } else {
+          const amt = Number(inv.amount || 0);
+          outstanding += amt; bucket.outstanding += amt; stuOut += amt;
+        }
+      }
+      totalStudents += 1; bucket.total += 1;
+      if (stuOut > 0) { pendingStudents += 1; bucket.pendingStu += 1; }
+      else { paidStudents += 1; bucket.paidStu += 1; }
+    }
+    return { parts, collected, outstanding, pendingStudents, paidStudents, totalStudents };
+  }, [invoices, students, dashInst]);
+
   // Recent payments — newest paid invoices first, top 8
   const recentPayments = useMemo(
     () =>
@@ -1278,6 +1330,91 @@ function OverviewView({
               </div>
             </div>
           </button>
+        </motion.div>
+      )}
+
+      {/* ── Fee overview: installment filter + collected/outstanding + per-Part ── */}
+      {!loading && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, delay: 0.04 }}
+          className="rounded-2xl border border-gray-200 bg-white p-5"
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Fee Collection Overview</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {dashInst === 'all' ? 'All installments' : `Installment ${dashInst + 1}`} · collected vs pending, by Part
+              </p>
+            </div>
+            {/* Installment selector — All / 1 / 2 / 3 */}
+            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-gray-100 border border-gray-200">
+              {([['all', 'All'], [0, 'Ins 1'], [1, 'Ins 2'], [2, 'Ins 3']] as const).map(([key, lbl]) => {
+                const active = dashInst === key;
+                return (
+                  <button
+                    key={String(key)}
+                    onClick={() => setDashInst(key as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${active ? 'bg-[#F26522] text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                  >
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Financial KPI cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <StatCard icon={Wallet} label="Collected" value={fmtMoney(feeSummary.collected)} sub={dashInst === 'all' ? 'All installments' : `Installment ${dashInst + 1}`} />
+            <StatCard icon={Clock} label="Outstanding" value={fmtMoney(feeSummary.outstanding)} sub="Still to collect" />
+            <StatCard icon={Users} label="Pending Students" value={feeSummary.pendingStudents} sub={`of ${feeSummary.totalStudents} with a plan`} />
+            <StatCard icon={CheckCircle2} label="Fully Paid" value={feeSummary.paidStudents} sub="No dues for this filter" />
+          </div>
+
+          {/* Per-Part breakdown */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4">
+            {(['1', '2'] as const).map((p) => {
+              const b = feeSummary.parts[p] || { collected: 0, outstanding: 0, paidStu: 0, pendingStu: 0, total: 0 };
+              const totalMoney = b.collected + b.outstanding;
+              const pct = totalMoney > 0 ? Math.round((b.collected / totalMoney) * 100) : 0;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => onNavigate('accountant-challans')}
+                  className="text-left rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-4 hover:shadow-md hover:border-[#F26522]/40 transition-all"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-bold text-gray-900">Part {p} <span className="font-medium text-gray-400">· {p === '1' ? '1st Year' : '2nd Year'}</span></span>
+                    <span className="text-xs font-semibold text-[#F26522]">{pct}% collected</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-200 overflow-hidden mb-3">
+                    <div className="h-full bg-[#F26522] rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <p className="text-gray-500">Collected</p>
+                      <p className="font-bold text-gray-900 tabular-nums">{fmtMoney(b.collected)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Outstanding</p>
+                      <p className="font-bold text-gray-900 tabular-nums">{fmtMoney(b.outstanding)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Pending students</p>
+                      <p className="font-bold text-rose-600 tabular-nums">{b.pendingStu}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Fully paid</p>
+                      <p className="font-bold text-emerald-600 tabular-nums">{b.paidStu}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </motion.div>
       )}
 
