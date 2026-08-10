@@ -1712,16 +1712,6 @@ function FeeInstallmentsView({
     }
   };
 
-  // Largest installment count across the section — drives the picker options.
-  const maxInstallmentsInSection = useMemo(() => {
-    let max = 0;
-    for (const s of displayedStudents) {
-      const n = invoices.filter((i) => (i.studentId === s.id || i.userId === s.id) && i.type === 'Installment').length;
-      if (n > max) max = n;
-    }
-    return max;
-  }, [displayedStudents, invoices]);
-
   // Run the chosen bulk export for the picked installment (undefined = next due).
   const runBulkExport = (installmentIndex?: number) => {
     const mode = bulkPick.mode;
@@ -1903,6 +1893,16 @@ function FeeInstallmentsView({
         String(s.part || '1') === wantPart,
     );
   }, [lockedStudents, search, activeClassObj, isSearching]);
+
+  // Largest installment count across the section — drives the picker options.
+  const maxInstallmentsInSection = useMemo(() => {
+    let max = 0;
+    for (const s of displayedStudents) {
+      const n = invoices.filter((i) => (i.studentId === s.id || i.userId === s.id) && i.type === 'Installment').length;
+      if (n > max) max = n;
+    }
+    return max;
+  }, [displayedStudents, invoices]);
 
   // Helper: count locked-fee students for a given class id (for the card grids).
   const getLockedCountForClass = (clsId: string) => {
