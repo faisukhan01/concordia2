@@ -249,11 +249,21 @@ export const api = {
   updateInstitute: async (id: string, body: any) => { const r = await request<any>(`institutes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }); invalidateCache(); return r; },
   editInstitute: async (id: string, body: any) => { const r = await request<any>(`institutes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }); invalidateCache(); return r; },
   deleteInstitute: async (id: string) => { const r = await request<any>(`institutes/${id}`, { method: 'DELETE' }); invalidateCache(); return r; },
-  // Super-admin-only: wipe ALL test student / teacher data from the platform
-  // (students, teachers, sessions, notifications, attendance, results, fees,
-  // documents, etc.) while preserving institutes, branches, office-staff
-  // accounts, classes, courses, fee_structure, and exams.
-  purgeTestData: async () => { const r = await request<any>('admin/purge-data', { method: 'POST', body: JSON.stringify({ confirmText: 'PURGE' }) }); invalidateCache(); return r; },
+  // Super-admin-only: wipe ALL test data from the platform.
+  //  • deep=false → wipes students/teachers/parents/sessions/notifications/
+  //    attendance/results/fees/documents/salaries/timetable/etc. but PRESERVES
+  //    the class/course/fee-template/exam catalog (the "college skeleton").
+  //  • deep=true  → FULL RESET. Also wipes classes, courses, class_courses,
+  //    fee_structure, and exams. Only institutes + branches + office-staff
+  //    logins + super-admin survive. Use when delivering a clean install.
+  purgeTestData: async (opts?: { deep?: boolean }) => {
+    const r = await request<any>('admin/purge-data', {
+      method: 'POST',
+      body: JSON.stringify({ confirmText: 'PURGE', deep: opts?.deep }),
+    });
+    invalidateCache();
+    return r;
+  },
   // Super-admin-only: download a full JSON backup of the entire database.
   // Returns a Blob (the JSON file) that the browser saves as a download.
   dbBackup: async () => {

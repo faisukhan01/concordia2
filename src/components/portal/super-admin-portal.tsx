@@ -362,6 +362,11 @@ function SuperAdminDashboard({
   const [purgeConfirmText, setPurgeConfirmText] = useState('');
   const [purging, setPurging] = useState(false);
   const [purgeResult, setPurgeResult] = useState<any>(null);
+  // deep=true (default) → FULL RESET. Also wipes classes, courses, fee
+  // templates, and exam definitions so only the institute / branch /
+  // office-staff skeleton remains. deep=false preserves the course/fee/exam
+  // catalog. The user wants manually-added data gone, so we default to deep.
+  const [purgeDeep, setPurgeDeep] = useState(true);
 
   // ── Database Backup state ──
   // Downloads a full JSON snapshot of every table + every row in the
@@ -415,6 +420,7 @@ function SuperAdminDashboard({
   const openPurgeDialog = () => {
     setPurgeConfirmText('');
     setPurgeResult(null);
+    setPurgeDeep(true);
     setPurgeDialogOpen(true);
   };
 
@@ -422,6 +428,7 @@ function SuperAdminDashboard({
     setPurgeDialogOpen(false);
     setPurgeConfirmText('');
     setPurgeResult(null);
+    setPurgeDeep(true);
   };
 
   const confirmPurge = async () => {
@@ -436,7 +443,7 @@ function SuperAdminDashboard({
     }
     setPurging(true);
     try {
-      const result = await api.purgeTestData();
+      const result = await api.purgeTestData({ deep: purgeDeep });
       setPurgeResult(result);
       toast({
         title: 'Test data purged',
@@ -996,10 +1003,11 @@ function SuperAdminDashboard({
       </div>
 
       {/* ── Danger Zone — Purge Test Data ── */}
-      {/* destructive, irreversible. Wipes ALL test students/teachers/sessions/
-          notifications/attendance/results/fees/documents/salaries/etc. while
-          preserving institutes, branches, classes, courses, fee_structure,
-          exams, and office-staff accounts. */}
+      {/* destructive, irreversible. Default mode (Full Reset) wipes ALL
+          manually-added data — students, teachers, parents, classes, courses,
+          fees, attendance, results, salaries, timetable, etc. — leaving only
+          the institute / branch / office-staff / super-admin skeleton.
+          Uncheck "Full reset" to preserve the class/course/fee/exam catalog. */}
       <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -1011,15 +1019,15 @@ function SuperAdminDashboard({
                 Danger Zone
               </div>
               <h3 className="text-base font-bold text-gray-900 mt-0.5">
-                Purge all test data
+                Purge all manually-added data
               </h3>
               <p className="text-xs text-gray-600 mt-1 max-w-xl">
-                Permanently deletes every test student, teacher, login session,
-                notification, attendance record, result, fee, invoice, document,
-                salary payment, and timetable entry. Preserves colleges,
-                departments, office-staff accounts, classes, courses, fee
-                templates, and exam definitions. Use before delivering the
-                platform to a real customer.
+                Permanently deletes every student, teacher, parent, login
+                session, notification, attendance record, result, fee, invoice,
+                document, salary payment, timetable, and — by default — also
+                classes, courses, fee templates, and exam definitions. Only the
+                college skeleton and office-staff logins are preserved. Use this
+                to reset the platform to a clean state.
               </p>
             </div>
           </div>
@@ -1059,25 +1067,79 @@ function SuperAdminDashboard({
               </div>
             </div>
 
+            {/* ── Full Reset toggle ── */}
+            {/* When ON (default), also wipes the class/course/fee/exam catalog. */}
+            {!purgeResult && (
+              <button
+                type="button"
+                onClick={() => setPurgeDeep((v) => !v)}
+                disabled={purging}
+                className={cn(
+                  'w-full text-left rounded-lg border px-3 py-2.5 mb-3 transition-colors disabled:opacity-60',
+                  purgeDeep
+                    ? 'border-rose-300 bg-rose-50/60'
+                    : 'border-gray-200 bg-gray-50/60',
+                )}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div
+                    className={cn(
+                      'mt-0.5 h-4 w-4 shrink-0 rounded border-2 grid place-items-center transition-colors',
+                      purgeDeep
+                        ? 'bg-rose-600 border-rose-600'
+                        : 'border-gray-300 bg-white',
+                    )}
+                  >
+                    {purgeDeep && (
+                      <svg viewBox="0 0 16 16" className="h-3 w-3 text-white" fill="none" stroke="currentColor" strokeWidth="3">
+                        <path d="M3 8l3.5 3.5L13 4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-gray-900">
+                      Full reset — also wipe classes, courses, fee templates & exams
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">
+                      {purgeDeep
+                        ? 'Only the college + office-staff logins will survive. Everything else is permanently removed.'
+                        : 'Preserves the class/course/fee/exam catalog so you keep the academic setup.'}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            )}
+
             <div className="rounded-md bg-rose-50 border border-rose-100 px-3 py-2.5 mb-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-700 mb-1.5">
                 This will permanently delete
               </p>
               <ul className="text-xs text-rose-800 space-y-0.5">
-                <li>• All student accounts (every test student)</li>
-                <li>• All teacher accounts (every test teacher)</li>
+                <li>• All student accounts (every student)</li>
+                <li>• All teacher accounts (every teacher)</li>
+                {purgeDeep && <li>• All parent accounts (linked to students)</li>}
                 <li>• Every active login session (everyone must sign in again)</li>
                 <li>• All in-app notifications + FCM device tokens</li>
                 <li>• All attendance, results, and report cards</li>
                 <li>• All fees, invoices, misc charges, and salaries</li>
                 <li>• All student documents, events, and announcements</li>
                 <li>• All timetables and date sheets</li>
+                {purgeDeep && (
+                  <>
+                    <li>• All classes, courses, and class-course mappings</li>
+                    <li>• All fee structure templates</li>
+                    <li>• All exam definitions</li>
+                  </>
+                )}
               </ul>
               <p className="text-[11px] text-rose-700 mt-2 font-semibold uppercase tracking-wider">
                 Preserved
               </p>
               <ul className="text-xs text-emerald-700 space-y-0.5 mt-1">
-                <li>• Colleges, departments, classes, courses, fee templates, exams</li>
+                <li>• Colleges & departments (the institute skeleton)</li>
+                {!purgeDeep && (
+                  <li>• Classes, courses, fee templates, exam definitions</li>
+                )}
                 <li>• Office-staff accounts (admin / admissions / accountant / academic)</li>
                 <li>• Super-admin account (you stay logged in)</li>
               </ul>
@@ -1089,11 +1151,14 @@ function SuperAdminDashboard({
             {purgeResult ? (
               <div className="rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 mb-1.5">
-                  Purge complete
+                  {purgeResult.deep ? 'Full reset complete' : 'Purge complete'}
                 </p>
                 <ul className="text-xs text-emerald-800 space-y-0.5">
                   <li>• {purgeResult.purged?.students ?? 0} students removed</li>
                   <li>• {purgeResult.purged?.teachers ?? 0} teachers removed</li>
+                  {!!(purgeResult.purged?.parents) && (
+                    <li>• {purgeResult.purged.parents} parents removed</li>
+                  )}
                   <li>• {purgeResult.purged?.sessions ?? 0} login sessions cleared</li>
                   <li>• {purgeResult.purged?.notifications ?? 0} notifications cleared</li>
                   <li>• {purgeResult.purged?.attendance ?? 0} attendance records removed</li>
@@ -1102,7 +1167,18 @@ function SuperAdminDashboard({
                   <li>• {purgeResult.purged?.fee_invoices ?? 0} invoices removed</li>
                   <li>• {purgeResult.purged?.student_documents ?? 0} documents removed</li>
                   <li>• {purgeResult.purged?.report_cards ?? 0} report cards removed</li>
+                  {purgeResult.deep && (
+                    <>
+                      <li>• {purgeResult.purged?.classes ?? 0} classes removed</li>
+                      <li>• {purgeResult.purged?.courses ?? 0} courses removed</li>
+                      <li>• {purgeResult.purged?.fee_structure ?? 0} fee templates removed</li>
+                      <li>• {purgeResult.purged?.exams ?? 0} exam definitions removed</li>
+                    </>
+                  )}
                 </ul>
+                <p className="text-[11px] text-emerald-700 mt-2 font-medium">
+                  The platform is now in a clean state.
+                </p>
               </div>
             ) : (
               <Field

@@ -4387,11 +4387,17 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     // accounts, super-admin). Used to reset the platform to a clean state
     // before delivering it to a real customer.
     //
-    // What gets DELETED:
-    //   • users where role IN ('student', 'teacher')   — keeps office staff
+    // BODY: { confirmText: 'PURGE', deep?: boolean }
+    //   • deep=true (FULL RESET) → ALSO wipes classes, courses, class_courses,
+    //     fee_structure, exams, parent users, and notification_preferences.
+    //     Only institutes + branches + office-staff + super-admin survive.
+    //   • deep=false (default) → preserves the course/fee/exam catalog.
+    //
+    // What gets DELETED (always):
+    //   • users where role IN ('student', 'teacher', 'parent')  — keeps office staff
     //   • sessions (every login is invalidated — everyone must sign in again)
     //   • device_tokens (FCM tokens re-register on next app launch)
-    //   • notifications (the in-app bell history — test noise)
+    //   • notifications + notification_preferences        — bell history + prefs
     //   • attendance, results, report_cards              — test grading
     //   • fees, fee_invoices, misc_charges                — test billing
     //   • student_documents                               — test admissions docs
@@ -4401,13 +4407,16 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     //   • timetable, date_sheets + date_sheet_entries     — test scheduling
     //   • announcements                                   — test broadcasts
     //
+    // What gets DELETED only when deep=true:
+    //   • classes, courses, class_courses                 — course catalog
+    //   • fee_structure                                   — fee templates
+    //   • exams                                           — exam definitions
+    //
     // What gets PRESERVED:
     //   • institutes + branches (the college skeleton)
     //   • users with role IN ('super-admin','institute-admin','branch-manager',
     //                          'admin','admissions','accountant','academic')
-    //   • classes, courses, class_courses                 (course catalog)
-    //   • fee_structure                                   (fee templates)
-    //   • exams                                           (exam definitions)
+    //   • classes, courses, class_courses, fee_structure, exams  (only when deep=false)
     //
     // What gets RESET:
     //   • institutes.students = 0, institutes.staff = (recomputed live)
@@ -4415,7 +4424,11 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'POST' && path === 'admin/purge-data') {
       const user = await requireAuth(req);
       requireRole(user, 'super-admin');
-      const { confirmText } = body || {};
+      const { confirmText, deep } = body || {};
+      // deep=true → ALSO wipe the manually-set-up catalog (classes, courses,
+      // fee templates, exams) + parent accounts, leaving ONLY the institute /
+      // branch / office-staff skeleton. deep=false preserves the catalog.
+      const deepMode = !!deep;
       // Double-safety: caller must send the literal token "PURGE" so an
       // accidental empty POST can never trigger the wipe.
       if (confirmText !== 'PURGE') {
@@ -4427,6 +4440,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         sql: `SELECT
                 (SELECT COUNT(*) FROM users WHERE role='student') AS students,
                 (SELECT COUNT(*) FROM users WHERE role='teacher') AS teachers,
+                (SELECT COUNT(*) FROM users WHERE role='parent')  AS parents,
                 (SELECT COUNT(*) FROM sessions)                AS sessions,
                 (SELECT COUNT(*) FROM notifications)           AS notifications,
                 (SELECT COUNT(*) FROM device_tokens)           AS device_tokens,
@@ -4435,16 +4449,23 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
                 (SELECT COUNT(*) FROM fees)                    AS fees,
                 (SELECT COUNT(*) FROM fee_invoices)            AS fee_invoices,
                 (SELECT COUNT(*) FROM student_documents)       AS student_documents,
-                (SELECT COUNT(*) FROM report_cards)            AS report_cards`,
+                (SELECT COUNT(*) FROM report_cards)            AS report_cards,
+                (SELECT COUNT(*) FROM classes)                 AS classes,
+                (SELECT COUNT(*) FROM courses)                 AS courses,
+                (SELECT COUNT(*) FROM fee_structure)           AS fee_structure,
+                (SELECT COUNT(*) FROM exams)                   AS exams`,
       });
       const beforeRow = (before.rows[0] || {}) as any;
 
       // ── Cascade delete (children first, parents last) ──
-      // 1. Sessions + device_tokens + notifications: wipe EVERYTHING so
-      //    every active login is kicked out and the bell history is clean.
+      // 1. Sessions + device_tokens + notifications + per-user prefs: wipe
+      //    EVERYTHING so every active login is kicked out and the bell
+      //    history is clean. notification_preferences reference users that
+      //    are about to be deleted, so they must go too.
       await db.execute('DELETE FROM sessions');
       await db.execute('DELETE FROM device_tokens');
       await db.execute('DELETE FROM notifications');
+      await db.execute('DELETE FROM notification_preferences');
 
       // 2. Records that reference a studentId / teacherId directly.
       await db.execute('DELETE FROM attendance');
@@ -4464,11 +4485,24 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       await db.execute('DELETE FROM date_sheet_entries');
       await db.execute('DELETE FROM date_sheets');
 
-      // 3. Finally delete the student + teacher user rows themselves.
+      // 2b. Deep mode: also wipe the manually-set-up catalog (classes,
+      //     courses, fee templates, exam definitions) so the platform is a
+      //     true blank slate. Only the institute + branch + office-staff
+      //     logins remain. class_courses must go before classes/courses.
+      if (deepMode) {
+        await db.execute('DELETE FROM class_courses');
+        await db.execute('DELETE FROM classes');
+        await db.execute('DELETE FROM courses');
+        await db.execute('DELETE FROM fee_structure');
+        await db.execute('DELETE FROM exams');
+      }
+
+      // 3. Finally delete the student + teacher + parent user rows themselves.
       //    Office-staff roles (admin/admissions/accountant/academic/
       //    institute-admin/branch-manager/super-admin) are PRESERVED.
+      //    Parents are linked to students, so they go too.
       await db.execute({
-        sql: `DELETE FROM users WHERE role IN ('student','teacher')`,
+        sql: `DELETE FROM users WHERE role IN ('student','teacher','parent')`,
       });
 
       // 4. Reset the denormalized counter columns on institutes + branches
@@ -4495,10 +4529,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
 
       return NextResponse.json({
         success: true,
-        message: 'All test student / teacher data has been permanently purged. The platform is now in a clean state.',
+        message: deepMode
+          ? 'All manually-added data (students, teachers, parents, classes, courses, fees, exam definitions) has been permanently purged. Only the college skeleton + office-staff logins remain.'
+          : 'All test student / teacher data has been permanently purged. The platform is now in a clean state.',
+        deep: deepMode,
         purged: {
           students: Number(beforeRow.students || 0),
           teachers: Number(beforeRow.teachers || 0),
+          parents: Number(beforeRow.parents || 0),
           sessions: Number(beforeRow.sessions || 0),
           notifications: Number(beforeRow.notifications || 0),
           device_tokens: Number(beforeRow.device_tokens || 0),
@@ -4508,13 +4546,23 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           fee_invoices: Number(beforeRow.fee_invoices || 0),
           student_documents: Number(beforeRow.student_documents || 0),
           report_cards: Number(beforeRow.report_cards || 0),
+          classes: deepMode ? Number(beforeRow.classes || 0) : 0,
+          courses: deepMode ? Number(beforeRow.courses || 0) : 0,
+          fee_structure: deepMode ? Number(beforeRow.fee_structure || 0) : 0,
+          exams: deepMode ? Number(beforeRow.exams || 0) : 0,
         },
-        preserved: [
-          'institutes', 'branches', 'classes', 'courses', 'class_courses',
-          'fee_structure', 'exams',
-          'office-staff accounts (admin / admissions / accountant / academic)',
-          'super-admin account',
-        ],
+        preserved: deepMode
+          ? [
+              'institutes', 'branches',
+              'office-staff accounts (admin / admissions / accountant / academic)',
+              'super-admin account',
+            ]
+          : [
+              'institutes', 'branches', 'classes', 'courses', 'class_courses',
+              'fee_structure', 'exams',
+              'office-staff accounts (admin / admissions / accountant / academic)',
+              'super-admin account',
+            ],
       });
     }
 
