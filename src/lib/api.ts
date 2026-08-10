@@ -775,6 +775,11 @@ export type ImportStudentRow = {
   address?: string;
   prevResult?: string;
   rollNo?: string;    // usually blank → auto-generated
+  /** Optional installment plan for already-enrolled students imported via
+   *  Student Records drill-down. When provided, fee_invoice rows are created
+   *  automatically so the student appears in Fee & Installments with invoices
+   *  ready (no manual "Generate Plan" step needed). */
+  installments?: { amount: number; dueDate?: string }[];
 };
 
 // === Shared types for the v1.5.0 module APIs ===

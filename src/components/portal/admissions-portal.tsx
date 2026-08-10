@@ -111,6 +111,7 @@ import {
   SimplePieChart,
   ChartCard,
 } from './shared/concordia-charts';
+import { StudentImportDialog } from './shared/student-import-dialog';
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -1553,6 +1554,7 @@ export function StudentRecordsView({
   const [drill, setDrill] = useNavState<Drill>('admissions-students', { dept: null, part: '1', cls: null, section: null });
   const [editing, setEditing] = useState<any | null>(null);
   const [docStudent, setDocStudent] = useState<any | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   // ── Counts per department — count students whose program matches one of
   // the canonical 6 departments. Legacy programs (ICS, F.Sc Pre-Medical, …)
@@ -1646,16 +1648,28 @@ export function StudentRecordsView({
   const handleClearHierarchy = () =>
     setDrill({ dept: null, part: '1', cls: null, section: null });
 
-  // ── Header actions: refresh only.
+  // ── Header actions: Import (when drilled to a section) + Refresh.
+  const canImport = !!(drill.section || drill.cls);
   const headerActions = (
-    <Button
-      variant="outline"
-      className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
-      onClick={onRefresh}
-    >
-      <Loader2 className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-      Refresh
-    </Button>
+    <div className="flex gap-2">
+      {canImport && (
+        <Button
+          onClick={() => setImportOpen(true)}
+          className="bg-[#F26522] hover:bg-[#D4541E] text-white rounded-lg h-9 px-4 text-sm font-medium"
+        >
+          <Upload className="h-4 w-4 mr-1.5" />
+          Import Students
+        </Button>
+      )}
+      <Button
+        variant="outline"
+        className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg h-9 px-4 text-sm font-medium"
+        onClick={onRefresh}
+      >
+        <Loader2 className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+        Refresh
+      </Button>
+    </div>
   );
 
   return (
@@ -1865,6 +1879,20 @@ export function StudentRecordsView({
       <DocumentManagerDialog
         student={docStudent}
         onClose={() => setDocStudent(null)}
+      />
+
+      {/* Import students dialog — pre-fills program + section from drill-down */}
+      <StudentImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          setImportOpen(false);
+          onRefresh();
+        }}
+        branchId={user?.branchId}
+        preselectedProgram={drill.dept || undefined}
+        preselectedSection={drill.section?.section || drill.cls?.section || undefined}
+        preselectedPart={drill.part as '1' | '2'}
       />
     </div>
   );

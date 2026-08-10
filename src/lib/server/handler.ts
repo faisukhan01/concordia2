@@ -956,6 +956,30 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           if (cnicDigits) cnicSet.add(cnicDigits);
           nameFatherSet.add(nf);
           await db.execute({ sql: 'UPDATE branches SET students = students + 1 WHERE id = ?', args: [brId] });
+          
+          // ── Create installment invoices if provided (bulk import with fees) ──
+          if (row.installments && Array.isArray(row.installments) && row.installments.length > 0) {
+            let instNum = 0;
+            const now = new Date();
+            for (const inst of row.installments) {
+              const instAmount = Number(inst.amount);
+              const dueDate = inst.dueDate || null;
+              if (!instAmount || instAmount <= 0) continue;
+              const invId = nextId('INV');
+              const challanNo = `CH-INST-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${rollNo}-${instNum + 1}`;
+              const d = dueDate ? new Date(dueDate) : now;
+              const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+              const month = monthNames[d.getMonth()] || 'January';
+              const year = d.getFullYear();
+              await db.execute({
+                sql: `INSERT INTO fee_invoices (id, studentId, studentName, className, branchId, instituteId, month, year, amount, type, status, challanNo, dueDate)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [invId, id, name, program || '', brId, instId, month, year, instAmount, 'Installment', 'Unpaid', challanNo, dueDate],
+              });
+              instNum++;
+            }
+          }
+          
           created.push({ id, name, rollNo, email, password, program: program || null });
         } catch (e: any) {
           errors.push({ index: i, name, error: e?.message || 'insert failed' });

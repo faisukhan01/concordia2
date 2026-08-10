@@ -42,9 +42,26 @@ function normPhone(v: any): string {
   return d;
 }
 
-function parseFee(v: any): number | '' {
+const parseFee = (v: any): number | '' {
   const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
   return Number.isFinite(n) && n > 0 ? n : '';
+}
+
+// Compute the 3-part installment plan: Rs 10,000 admission fee folded into
+// installment 1, remaining fee split into 3 equal installments.
+const ADMISSION_FEE = 10000;
+function computeInstallmentPlan(baseFee: number): { amount: number; dueDate?: string }[] {
+  const total = Math.max(0, Math.round(Number(baseFee) || 0));
+  if (total === 0) return [];
+  const fixed = Math.min(ADMISSION_FEE, total);
+  const remaining = Math.max(0, total - fixed);
+  const each = Math.round(remaining / 3);
+  const firstThird = remaining - 2 * each;
+  return [
+    { amount: fixed + firstThird },
+    { amount: each },
+    { amount: each },
+  ];
 }
 
 // Map the (normalised) header row to column indices for each field.
@@ -74,18 +91,25 @@ function buildColMap(headers: string[]) {
 const cell = (row: any[], idx: number) => (idx >= 0 ? row[idx] : '');
 
 export function StudentImportDialog({
-  open, onClose, onImported, branchId,
+  open, onClose, onImported, branchId, preselectedProgram, preselectedSection, preselectedPart,
 }: {
   open: boolean;
   onClose: () => void;
   onImported?: () => void;
   branchId?: string;
+  /** When opened from Student Records drill-down, the program is pre-filled and locked. */
+  preselectedProgram?: string;
+  /** When opened from Student Records drill-down, the section is pre-filled and locked. */
+  preselectedSection?: string;
+  /** When opened from Student Records drill-down, the part is pre-filled and locked. */
+  preselectedPart?: '1' | '2';
 }) {
   const [step, setStep] = useState<'upload' | 'preview' | 'done'>('upload');
   const [rows, setRows] = useState<Row[]>([]);
   const [fileName, setFileName] = useState('');
-  const [part, setPart] = useState<'1' | '2'>('1');
-  const [section, setSection] = useState('A');
+  const [part, setPart] = useState<'1' | '2'>(preselectedPart || '1');
+  const [section, setSection] = useState(preselectedSection || 'A');
+  const [generateInstallments, setGenerateInstallments] = useState(true);
   const [importing, setImporting] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [result, setResult] = useState<{ created: number; skipped: number; errors: number } | null>(null);
@@ -93,7 +117,7 @@ export function StudentImportDialog({
 
   const reset = () => {
     setStep('upload'); setRows([]); setFileName(''); setResult(null);
-    setPart('1'); setSection('A');
+    setPart(preselectedPart || '1'); setSection(preselectedSection || 'A');
   };
 
   const close = () => { reset(); onClose(); };
@@ -120,11 +144,12 @@ export function StudentImportDialog({
         const nm = String(cell(r, col.name) ?? '').trim();
         if (!nm) continue;
         const rawProgram = String(cell(r, col.program) ?? '').trim();
+        const detectedProgram = preselectedProgram || detectProgram(rawProgram);
         parsed.push({
           name: nm,
           fatherName: String(cell(r, col.fatherName) ?? '').trim(),
           phone: normPhone(cell(r, col.phone)),
-          program: detectProgram(rawProgram),
+          program: detectedProgram,
           baseFee: parseFee(cell(r, col.fee)),
           cnic: String(cell(r, col.cnic) ?? '').trim(),
           fatherCnic: String(cell(r, col.fatherCnic) ?? '').trim(),
@@ -163,21 +188,27 @@ export function StudentImportDialog({
     if (included.length === 0) { toast({ title: 'No rows selected', variant: 'destructive' }); return; }
     setImporting(true);
     try {
-      const payload: ImportStudentRow[] = included.map((r) => ({
-        name: r.name,
-        fatherName: r.fatherName,
-        phone: r.phone,
-        program: r.program,
-        part,
-        section: section.trim().toUpperCase() || 'A',
-        baseFee: r.baseFee,
-        cnic: r.cnic,
-        fatherCnic: r.fatherCnic,
-        gender: r.gender,
-        address: r.address,
-        prevResult: r.prevResult,
-        rollNo: r.rollNo,
-      }));
+      const payload: ImportStudentRow[] = included.map((r) => {
+        const baseRow: ImportStudentRow = {
+          name: r.name,
+          fatherName: r.fatherName,
+          phone: r.phone,
+          program: r.program,
+          part,
+          section: section.trim().toUpperCase() || 'A',
+          baseFee: r.baseFee,
+          cnic: r.cnic,
+          fatherCnic: r.fatherCnic,
+          gender: r.gender,
+          address: r.address,
+          prevResult: r.prevResult,
+          rollNo: r.rollNo,
+        };
+        if (generateInstallments && r.baseFee && Number(r.baseFee) > 0) {
+          baseRow.installments = computeInstallmentPlan(Number(r.baseFee));
+        }
+        return baseRow;
+      });
       const res = await api.importStudents(payload, branchId);
       setResult(res);
       setStep('done');
@@ -238,13 +269,37 @@ export function StudentImportDialog({
           <>
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-3">
               <div className="flex items-center gap-4 flex-wrap">
+                {preselectedProgram && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Program (locked)</p>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+                      {deptLabel(preselectedProgram)}
+                    </div>
+                  </div>
+                )}
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Enroll into Part</p>
-                  <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                    Enroll into Part {preselectedPart ? '(locked)' : ''}
+                  </p>
+                  {preselectedPart ? (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+                      Part {preselectedPart}
+                    </div>
+                  ) : (
+                    <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+                  )}
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Section</p>
-                  <Input value={section} onChange={(e) => setSection(e.target.value)} className="h-10 w-20" maxLength={3} placeholder="A" />
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                    Section {preselectedSection ? '(locked)' : ''}
+                  </p>
+                  {preselectedSection ? (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+                      Section {preselectedSection}
+                    </div>
+                  ) : (
+                    <Input value={section} onChange={(e) => setSection(e.target.value)} className="h-10 w-20" maxLength={3} placeholder="A" />
+                  )}
                 </div>
               </div>
               <div className="text-xs text-gray-500 space-y-0.5 text-right">
@@ -255,6 +310,26 @@ export function StudentImportDialog({
                   </p>
                 )}
               </div>
+            </div>
+
+            {/* Generate Installments toggle */}
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={generateInstallments}
+                  onChange={(e) => setGenerateInstallments(e.target.checked)}
+                  className="h-4 w-4 mt-0.5 accent-[#F26522]"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-gray-900">Generate fee installments automatically</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    When enabled, each student with a tuition fee will get 3 installments auto-created: 
+                    <span className="font-medium text-gray-700"> Rs 10,000 admission fee + first third, then two equal installments</span>. 
+                    They'll appear directly in the Accountant's Fee & Installments page ready to collect.
+                  </p>
+                </div>
+              </label>
             </div>
 
             <div className="overflow-auto flex-1 -mx-6 px-6">
@@ -283,18 +358,21 @@ export function StudentImportDialog({
                       </td>
                       <td className="py-1.5 pr-3 font-medium text-gray-900 whitespace-nowrap">{r.name}</td>
                       <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap">{r.fatherName || '—'}</td>
-                      <td className="py-1.5 pr-3">
-                        <Select value={r.program || 'none'} onValueChange={(v) => setRowProgram(i, v === 'none' ? '' : v)}>
-                          <SelectTrigger className={`h-8 text-xs ${!r.program ? 'border-amber-300 text-amber-700' : ''}`}>
-                            <SelectValue placeholder="Select…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">— Unassigned —</SelectItem>
-                            {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </td>
+                      {!preselectedProgram && (
+                        <td className="py-1.5 pr-3">
+                          <Select value={r.program || 'none'} onValueChange={(v) => setRowProgram(i, v === 'none' ? '' : v)}>
+                            <SelectTrigger className={`h-8 text-xs ${!r.program ? 'border-amber-300 text-amber-700' : ''}`}>
+                              <SelectValue placeholder="Select…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">— Unassigned —</SelectItem>
+                              {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                      )}
                       <td className="py-1.5 pr-3 text-right tabular-nums text-gray-700">{r.baseFee ? Number(r.baseFee).toLocaleString() : '—'}</td>
+                      <td className="py-1.5 pr-3 text-gray-600 font-mono text-xs whitespace-nowrap">{r.rollNo || '—'}</td>
                       <td className="py-1.5 pr-3 text-gray-600 tabular-nums whitespace-nowrap">{r.phone || '—'}</td>
                       <td className="py-1.5 pr-3 text-gray-500 tabular-nums whitespace-nowrap">{r.cnic || '—'}</td>
                     </tr>
