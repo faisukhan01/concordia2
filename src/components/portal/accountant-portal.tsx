@@ -1862,8 +1862,12 @@ function FeeInstallmentsView({
 
   const sectionsOfClass = useMemo(() => {
     if (!drill.cls) return [];
-    return classes.filter((c) => c.name === drill.cls!.name);
-  }, [classes, drill.cls]);
+    // Sections belong to a specific Part — never merge Part 1 and Part 2
+    // sections of the same class (e.g. MB/MG in Part 1 vs MK/MQ in Part 2).
+    return classes.filter(
+      (c) => c.name === drill.cls!.name && String(c.part || '1') === String(drill.part || '1'),
+    );
+  }, [classes, drill.cls, drill.part]);
   const hasMultipleSections = sectionsOfClass.length > 1;
 
   const activeClassId = drill.section?.id || drill.cls?.id || '';
@@ -3194,8 +3198,12 @@ function MiscChargesView({
 
   const sectionsOfClass = useMemo(() => {
     if (!drill.cls) return [];
-    return classes.filter((c) => c.name === drill.cls!.name);
-  }, [classes, drill.cls]);
+    // Sections belong to a specific Part — never merge Part 1 and Part 2
+    // sections of the same class (e.g. MB/MG in Part 1 vs MK/MQ in Part 2).
+    return classes.filter(
+      (c) => c.name === drill.cls!.name && String(c.part || '1') === String(drill.part || '1'),
+    );
+  }, [classes, drill.cls, drill.part]);
   const hasMultipleSections = sectionsOfClass.length > 1;
 
   const activeClassId = drill.section?.id || drill.cls?.id || '';
