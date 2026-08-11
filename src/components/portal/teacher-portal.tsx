@@ -2249,6 +2249,7 @@ function TeacherSyllabus({ user, classes, loading }: { user: any; classes: Teach
 
   const send = async () => {
     if (!cls) { toast({ title: 'Select a class', variant: 'destructive' }); return; }
+    if (!course) { toast({ title: 'Select the subject you teach', variant: 'destructive' }); return; }
     if (!content.trim()) { toast({ title: 'Write the syllabus / topic', variant: 'destructive' }); return; }
     setSaving(true);
     try {
@@ -2256,7 +2257,7 @@ function TeacherSyllabus({ user, classes, loading }: { user: any; classes: Teach
         program: cls.program || cls.name,
         part: cls.part,
         section: cls.section,
-        course: course || undefined,
+        course,
         date,
         content: content.trim(),
       });
@@ -2277,7 +2278,7 @@ function TeacherSyllabus({ user, classes, loading }: { user: any; classes: Teach
       <div className="rounded-xl border border-gray-200 bg-white p-6 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Class" required>
-            <Select value={classId} onValueChange={(v) => { setClassId(v); setCourse(''); }}>
+            <Select value={classId} onValueChange={(v) => { setClassId(v); const c = classes.find((x) => x.id === v); setCourse(c?.courses[0]?.name || ''); }}>
               <SelectTrigger className={selectTriggerCls}><SelectValue placeholder="Select class…" /></SelectTrigger>
               <SelectContent>
                 {classes.length === 0 ? (
@@ -2288,12 +2289,13 @@ function TeacherSyllabus({ user, classes, loading }: { user: any; classes: Teach
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Subject (optional)">
-            <Select value={course || 'none'} onValueChange={(v) => setCourse(v === 'none' ? '' : v)}>
-              <SelectTrigger className={selectTriggerCls}><SelectValue placeholder="All subjects" /></SelectTrigger>
+          <Field label="Subject" required>
+            <Select value={course} onValueChange={setCourse} disabled={!cls}>
+              <SelectTrigger className={selectTriggerCls}><SelectValue placeholder={cls ? 'Select subject' : 'Pick a class first'} /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">General (whole class)</SelectItem>
-                {(cls?.courses || []).map((co) => <SelectItem key={co.id} value={co.name}>{co.name}</SelectItem>)}
+                {(cls?.courses || []).length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-500">No subject assigned for this section.</div>
+                ) : (cls?.courses || []).map((co) => <SelectItem key={co.id} value={co.name}>{co.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
