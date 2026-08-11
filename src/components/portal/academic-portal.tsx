@@ -1796,8 +1796,12 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
   // Sections of the selected class (same name, different section letters).
   const sectionsOfClass = useMemo(() => {
     if (!drill.cls) return [];
-    return classes.filter((c) => c.name === drill.cls!.name);
-  }, [classes, drill.cls]);
+    // Scope to the current Part — never merge Part 1 and Part 2 sections of
+    // the same class (e.g. MB/MG in Part 1 vs MK/MQ in Part 2).
+    return classes.filter(
+      (c) => c.name === drill.cls!.name && String(c.part || '1') === String(drill.part || '1'),
+    );
+  }, [classes, drill.cls, drill.part]);
   const hasMultipleSections = sectionsOfClass.length > 1;
 
   // Load timetable whenever the active class changes.
@@ -2485,8 +2489,12 @@ function ReportCardsView({ user, classes, students, teachers, exams }: { user: a
 
   const sectionsOfClass = useMemo(() => {
     if (!drill.cls) return [];
-    return classes.filter((c) => c.name === drill.cls!.name);
-  }, [classes, drill.cls]);
+    // Scope to the current Part — never merge Part 1 and Part 2 sections of
+    // the same class (e.g. MB/MG in Part 1 vs MK/MQ in Part 2).
+    return classes.filter(
+      (c) => c.name === drill.cls!.name && String(c.part || '1') === String(drill.part || '1'),
+    );
+  }, [classes, drill.cls, drill.part]);
   const hasMultipleSections = sectionsOfClass.length > 1;
 
   // ── Load courses + results for the active class (once the user drills in).
