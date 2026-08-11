@@ -235,6 +235,18 @@ export const api = {
   getMe: () => request<any>('auth/me'),
   sendStudentMessage: (studentId: string, message: string) =>
     request<{ success: boolean; parentsNotified: number }>('teacher/message', { method: 'POST', body: JSON.stringify({ studentId, message }) }),
+  // Syllabus / "today's topic"
+  createSyllabus: (body: { program: string; part?: string; section: string; course?: string; date?: string; content: string }) =>
+    request<{ success: boolean; id: string; notified: number }>('syllabus', { method: 'POST', body: JSON.stringify(body) }),
+  getSyllabus: (params?: { program?: string; part?: string; section?: string; teacherId?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.program) q.set('program', params.program);
+    if (params?.part) q.set('part', params.part);
+    if (params?.section) q.set('section', params.section);
+    if (params?.teacherId) q.set('teacherId', params.teacherId);
+    const qs = q.toString();
+    return request<any[]>(qs ? `syllabus?${qs}` : 'syllabus');
+  },
   getSessionInfo: () =>
     cachedGet<{
       currentSession: { token: string; issuedAt: number; expiresAt: number } | null;

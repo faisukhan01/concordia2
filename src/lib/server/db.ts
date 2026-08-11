@@ -98,6 +98,11 @@ const SCHEMA_STATEMENTS: string[] = [
   // table is the persistent record so users see the bell badge + history.
   `CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, data TEXT, read INTEGER NOT NULL DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')))`,
 
+  // Daily syllabus / "today's topic" a teacher posts to a section. Students of
+  // that program+part+section read it in their Syllabus page (grouped by course).
+  `CREATE TABLE IF NOT EXISTS syllabus (id TEXT PRIMARY KEY, branchId TEXT, program TEXT, part TEXT, section TEXT, course TEXT, date TEXT, content TEXT, teacherId TEXT, teacherName TEXT, createdAt TEXT DEFAULT (datetime('now')))`,
+  `CREATE INDEX IF NOT EXISTS idx_syllabus_section ON syllabus(branchId, program, part, section)`,
+
   // ── Notification Preferences (v4.4.0) ──
   // One row per user. Stores per-type mute toggles + sound + DND hours as
   // JSON so we can evolve the schema without migrations. The frontend

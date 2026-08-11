@@ -445,6 +445,7 @@ function TeacherDashboard({
 }) {
   const [todaySchedule, setTodaySchedule] = useState<any[]>([]);
   const [myResults, setMyResults] = useState<any[]>([]);
+  const [exams, setExams] = useState<any[]>([]);
   const [notifCount, setNotifCount] = useState(0);
 
   useEffect(() => {
@@ -461,10 +462,14 @@ function TeacherDashboard({
       .then((d) => setMyResults(Array.isArray(d) ? d : []))
       .catch(() => {});
     api
+      .getExams({ branchId: user.branchId })
+      .then((d) => setExams(Array.isArray(d) ? d : []))
+      .catch(() => {});
+    api
       .getNotifications()
       .then((d) => setNotifCount(d?.unread || 0))
       .catch(() => {});
-  }, [user?.id]);
+  }, [user?.id, user?.branchId]);
 
   // Unique student count across all allocated classes.
   const totalStudents = useMemo(() => {
@@ -473,15 +478,24 @@ function TeacherDashboard({
     return ids.size;
   }, [classes, students]);
 
-  // "Pending results" = number of allocated class+course pairs without a
-  // results row posted by this teacher. Approximate but meaningful.
+  // "Pending results" is only meaningful once the Academic Office has created
+  // an exam/test session. With no exams there is nothing to submit → 0 (fixes
+  // the old behaviour that counted every allocated course as "pending"). When
+  // exams exist, count each exam × the teacher's course-sections not yet posted.
   const pendingResults = useMemo(() => {
-    const posted = new Set(myResults.map((r: any) => `${r.classId}:${r.courseId}`));
-    return classes.reduce(
-      (acc, c) => acc + c.courses.filter((co) => !posted.has(`${c.id}:${co.id}`)).length,
-      0,
+    if (!exams || exams.length === 0) return 0;
+    const posted = new Set(
+      myResults.map((r: any) => `${r.exam || r.examName || ''}::${r.classId}::${r.courseId}`),
     );
-  }, [classes, myResults]);
+    let count = 0;
+    for (const ex of exams) {
+      const exName = ex.name || ex.title || ex.examName || '';
+      for (const c of classes) for (const co of c.courses) {
+        if (!posted.has(`${exName}::${c.id}::${co.id}`)) count += 1;
+      }
+    }
+    return count;
+  }, [exams, classes, myResults]);
 
   const quickActions = [
     { id: 'teacher-attendance', label: 'Mark Attendance', icon: CalendarCheck, desc: "Take today's attendance" },
@@ -2214,6 +2228,121 @@ function TeacherTimetable({ user }: { user: any }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Syllabus — teacher writes "today's topic" for a section and sends it to
+// all its students (in-app notification + push). Grouped by course.
+// ═══════════════════════════════════════════════════════════════════════
+
+function TeacherSyllabus({ user, classes, loading }: { user: any; classes: TeacherClass[]; loading: boolean }) {
+  const [classId, setClassId] = useState('');
+  const [course, setCourse] = useState('');
+  const [date, setDate] = useState(todayISO());
+  const [content, setContent] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const cls = classes.find((c) => c.id === classId) || null;
+
+  const loadHistory = () => {
+    if (!user?.id) return;
+    api.getSyllabus({ teacherId: user.id }).then((d) => setHistory(Array.isArray(d) ? d : [])).catch(() => {});
+  };
+  useEffect(loadHistory, [user?.id]);
+
+  const send = async () => {
+    if (!cls) { toast({ title: 'Select a class', variant: 'destructive' }); return; }
+    if (!content.trim()) { toast({ title: 'Write the syllabus / topic', variant: 'destructive' }); return; }
+    setSaving(true);
+    try {
+      const r = await api.createSyllabus({
+        program: cls.program || cls.name,
+        part: cls.part,
+        section: cls.section,
+        course: course || undefined,
+        date,
+        content: content.trim(),
+      });
+      toast({ title: 'Syllabus sent', description: `Delivered to ${r.notified} student(s).` });
+      setContent('');
+      loadHistory();
+    } catch (e: any) {
+      toast({ title: 'Could not send', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in-0 duration-200">
+      <PageHeader title="Syllabus" subtitle="Write today's topic for a section and send it to every student in it." />
+
+      <div className="rounded-xl border border-gray-200 bg-white p-6 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Class" required>
+            <Select value={classId} onValueChange={(v) => { setClassId(v); setCourse(''); }}>
+              <SelectTrigger className={selectTriggerCls}><SelectValue placeholder="Select class…" /></SelectTrigger>
+              <SelectContent>
+                {classes.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-500">No classes assigned yet.</div>
+                ) : classes.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{deptLabel(c.name)} · Part {c.part || '1'} · Sec {c.section || 'A'}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Subject (optional)">
+            <Select value={course || 'none'} onValueChange={(v) => setCourse(v === 'none' ? '' : v)}>
+              <SelectTrigger className={selectTriggerCls}><SelectValue placeholder="All subjects" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">General (whole class)</SelectItem>
+                {(cls?.courses || []).map((co) => <SelectItem key={co.id} value={co.name}>{co.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Date" required>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, 'h-10')} max={todayISO()} />
+          </Field>
+        </div>
+        <Field label="Today's Syllabus / Topic" required>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={6}
+            placeholder="e.g. Chapter 3 — Cell Structure: covered the cell membrane, cytoplasm and organelles. Homework: Q1–Q5 page 42."
+            className={cn(inputCls, 'w-full resize-y min-h-[140px] py-2')}
+          />
+        </Field>
+        <div className="flex justify-end">
+          <button onClick={send} disabled={saving} className={btnPrimary}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+            Send to all students
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-6">
+        <SectionHeader title="Recently posted" desc="Your latest syllabus entries." />
+        {loading ? (
+          <SkeletonTable rows={3} />
+        ) : history.length === 0 ? (
+          <EmptyState icon={BookOpen} title="Nothing posted yet" desc="Your sent syllabus entries will appear here." />
+        ) : (
+          <div className="space-y-2">
+            {history.slice(0, 20).map((h) => (
+              <div key={h.id} className="rounded-lg border border-gray-100 p-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-sm font-semibold text-gray-900">{deptLabel(h.program)} · Part {h.part || '1'} · Sec {h.section}{h.course ? ` · ${h.course}` : ''}</span>
+                  <span className="text-[11px] text-gray-400">{h.date}</span>
+                </div>
+                <p className="text-sm text-gray-600 whitespace-pre-wrap">{h.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Router — `settings` is handled by the parent RolePortal (return null here).
 // Admin views teacher modules via namespaced ids like `teacher:teacher-dashboard`
 // — strip the namespace before routing.
@@ -2260,6 +2389,8 @@ export function TeacherPortal({ activeModule, user }: Props) {
           loading={loading}
         />
       );
+    case 'teacher-syllabus':
+      return <TeacherSyllabus user={user} classes={classes} loading={loading} />;
     case 'teacher-feedback':
       return (
         <TeacherFeedback

@@ -264,6 +264,54 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true, parentsNotified: parents.rows.length });
     }
 
+    // Teacher posts a daily syllabus / "today's topic" to a section. Students
+    // of that program+part+section get it in their Syllabus page + a push.
+    if (method === 'POST' && path === 'syllabus') {
+      const user = await requireAuth(req);
+      requireRole(user, 'teacher', 'branch-manager', 'institute-admin', 'super-admin');
+      const { program, part, section, course, date, content } = body || {};
+      const text = String(content || '').trim();
+      if (!program || !section || !text) {
+        return NextResponse.json({ error: 'program, section and content are required' }, { status: 400 });
+      }
+      const brId = user.branchId;
+      const prt = part === '2' ? '2' : '1';
+      const sec = String(section).toUpperCase();
+      const dt = date || new Date().toISOString().slice(0, 10);
+      const id = nextId('SYL');
+      await db.execute({
+        sql: 'INSERT INTO syllabus (id, branchId, program, part, section, course, date, content, teacherId, teacherName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        args: [id, brId, program, prt, sec, course || null, dt, text, user.id, user.name || null],
+      });
+      const stu = await db.execute({
+        sql: "SELECT id FROM users WHERE role = 'student' AND branchId = ? AND class = ? AND section = ? AND COALESCE(part,'1') = ?",
+        args: [brId, program, sec, prt],
+      });
+      const ids = stu.rows.map((r: any) => r.id);
+      if (ids.length > 0) {
+        const { sendPushToUsers } = await import('./fcm');
+        const title = `📘 Syllabus${course ? ` · ${course}` : ''}`;
+        await sendPushToUsers(ids, 'syllabus', title, `${user.name || 'Your teacher'} posted today's topic.`, { route: 'syllabus' });
+      }
+      return NextResponse.json({ success: true, id, notified: ids.length });
+    }
+
+    // List syllabus entries — students pass their program/part/section; a
+    // teacher can pass teacherId to see what they posted.
+    if (method === 'GET' && path === 'syllabus') {
+      const user = await requireAuth(req);
+      const { program, part, section, teacherId } = query;
+      let sql = 'SELECT * FROM syllabus WHERE branchId = ?';
+      const args: any[] = [user.branchId];
+      if (program) { sql += ' AND program = ?'; args.push(program); }
+      if (part) { sql += " AND COALESCE(part,'1') = ?"; args.push(part); }
+      if (section) { sql += ' AND section = ?'; args.push(String(section).toUpperCase()); }
+      if (teacherId) { sql += ' AND teacherId = ?'; args.push(teacherId); }
+      sql += ' ORDER BY date DESC, createdAt DESC LIMIT 300';
+      const r = await db.execute({ sql, args });
+      return NextResponse.json(r.rows);
+    }
+
     if (method === 'GET' && path === 'auth/session-info') {
       const user = await requireAuth(req);
       const authHeader = req.headers.get('authorization') || '';

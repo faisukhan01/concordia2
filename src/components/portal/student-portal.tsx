@@ -501,6 +501,8 @@ export function StudentPortal({ activeModule, user }: Props) {
       return <StudentFees user={user} />;
     case 'student-results':
       return <StudentResults user={user} />;
+    case 'student-syllabus':
+      return <StudentSyllabus user={user} />;
     case 'student-report-card':
       return <StudentReportCard user={user} />;
     case 'student-attendance':
@@ -514,6 +516,91 @@ export function StudentPortal({ activeModule, user }: Props) {
     default:
       return <ComingSoon />;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Syllabus — today's topic posted by teachers, grouped by subject.
+// ═══════════════════════════════════════════════════════════════════════
+
+function StudentSyllabus({ user }: { user: any }) {
+  const [entries, setEntries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openSubject, setOpenSubject] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .getSyllabus({ program: user?.class, part: user?.part, section: user?.section })
+      .then((d) => { if (!cancelled) setEntries(Array.isArray(d) ? d : []); })
+      .catch(() => { if (!cancelled) setEntries([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [user?.class, user?.part, user?.section]);
+
+  // Group entries by subject (course); null/empty → "General".
+  const bySubject = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const e of entries) {
+      const key = (e.course || 'General').trim() || 'General';
+      const arr = map.get(key) || [];
+      arr.push(e);
+      map.set(key, arr);
+    }
+    return Array.from(map.entries()).map(([subject, list]) => ({
+      subject,
+      list: list.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))),
+    })).sort((a, b) => a.subject.localeCompare(b.subject));
+  }, [entries]);
+
+  const openList = openSubject ? (bySubject.find((s) => s.subject === openSubject)?.list || []) : [];
+
+  return (
+    <div className="space-y-6 animate-in fade-in-0 duration-200">
+      <PageHeader title="Syllabus" subtitle="Today's topics your teachers posted — tap a subject to see what was covered." />
+
+      {loading ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-6"><Loader2 className="h-5 w-5 animate-spin text-[#F26522]" /></div>
+      ) : entries.length === 0 ? (
+        <EmptyState icon={FileText} title="No syllabus yet" desc="When your teachers post today's topic, it will appear here by subject." />
+      ) : openSubject ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-3">
+          <button onClick={() => setOpenSubject(null)} className="text-sm text-gray-500 hover:text-gray-900 inline-flex items-center gap-1">
+            <ChevronRight className="h-3.5 w-3.5 rotate-180" /> All subjects
+          </button>
+          <h3 className="text-base font-bold text-gray-900">{openSubject}</h3>
+          <div className="space-y-2">
+            {openList.map((e) => (
+              <div key={e.id} className="rounded-lg border border-gray-100 p-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-xs font-semibold text-[#F26522]">{e.date}</span>
+                  {e.teacherName && <span className="text-[11px] text-gray-400">{e.teacherName}</span>}
+                </div>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{e.content}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {bySubject.map(({ subject, list }) => (
+            <button
+              key={subject}
+              onClick={() => setOpenSubject(subject)}
+              className="text-left rounded-xl border border-gray-200 bg-white p-4 hover:shadow-md hover:border-[#F26522]/40 transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="h-10 w-10 rounded-lg bg-[#F26522]/10 grid place-items-center"><FileText className="h-5 w-5 text-[#F26522]" /></div>
+                <ChevronRight className="h-4 w-4 text-gray-300" />
+              </div>
+              <p className="text-sm font-bold text-gray-900">{subject}</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">{list.length} entr{list.length === 1 ? 'y' : 'ies'} · latest {list[0]?.date}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
