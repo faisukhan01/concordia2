@@ -238,6 +238,32 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json(buildUserProfile(u));
     }
 
+    // Teacher → a single student: a direct typed message. Delivered as an
+    // in-app notification + push to the student AND any linked parent(s).
+    if (method === 'POST' && path === 'teacher/message') {
+      const user = await requireAuth(req);
+      requireRole(user, 'teacher', 'branch-manager', 'institute-admin', 'super-admin');
+      const { studentId, message } = body || {};
+      const text = String(message || '').trim();
+      if (!studentId || !text) return NextResponse.json({ error: 'studentId and message are required' }, { status: 400 });
+      const stuR = await db.execute({ sql: 'SELECT id, name FROM users WHERE id = ?', args: [studentId] });
+      if (stuR.rows.length === 0) return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+      const studentName = (stuR.rows[0] as any).name || 'your child';
+      const { sendPushToUser } = await import('./fcm');
+      const title = `💬 Message from ${user.name || 'your teacher'}`;
+      // Student
+      await sendPushToUser(studentId, 'feedback', title, text, { route: 'notifications' });
+      // Linked parents (parent rows point at the student via ward / wardId)
+      const parents = await db.execute({
+        sql: "SELECT id FROM users WHERE role = 'parent' AND (wardId = ? OR ward = ?)",
+        args: [studentId, studentName],
+      });
+      for (const p of parents.rows) {
+        await sendPushToUser((p as any).id, 'feedback', title, `Regarding ${studentName}: ${text}`, { route: 'notifications' });
+      }
+      return NextResponse.json({ success: true, parentsNotified: parents.rows.length });
+    }
+
     if (method === 'GET' && path === 'auth/session-info') {
       const user = await requireAuth(req);
       const authHeader = req.headers.get('authorization') || '';

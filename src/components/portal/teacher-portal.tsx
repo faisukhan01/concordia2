@@ -901,6 +901,8 @@ function TeacherAttendance({
   const [saving, setSaving] = useState(false);
   const [existing, setExisting] = useState<boolean>(false);
   const [loadingExisting, setLoadingExisting] = useState(false);
+  const [msgDraft, setMsgDraft] = useState<Record<string, string>>({});
+  const [sendingMsg, setSendingMsg] = useState<string | null>(null);
 
   // Attendance is limited to sections this teacher is IN-CHARGE of. When the
   // classes come from the new assignments (they carry `program`), keep only
@@ -937,10 +939,44 @@ function TeacherAttendance({
       .finally(() => setLoadingExisting(false));
   }, [classId, date, user.id]);
 
+  // Everyone defaults to PRESENT (orange). The teacher only flips absentees.
+  const listKey = list.map((s) => s.id).join(',');
+  useEffect(() => {
+    if (loadingExisting || existing || list.length === 0) return;
+    setMarks((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const s of list) {
+        if (!next[s.id]) { next[s.id] = 'Present'; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey, existing, loadingExisting]);
+
+  const toggleMark = (id: string) =>
+    setMarks((m) => ({ ...m, [id]: (m[id] === 'Absent' ? 'Present' : 'Absent') }));
+
   const setAll = (status: AttendanceStatus) => {
     const m: Record<string, AttendanceStatus> = {};
     for (const s of list) m[s.id] = status;
     setMarks(m);
+  };
+
+  // Send a direct message to a student (and their parents) — bell + push.
+  const sendMessage = async (s: any) => {
+    const text = (msgDraft[s.id] || '').trim();
+    if (!text) { toast({ title: 'Type a message first', variant: 'destructive' }); return; }
+    setSendingMsg(s.id);
+    try {
+      const r = await api.sendStudentMessage(s.id, text);
+      setMsgDraft((m) => ({ ...m, [s.id]: '' }));
+      toast({ title: 'Message sent', description: `Delivered to ${s.name}${r?.parentsNotified ? ` + ${r.parentsNotified} parent(s)` : ''}.` });
+    } catch (e: any) {
+      toast({ title: 'Could not send message', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSendingMsg(null);
+    }
   };
 
   const stats = useMemo(() => {
@@ -1096,59 +1132,50 @@ function TeacherAttendance({
             desc="The Academic Office may not have enrolled students here yet."
           />
         ) : (
-          <div className="max-h-[28rem] overflow-y-auto pr-1 -mr-1">
-            <Table>
-              <TableHeader className="sticky top-0 bg-white z-10">
-                <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wide text-gray-500 w-20">
-                    Roll No
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                    Student
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wide text-gray-500 text-right">
-                    Status
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {list.map((s) => {
-                  const status = marks[s.id];
-                  return (
-                    <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
-                      <TableCell className="text-sm font-mono text-gray-600">
-                        {s.rollNo || '—'}
-                      </TableCell>
-                      <TableCell className="text-sm font-medium text-[#1A1A1A]">{s.name}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
-                          {(['Present', 'Absent', 'Late'] as AttendanceStatus[]).map((opt) => {
-                            const active = status === opt;
-                            const colorMap: Record<AttendanceStatus, string> = {
-                              Present: 'bg-emerald-500 text-white',
-                              Absent: 'bg-rose-500 text-white',
-                              Late: 'bg-amber-500 text-white',
-                            };
-                            return (
-                              <button
-                                key={opt}
-                                onClick={() => setMarks((m) => ({ ...m, [s.id]: opt }))}
-                                className={cn(
-                                  'px-3 h-8 text-[11px] font-medium transition-colors',
-                                  active ? colorMap[opt] : 'bg-white text-gray-600 hover:bg-gray-50',
-                                )}
-                              >
-                                {opt[0]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+          <div className="max-h-[32rem] overflow-y-auto pr-1 -mr-1 divide-y divide-gray-100">
+            {list.map((s) => {
+              const absent = marks[s.id] === 'Absent';
+              return (
+                <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-3 py-3">
+                  {/* Roll + name */}
+                  <div className="flex items-center gap-3 sm:w-64 shrink-0 min-w-0">
+                    <span className="text-xs font-mono text-gray-400 w-12 shrink-0">{s.rollNo || '—'}</span>
+                    <span className="text-sm font-semibold text-[#1A1A1A] truncate">{s.name}</span>
+                  </div>
+
+                  {/* One toggle button: Present (orange) ⇄ Absent (red) */}
+                  <button
+                    onClick={() => toggleMark(s.id)}
+                    className={cn(
+                      'shrink-0 h-9 w-24 rounded-lg text-sm font-bold text-white transition-colors shadow-sm',
+                      absent ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#F26522] hover:bg-[#D4541E]',
+                    )}
+                    title={absent ? 'Absent — click to mark Present' : 'Present — click to mark Absent'}
+                  >
+                    {absent ? 'Absent' : 'Present'}
+                  </button>
+
+                  {/* Direct message to student + parents */}
+                  <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <Input
+                      value={msgDraft[s.id] || ''}
+                      onChange={(e) => setMsgDraft((m) => ({ ...m, [s.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(s); }}
+                      placeholder="Message to student & parent…"
+                      className={cn(inputCls, 'h-9 flex-1')}
+                    />
+                    <button
+                      onClick={() => sendMessage(s)}
+                      disabled={sendingMsg === s.id || !(msgDraft[s.id] || '').trim()}
+                      className="shrink-0 h-9 px-3 rounded-lg bg-gray-900 hover:bg-black text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-40"
+                    >
+                      {sendingMsg === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                      Send
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
