@@ -9,6 +9,10 @@ function apiUrl(path: string) {
 // Solves the "every page is slow" problem — GET requests return cached data
 // instantly and refresh silently in the background.
 const _cache = new Map<string, { data: any; time: number }>();
+// In-flight GET de-duplication: when several components request the same
+// endpoint at once (very common on a page mount), they share ONE network
+// request instead of firing N. Huge win under concurrent load.
+const _inflight = new Map<string, Promise<any>>();
 const CACHE_TTL = 60_000; // 60 seconds
 const SESSION_KEY = 'concordia-api-cache';
 
@@ -48,11 +52,14 @@ async function cachedGet<T>(path: string): Promise<T> {
     backgroundRefresh<T>(path);
     return entry.data as T;
   }
-  // No cache — fetch from network
-  const data = await request<T>(path);
-  _cache.set(path, { data, time: now });
-  persistCache();
-  return data;
+  // No cache — coalesce concurrent identical fetches into a single request.
+  const pending = _inflight.get(path);
+  if (pending) return pending as Promise<T>;
+  const p = request<T>(path)
+    .then((data) => { _cache.set(path, { data, time: Date.now() }); persistCache(); return data; })
+    .finally(() => { _inflight.delete(path); });
+  _inflight.set(path, p);
+  return p;
 }
 
 async function backgroundRefresh<T>(path: string) {
@@ -428,12 +435,15 @@ export const api = {
   // reference
   reference: () => cachedGet<{ classes: string[]; sections: string[]; subjects: string[]; programs: string[] }>('reference'),
   // classes & courses
-  getClasses: (branchId?: string) => request<any[]>(branchId ? `classes?branchId=${branchId}` : 'classes'),
+  getClasses: (branchId?: string) => cachedGet<any[]>(branchId ? `classes?branchId=${branchId}` : 'classes'),
   // `program` and `part` are optional — pre-existing callers that omit them
   // still work (the backend defaults them to NULL / '1'). New Academic
   // Office flows pass program + part to drive the department hierarchy.
-  createClass: (name: string, section: string, branchId?: string, program?: string, part?: string) =>
-    request<any>('classes', { method: 'POST', body: JSON.stringify({ name, section, branchId, program, part }) }),
+  createClass: async (name: string, section: string, branchId?: string, program?: string, part?: string) => {
+    const r = await request<any>('classes', { method: 'POST', body: JSON.stringify({ name, section, branchId, program, part }) });
+    invalidateCache();
+    return r;
+  },
   getCourses: (params?: { branchId?: string; classId?: string }) => {
     const q = new URLSearchParams();
     if (params?.branchId) q.set('branchId', params.branchId);

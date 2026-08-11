@@ -124,6 +124,10 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(LOWER(email))`,
   `CREATE INDEX IF NOT EXISTS idx_users_class ON users(class)`,
   `CREATE INDEX IF NOT EXISTS idx_users_part ON users(part)`,
+  // Composite indexes for the hottest multi-column filters — loading a branch's
+  // students/teachers, and scoping students by Department + Section + Part.
+  `CREATE INDEX IF NOT EXISTS idx_users_role_branch ON users(role, branchId)`,
+  `CREATE INDEX IF NOT EXISTS idx_users_branch_class_section_part ON users(branchId, class, section, part)`,
   `CREATE INDEX IF NOT EXISTS idx_classes_branchId ON classes(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_classes_program ON classes(program)`,
   `CREATE INDEX IF NOT EXISTS idx_classes_part ON classes(part)`,
@@ -143,6 +147,7 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_fee_invoices_branchId ON fee_invoices(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_fee_invoices_status ON fee_invoices(status)`,
   `CREATE INDEX IF NOT EXISTS idx_fee_invoices_type ON fee_invoices(type)`,
+  `CREATE INDEX IF NOT EXISTS idx_fee_invoices_student_type ON fee_invoices(studentId, type)`,
   `CREATE INDEX IF NOT EXISTS idx_fee_structure_branchId ON fee_structure(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId)`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_expiresAt ON sessions(expiresAt)`,
@@ -161,6 +166,9 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_student_documents_branchId ON student_documents(branchId)`,
   `CREATE INDEX IF NOT EXISTS idx_date_sheets_examId ON date_sheets(examId)`,
   `CREATE INDEX IF NOT EXISTS idx_date_sheets_branchId ON date_sheets(branchId)`,
+  `CREATE INDEX IF NOT EXISTS idx_date_sheets_lookup ON date_sheets(examId, part, program)`,
+  `CREATE INDEX IF NOT EXISTS idx_results_teacherId ON results(teacherId)`,
+  `CREATE INDEX IF NOT EXISTS idx_syllabus_teacherId ON syllabus(teacherId)`,
   `CREATE INDEX IF NOT EXISTS idx_date_sheet_entries_dateSheetId ON date_sheet_entries(dateSheetId)`,
   `CREATE INDEX IF NOT EXISTS idx_teacher_salaries_teacherId ON teacher_salaries(teacherId)`,
   `CREATE INDEX IF NOT EXISTS idx_salary_payments_teacherId ON salary_payments(teacherId)`,
