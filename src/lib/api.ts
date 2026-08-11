@@ -680,15 +680,16 @@ export const api = {
   // ───────────────────────────────────────────────────────────
   // Date Sheets (Academic → Exams & Date Sheets)
   // ───────────────────────────────────────────────────────────
-  getDateSheets: (params?: { examId?: string; part?: string; branchId?: string }) => {
+  getDateSheets: (params?: { examId?: string; part?: string; branchId?: string; program?: string }) => {
     const q = new URLSearchParams();
     if (params?.examId) q.set('examId', params.examId);
     if (params?.part) q.set('part', params.part);
     if (params?.branchId) q.set('branchId', params.branchId);
+    if (params?.program) q.set('program', params.program);
     const qs = q.toString();
     return request<any[]>(qs ? `date-sheets?${qs}` : 'date-sheets');
   },
-  saveDateSheet: (data: { examId: string; examName?: string; part: string; branchId?: string; entries: { subject: string; examDate: string; examTime?: string; roomName?: string }[] }) =>
+  saveDateSheet: (data: { examId: string; examName?: string; part: string; program: string; branchId?: string; entries: { subject: string; examDate: string; examTime?: string; roomName?: string }[] }) =>
     request<any>('date-sheets', { method: 'POST', body: JSON.stringify(data) }),
   deleteDateSheet: (id: string) =>
     request<{ success: boolean }>(`date-sheets/${id}`, { method: 'DELETE' }),

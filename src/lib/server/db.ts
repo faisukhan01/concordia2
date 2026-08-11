@@ -191,6 +191,9 @@ const MIGRATION_STATEMENTS: string[] = [
   // { program, part, section, course, incharge }. One teacher can hold many.
   // Drives the teacher dashboard and (incharge-only) attendance.
   `ALTER TABLE users ADD COLUMN assignments TEXT`,
+  // Date sheets are now per Program (department) as well as Part, so each
+  // program gets its own subject-wise schedule for an exam.
+  `ALTER TABLE date_sheets ADD COLUMN program TEXT`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===

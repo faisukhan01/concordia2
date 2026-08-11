@@ -4447,13 +4447,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
 
     if (method === 'GET' && path === 'date-sheets') {
       const user = await requireAuth(req);
-      const { examId, part, branchId } = query;
+      const { examId, part, branchId, program } = query;
       const brId = branchId || user.branchId;
       let sql = 'SELECT * FROM date_sheets WHERE 1=1';
       const args: any[] = [];
       if (brId) { sql += ' AND branchId = ?'; args.push(brId); }
       if (examId) { sql += ' AND examId = ?'; args.push(examId); }
       if (part) { sql += ' AND part = ?'; args.push(part); }
+      if (program) { sql += ' AND program = ?'; args.push(program); }
       sql += ' ORDER BY createdAt DESC';
       const r = await db.execute({ sql, args });
       const sheets = r.rows as any[];
@@ -4468,14 +4469,15 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
     if (method === 'POST' && path === 'date-sheets') {
       const user = await requireAuth(req);
       requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
-      const { examId, examName, part, branchId, entries } = body || {};
+      const { examId, examName, part, branchId, program, entries } = body || {};
       if (!examId) return NextResponse.json({ error: 'examId is required' }, { status: 400 });
+      if (!program) return NextResponse.json({ error: 'program is required' }, { status: 400 });
       const brId = branchId || user.branchId;
       const prt = part === '2' ? '2' : '1';
-      // Check if a date sheet already exists for this exam+part
+      // Check if a date sheet already exists for this exam + part + program
       const existing = await db.execute({
-        sql: 'SELECT id FROM date_sheets WHERE examId = ? AND part = ? AND branchId = ?',
-        args: [examId, prt, brId],
+        sql: 'SELECT id FROM date_sheets WHERE examId = ? AND part = ? AND branchId = ? AND program = ?',
+        args: [examId, prt, brId, program],
       });
       let sheetId: string;
       if (existing.rows.length > 0) {
@@ -4485,8 +4487,8 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       } else {
         sheetId = nextId('DS');
         await db.execute({
-          sql: 'INSERT INTO date_sheets (id, branchId, instituteId, examId, examName, part, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          args: [sheetId, brId, user.instituteId, examId, examName || '', prt, user.id],
+          sql: 'INSERT INTO date_sheets (id, branchId, instituteId, examId, examName, part, program, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          args: [sheetId, brId, user.instituteId, examId, examName || '', prt, program, user.id],
         });
       }
       // Insert new entries
@@ -4501,13 +4503,19 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         }
       }
 
-      // ── Notify all students in the branch that the date sheet is out ──
+      // ── Notify the PROGRAM's students (that part) that the date sheet is out ──
       try {
-        const { sendPushToRole, fcmEnabled } = await import('./fcm');
+        const { sendPushToUsers, fcmEnabled } = await import('./fcm');
         if (fcmEnabled()) {
           const examLabel = examName || 'exam';
-          await sendPushToRole('student', 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The date sheet for "${examLabel}" (Part ${prt}) has been published. Check the Exams section for subject-wise dates.`, { route: 'date-sheets', examId, sheetId });
-          await sendPushToRole('teacher', 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The date sheet for "${examLabel}" (Part ${prt}) is now available.`, { route: 'date-sheets', examId, sheetId });
+          const stu = await db.execute({
+            sql: "SELECT id FROM users WHERE role = 'student' AND branchId = ? AND class = ? AND COALESCE(part,'1') = ?",
+            args: [brId, program, prt],
+          });
+          const ids = stu.rows.map((r: any) => r.id);
+          if (ids.length) {
+            await sendPushToUsers(ids, 'date-sheet', `📋 Date sheet published — ${examLabel}`, `The ${program} Part ${prt} date sheet for "${examLabel}" is out. Check the Date Sheets section.`, { route: 'date-sheets', examId, sheetId });
+          }
         }
       } catch (e) { console.error('[date-sheets] push failed:', e); }
 

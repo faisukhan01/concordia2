@@ -2289,6 +2289,7 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
 
   // Date sheet builder state
   const [builderExam, setBuilderExam] = useState<any | null>(null);
+  const [builderProgram, setBuilderProgram] = useState<string>(DEPARTMENTS[0]);
   const [builderEntries, setBuilderEntries] = useState<{ subject: string; examDate: string; examTime: string; roomName: string }[]>([]);
   const [builderLoading, setBuilderLoading] = useState(false);
   const [builderSaving, setBuilderSaving] = useState(false);
@@ -2355,11 +2356,11 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
 
   // ── Open the date sheet builder for an exam. Loads any existing entries so
   // the academic office can edit the saved sheet in place.
-  const openBuilder = async (exam: any) => {
-    setBuilderExam(exam);
+  // Load the saved date sheet for a given exam + PROGRAM + part into the builder.
+  const loadBuilderEntries = async (exam: any, prog: string) => {
     setBuilderLoading(true);
     try {
-      const r = await api.getDateSheets({ examId: exam.id, part, branchId: user?.branchId });
+      const r = await api.getDateSheets({ examId: exam.id, part, program: prog, branchId: user?.branchId });
       const sheet = Array.isArray(r) && r.length > 0 ? r[0] : null;
       if (sheet && Array.isArray(sheet.entries) && sheet.entries.length > 0) {
         setBuilderEntries(sheet.entries.map((e: any) => ({
@@ -2374,6 +2375,17 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
     } catch {
       setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '' }]);
     } finally { setBuilderLoading(false); }
+  };
+
+  const openBuilder = async (exam: any) => {
+    setBuilderExam(exam);
+    setBuilderProgram(DEPARTMENTS[0]);
+    loadBuilderEntries(exam, DEPARTMENTS[0]);
+  };
+
+  const changeBuilderProgram = (prog: string) => {
+    setBuilderProgram(prog);
+    if (builderExam) loadBuilderEntries(builderExam, prog);
   };
 
   const closeBuilder = () => {
@@ -2394,6 +2406,7 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
         examId: builderExam.id,
         examName: builderExam.name,
         part,
+        program: builderProgram,
         branchId: user?.branchId,
         entries: valid.map((e) => ({
           subject: e.subject.trim(),
@@ -2402,12 +2415,12 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
           roomName: e.roomName || '',
         })),
       });
-      toast({ title: 'Date sheet saved', description: `${builderExam.name} — Part ${part}` });
-      // Refresh the existing-sheets map so the table renders under the card.
+      toast({ title: 'Date sheet saved', description: `${deptLabel(builderProgram)} · ${builderExam.name} — Part ${part}. Pick another program to build its sheet, or Close.` });
+      // Refresh the existing-sheets map so the card reflects that a sheet exists.
       const r = await api.getDateSheets({ examId: builderExam.id, part, branchId: user?.branchId });
       const sheet = Array.isArray(r) && r.length > 0 ? r[0] : null;
       setExistingSheets((prev) => ({ ...prev, [builderExam.id]: sheet }));
-      closeBuilder();
+      // Keep the builder open so all 6 programs can be built in one session.
     } catch (e: any) {
       toast({ title: 'Failed to save date sheet', description: e?.message || 'Please try again', variant: 'destructive' });
     } finally { setBuilderSaving(false); }
@@ -2571,10 +2584,21 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
               Date Sheet Builder — {builderExam?.name}
             </SheetTitle>
             <SheetDescription>
-              Part {part} · Add one row per subject. Saving replaces any existing date sheet for this exam + part.
+              Part {part} · Each program has its own date sheet. Pick a program, add one row per subject, then Save. Repeat for each program.
             </SheetDescription>
           </SheetHeader>
           <div className="px-4 pb-6 space-y-4">
+            {/* Program selector — the date sheet is scoped to this program */}
+            <div className="rounded-lg border border-[#F26522]/30 bg-[#FFF7F2] p-3">
+              <Field label="Program (date sheet is for this department)" required>
+                <Select value={builderProgram} onValueChange={changeBuilderProgram}>
+                  <SelectTrigger className={cn(inputCls, 'h-10 bg-white')}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
             {builderLoading ? (
               <SkeletonTable rows={3} />
             ) : (

@@ -1246,10 +1246,18 @@ function TeacherResults({
   const [obtained, setObtained] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [recent, setRecent] = useState<any[]>([]);
+  const [exams, setExams] = useState<any[]>([]);
 
   const cls = classes.find((c) => c.id === classId) || null;
   const course = cls?.courses.find((co) => co.id === courseId) || null;
   const list = cls ? studentsForClass(students, cls) : [];
+
+  // Test options come from the exams the Academic Office created (e.g.
+  // "Monthly Test 1"); fall back to the common presets if none exist yet.
+  const testOptions = useMemo(() => {
+    const names = exams.map((e: any) => e.name || e.title || e.examName).filter(Boolean);
+    return names.length ? Array.from(new Set(names)) : COMMON_TESTS;
+  }, [exams]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1257,7 +1265,11 @@ function TeacherResults({
       .getResults({ teacherId: user.id })
       .then((d) => setRecent(Array.isArray(d) ? d : []))
       .catch(() => {});
-  }, [user?.id]);
+    api
+      .getExams({ branchId: user.branchId })
+      .then((d) => setExams(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [user?.id, user?.branchId]);
 
   // Reset course + marks when class changes.
   useEffect(() => {
@@ -1363,7 +1375,7 @@ function TeacherResults({
                 <SelectValue placeholder="Select test…" />
               </SelectTrigger>
               <SelectContent>
-                {COMMON_TESTS.map((t) => (
+                {testOptions.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
                   </SelectItem>
@@ -1377,9 +1389,11 @@ function TeacherResults({
                 <SelectValue placeholder="Select class…" />
               </SelectTrigger>
               <SelectContent>
-                {classes.map((c) => (
+                {classes.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-500">No classes assigned to you.</div>
+                ) : classes.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.name} · Sec {c.section || 'A'}
+                    {deptLabel(c.name)} · Part {c.part || '1'} · Sec {c.section || 'A'}
                   </SelectItem>
                 ))}
               </SelectContent>
