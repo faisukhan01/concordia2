@@ -312,6 +312,32 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json(r.rows);
     }
 
+    // Finalize/publish a class timetable — notify the section's students and
+    // every teacher who has a period in it that the weekly timetable is ready.
+    if (method === 'POST' && path === 'timetable/publish') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin', 'super-admin');
+      const { classId } = body || {};
+      if (!classId) return NextResponse.json({ error: 'classId required' }, { status: 400 });
+      const clsR = await db.execute({ sql: 'SELECT name, section, part, branchId FROM classes WHERE id = ?', args: [classId] });
+      if (clsR.rows.length === 0) return NextResponse.json({ error: 'Class not found' }, { status: 404 });
+      const c = clsR.rows[0] as any;
+      const brId = c.branchId || user.branchId;
+      const prt = String(c.part || '1');
+      const stu = await db.execute({
+        sql: "SELECT id FROM users WHERE role = 'student' AND branchId = ? AND class = ? AND section = ? AND COALESCE(part,'1') = ?",
+        args: [brId, c.name, c.section, prt],
+      });
+      const tt = await db.execute({ sql: 'SELECT DISTINCT teacherId FROM timetable WHERE classId = ? AND teacherId IS NOT NULL', args: [classId] });
+      const studentIds = stu.rows.map((r: any) => r.id);
+      const teacherIds = tt.rows.map((r: any) => r.teacherId).filter(Boolean);
+      const { sendPushToUsers } = await import('./fcm');
+      const label = `${c.name} · Sec ${c.section}`;
+      if (studentIds.length) await sendPushToUsers(studentIds, 'timetable', '🗓️ Weekly timetable published', `Your ${label} weekly timetable is ready.`, { route: 'timetable' });
+      if (teacherIds.length) await sendPushToUsers(teacherIds, 'timetable', '🗓️ Timetable updated', `The ${label} weekly timetable has been published.`, { route: 'timetable' });
+      return NextResponse.json({ success: true, students: studentIds.length, teachers: teacherIds.length });
+    }
+
     if (method === 'GET' && path === 'auth/session-info') {
       const user = await requireAuth(req);
       const authHeader = req.headers.get('authorization') || '';

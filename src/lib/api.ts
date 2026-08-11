@@ -582,6 +582,7 @@ export const api = {
   },
   saveTimetableEntry: (body: any) => request<any>('timetable', { method: 'POST', body: JSON.stringify(body) }),
   deleteTimetableEntry: (id: string) => request<any>(`timetable/${id}`, { method: 'DELETE' }),
+  publishTimetable: (classId: string) => request<{ success: boolean; students: number; teachers: number }>('timetable/publish', { method: 'POST', body: JSON.stringify({ classId }) }),
   // Report cards
   getReportCards: (params?: { studentId?: string; branchId?: string }) => {
     const q = new URLSearchParams();

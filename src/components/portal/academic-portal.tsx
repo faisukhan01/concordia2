@@ -1767,6 +1767,10 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [view, setView] = useState<'builder' | 'weekly'>('builder');
+  const [copyDest, setCopyDest] = useState('Tuesday');
+  const [busy, setBusy] = useState(false);
 
   // New-entry form state
   const [fDay, setFDay] = useState('Monday');
@@ -1839,10 +1843,11 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
       return;
     }
     if (!fSubject.trim()) { toast({ title: 'Subject is required', variant: 'destructive' }); return; }
+    if (!fTeacherId) { toast({ title: 'Teacher is required', description: 'Every period must have a teacher so it shows on their timetable.', variant: 'destructive' }); return; }
     const teacher = teachers.find((t) => t.id === fTeacherId) || null;
 
-    // Clash #1 — class slot taken
-    const classClash = entries.find((e) => e.day === fDay && Number(e.period) === period);
+    // Clash #1 — class slot taken (ignore the entry being edited).
+    const classClash = entries.find((e) => e.day === fDay && Number(e.period) === period && e.id !== editingId);
     if (classClash) {
       toast({
         title: '⚠ Clash: class slot taken',
@@ -1857,7 +1862,7 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
       try {
         const teacherEntries = await api.getTimetable({ teacherId: teacher.id });
         const teacherClash = (Array.isArray(teacherEntries) ? teacherEntries : []).find(
-          (e: any) => e.day === fDay && Number(e.period) === period,
+          (e: any) => e.day === fDay && Number(e.period) === period && e.id !== editingId,
         );
         if (teacherClash) {
           const clashCls = teacherClash.className
@@ -1872,7 +1877,7 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
         }
         if (fStart && fEnd) {
           const timeClash = (Array.isArray(teacherEntries) ? teacherEntries : []).find((e: any) =>
-            e.day === fDay && e.startTime && e.endTime && e.startTime < fEnd && e.endTime > fStart,
+            e.day === fDay && e.id !== editingId && e.startTime && e.endTime && e.startTime < fEnd && e.endTime > fStart,
           );
           if (timeClash) {
             const clashCls = timeClash.className
@@ -1906,8 +1911,11 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
         teacherName: teacher?.name || '',
         roomName: fRoom.trim(),
       });
-      toast({ title: 'Timetable entry saved', description: `${fDay} • Period ${period} • ${fSubject.trim()}` });
+      // When editing, remove the old row after the new one is saved.
+      if (editingId) { try { await api.deleteTimetableEntry(editingId); } catch {} }
+      toast({ title: editingId ? 'Timetable entry updated' : 'Timetable entry saved', description: `${fDay} • Period ${period} • ${fSubject.trim()}` });
       resetForm();
+      setEditingId(null);
       setShowForm(false);
       reloadEntries();
     } catch (e: any) {
@@ -1916,6 +1924,67 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
     } finally {
       setSaving(false);
     }
+  };
+
+  // Load an entry into the form for editing.
+  const editEntry = (e: any) => {
+    setEditingId(e.id);
+    setFDay(e.day || 'Monday');
+    setFPeriod(String(e.period || '1'));
+    setFSubject(e.subject || '');
+    setFTeacherId(e.teacherId || '');
+    setFStart(e.startTime || '08:00');
+    setFEnd(e.endTime || '08:45');
+    setFRoom(e.roomName || '');
+    setShowForm(true);
+    setView('builder');
+  };
+
+  // Copy every period of one day to another day (skips periods already taken).
+  const copyDay = async (src: string, dest: string) => {
+    if (src === dest) { toast({ title: 'Pick two different days', variant: 'destructive' }); return; }
+    const source = byDay(src);
+    if (source.length === 0) { toast({ title: `${src} has no periods to copy`, variant: 'destructive' }); return; }
+    const destPeriods = new Set(byDay(dest).map((e) => Number(e.period)));
+    const toCopy = source.filter((e) => !destPeriods.has(Number(e.period)));
+    if (toCopy.length === 0) { toast({ title: `${dest} already has those periods`, variant: 'destructive' }); return; }
+    setBusy(true);
+    try {
+      for (const e of toCopy) {
+        await api.saveTimetableEntry({
+          classId: activeClassId, className: activeClassObj?.name || '', section: activeClassObj?.section || '',
+          day: dest, period: Number(e.period), startTime: e.startTime, endTime: e.endTime,
+          subject: e.subject, teacherId: e.teacherId || null, teacherName: e.teacherName || '', roomName: e.roomName || '',
+        });
+      }
+      toast({ title: `Copied ${src} → ${dest}`, description: `${toCopy.length} period(s) copied.` });
+      reloadEntries();
+    } catch (e: any) {
+      toast({ title: 'Copy failed', description: e?.message || 'A period may clash on the target day.', variant: 'destructive' });
+      reloadEntries();
+    } finally { setBusy(false); }
+  };
+
+  const deleteFullTimetable = async () => {
+    if (entries.length === 0) return;
+    if (typeof window !== 'undefined' && !window.confirm(`Delete the ENTIRE timetable for ${activeClassObj?.name} — Section ${activeClassObj?.section}? (${entries.length} entries)`)) return;
+    setBusy(true);
+    try {
+      for (const e of entries) { if (e.id) { try { await api.deleteTimetableEntry(e.id); } catch {} } }
+      toast({ title: 'Timetable deleted' });
+      reloadEntries();
+    } finally { setBusy(false); }
+  };
+
+  const publishTimetable = async () => {
+    if (!activeClassId) return;
+    setBusy(true);
+    try {
+      const r = await api.publishTimetable(activeClassId);
+      toast({ title: 'Timetable published', description: `Sent to ${r.students} student(s) & ${r.teachers} teacher(s).` });
+    } catch (e: any) {
+      toast({ title: 'Could not publish', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setBusy(false); }
   };
 
   const removeEntry = async (entry: any) => {
@@ -2007,14 +2076,53 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                 {drill.dept} · Part {drill.part} · {entries.length} entr{entries.length === 1 ? 'y' : 'ies'}
               </p>
             </div>
-            <button onClick={() => setShowForm((s) => !s)} className={btnPrimary}>
-              <Plus className="h-4 w-4" /> {showForm ? 'Cancel' : 'Add Entry'}
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {view === 'builder' && (
+                <button onClick={() => { if (showForm) { setEditingId(null); resetForm(); } setShowForm((s) => !s); }} className={btnPrimary}>
+                  <Plus className="h-4 w-4" /> {showForm ? 'Cancel' : 'Add Entry'}
+                </button>
+              )}
+              <button
+                onClick={() => setView((v) => (v === 'builder' ? 'weekly' : 'builder'))}
+                disabled={entries.length === 0}
+                className={cn(btnSecondary, 'h-10', entries.length === 0 && 'opacity-50')}
+              >
+                <Calendar className="h-4 w-4" /> {view === 'builder' ? 'Finalize · Weekly View' : 'Back to Builder'}
+              </button>
+            </div>
           </div>
+
+          {/* Toolbar: copy a day, publish, delete all */}
+          {entries.length > 0 && (
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-4 rounded-lg border border-gray-100 bg-gray-50/60 p-2.5">
+              <div className="flex items-center gap-2 flex-wrap text-xs text-gray-600">
+                <span className="font-medium text-gray-500">Copy {fDay}</span>
+                <span>→</span>
+                <Select value={copyDest} onValueChange={setCopyDest}>
+                  <SelectTrigger className={cn(inputCls, 'h-8 w-36')}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {DAYS.filter((d) => d !== fDay).map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <button onClick={() => copyDay(fDay, copyDest)} disabled={busy} className={cn(btnSecondary, 'h-8 text-xs')}>
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />} Copy day
+                </button>
+                <span className="text-[11px] text-gray-400">(copies every period of {fDay})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={publishTimetable} disabled={busy} className={cn(btnPrimary, 'h-8 text-xs')}>
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Publish &amp; Notify
+                </button>
+                <button onClick={deleteFullTimetable} disabled={busy} className="h-8 px-3 text-xs rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 inline-flex items-center gap-1.5 font-medium">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete all
+                </button>
+              </div>
+            </div>
+          )}
 
           {showForm && (
             <div className="rounded-xl border border-gray-200 bg-gray-50/40 p-4 mb-4">
-              <SectionHeader title="New Timetable Entry" desc="Pick a day + period. Clashes (class slot taken, teacher double-booked, or teacher time overlap) are caught before saving." />
+              <SectionHeader title={editingId ? 'Edit Timetable Entry' : 'New Timetable Entry'} desc="Pick a day + period. Teacher is required so the period shows on their timetable. Clashes are caught before saving." />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 <Field label="Day" required>
                   <Select value={fDay} onValueChange={setFDay}>
@@ -2030,9 +2138,9 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                 <Field label="Subject" required>
                   <Input value={fSubject} onChange={(e) => setFSubject(e.target.value)} className={inputCls} placeholder="Mathematics" />
                 </Field>
-                <Field label="Teacher">
+                <Field label="Teacher" required>
                   <Select value={fTeacherId} onValueChange={setFTeacherId}>
-                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Optional" /></SelectTrigger>
+                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Select teacher" /></SelectTrigger>
                     <SelectContent>
                       {teachers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>)}
                     </SelectContent>
@@ -2049,9 +2157,9 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                 </Field>
                 <div className="flex items-end gap-2">
                   <button onClick={saveEntry} disabled={saving} className={btnPrimary + ' h-10 flex-1'}>
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save Entry
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {editingId ? 'Update Entry' : 'Save Entry'}
                   </button>
-                  <button onClick={() => { setShowForm(false); resetForm(); }} className={btnSecondary + ' h-10'}>Cancel</button>
+                  <button onClick={() => { setShowForm(false); resetForm(); setEditingId(null); }} className={btnSecondary + ' h-10'}>Cancel</button>
                 </div>
               </div>
             </div>
@@ -2068,6 +2176,60 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                 <button onClick={() => setShowForm(true)} className={btnPrimary}><Plus className="h-4 w-4" /> Add Entry</button>
               ) : undefined}
             />
+          ) : view === 'weekly' ? (
+            // ── Finalized weekly grid: periods (rows) × days (columns) ──
+            (() => {
+              const periods = Array.from(new Set(entries.map((e) => Number(e.period)))).sort((a, b) => a - b);
+              const cell = (day: string, p: number) => entries.find((e) => e.day === day && Number(e.period) === p);
+              return (
+                <div className="overflow-x-auto -mx-2 px-2">
+                  <table className="w-full border-collapse text-sm min-w-[720px]">
+                    <thead>
+                      <tr>
+                        <th className="sticky left-0 bg-white p-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400 border-b border-gray-200 w-20">Period</th>
+                        {DAYS.map((d) => (
+                          <th key={d} className="p-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-200">{d}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {periods.map((p) => (
+                        <tr key={p}>
+                          <td className="sticky left-0 bg-white p-2 align-top text-xs font-bold text-gray-700 border-b border-gray-100">P{p}</td>
+                          {DAYS.map((d) => {
+                            const e = cell(d, p);
+                            return (
+                              <td key={d} className="p-1.5 align-top border-b border-gray-100">
+                                {e ? (
+                                  <div className="group relative rounded-lg border border-gray-200 bg-gradient-to-br from-orange-50/60 to-white p-2.5 pr-7 hover:border-[#F26522]/40 transition-colors">
+                                    <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button onClick={() => editEntry(e)} title="Edit" className="h-5 w-5 grid place-items-center text-gray-400 hover:text-[#F26522] rounded"><Pencil className="h-3 w-3" /></button>
+                                      <button onClick={() => removeEntry(e)} disabled={deletingId === e.id} title="Delete" className="h-5 w-5 grid place-items-center text-gray-400 hover:text-rose-600 rounded">{deletingId === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}</button>
+                                    </div>
+                                    <div className="text-sm font-semibold text-gray-900 leading-tight">{e.subject || '—'}</div>
+                                    <div className="text-[10px] text-gray-500 mt-0.5">{e.startTime}–{e.endTime}</div>
+                                    {e.teacherName && <div className="text-[10px] text-gray-500 truncate">{e.teacherName}</div>}
+                                    {e.roomName && <div className="text-[10px] text-gray-400">{e.roomName}</div>}
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => { setEditingId(null); resetForm(); setFDay(d); setFPeriod(String(p)); setShowForm(true); setView('builder'); }}
+                                    className="w-full h-full min-h-[52px] rounded-lg border border-dashed border-gray-200 text-gray-300 hover:text-[#F26522] hover:border-[#F26522]/40 grid place-items-center"
+                                    title={`Add ${d} P${p}`}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()
           ) : (
             <div className="space-y-3">
               {DAYS.map((day) => {
@@ -2078,10 +2240,15 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                     <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">{day}</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                       {dayEntries.map((e, i) => (
-                        <div key={e.id || i} className="relative rounded-lg border border-gray-200 bg-white p-3 pr-9 hover:border-gray-300 transition-colors">
-                          <button onClick={() => removeEntry(e)} disabled={deletingId === e.id} aria-label="Delete entry" className="absolute top-2 right-2 h-6 w-6 inline-flex items-center justify-center text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded disabled:opacity-50">
-                            {deletingId === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                          </button>
+                        <div key={e.id || i} className="group relative rounded-lg border border-gray-200 bg-white p-3 pr-16 hover:border-gray-300 transition-colors">
+                          <div className="absolute top-2 right-2 flex items-center gap-0.5">
+                            <button onClick={() => editEntry(e)} aria-label="Edit entry" className="h-6 w-6 inline-flex items-center justify-center text-gray-300 hover:text-[#F26522] hover:bg-orange-50 rounded">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => removeEntry(e)} disabled={deletingId === e.id} aria-label="Delete entry" className="h-6 w-6 inline-flex items-center justify-center text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded disabled:opacity-50">
+                              {deletingId === e.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
                           <div className="text-xs text-gray-400">Period {e.period}</div>
                           <div className="text-sm font-semibold text-gray-900 mt-0.5">{e.subject || '—'}</div>
                           <div className="text-xs text-gray-500 mt-1">{e.startTime} — {e.endTime}</div>
