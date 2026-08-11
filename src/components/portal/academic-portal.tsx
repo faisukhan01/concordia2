@@ -2281,6 +2281,7 @@ const EXAM_TYPES = ['Monthly Test', 'Midterm', 'Final', 'Quiz', 'Assignment', 'O
 function ExamsAndDateSheetsView({ user }: { user: any }) {
   const [part, setPart] = useState<'1' | '2'>('1');
   const [exams, setExams] = useState<any[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingExam, setSavingExam] = useState(false);
   const [name, setName] = useState('');
@@ -2290,7 +2291,7 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
   // Date sheet builder state
   const [builderExam, setBuilderExam] = useState<any | null>(null);
   const [builderProgram, setBuilderProgram] = useState<string>(DEPARTMENTS[0]);
-  const [builderEntries, setBuilderEntries] = useState<{ subject: string; examDate: string; examTime: string; roomName: string }[]>([]);
+  const [builderEntries, setBuilderEntries] = useState<{ subject: string; examDate: string; examTime: string; roomName: string; teacherId: string; teacherName: string }[]>([]);
   const [builderLoading, setBuilderLoading] = useState(false);
   const [builderSaving, setBuilderSaving] = useState(false);
 
@@ -2304,8 +2305,26 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
       .then((d) => setExams(Array.isArray(d) ? d : []))
       .catch(() => setExams([]))
       .finally(() => setLoading(false));
+    api.platformUsers({ role: 'teacher', branchId: user?.branchId })
+      .then((d) => setTeachers(Array.isArray(d) ? d : []))
+      .catch(() => setTeachers([]));
   }, [user?.branchId]);
   useEffect(() => { load(); }, [load]);
+
+  // Subjects the selected teacher teaches for the builder's program + part
+  // (from their `assignments`). Drives the per-row Subject dropdown so results
+  // for a subject are routed to the teacher who actually teaches it.
+  const teacherSubjects = (teacherId: string): string[] => {
+    const t = teachers.find((x) => x.id === teacherId);
+    const asg: any[] = Array.isArray(t?.assignments) ? t!.assignments : [];
+    const set = new Set<string>();
+    for (const a of asg) {
+      if ((a.program || '').trim() === builderProgram && String(a.part || '1') === part && a.course) {
+        set.add(String(a.course).trim());
+      }
+    }
+    return Array.from(set).sort();
+  };
 
   // ── When the part tab changes, load all date sheets for that part so each
   // exam card can show its saved sheet (or "Build" button) without an extra
@@ -2368,12 +2387,14 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
           examDate: e.examDate ? String(e.examDate).slice(0, 10) : '',
           examTime: e.examTime || '',
           roomName: e.roomName || '',
+          teacherId: e.teacherId || '',
+          teacherName: e.teacherName || '',
         })));
       } else {
-        setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '' }]);
+        setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '', teacherId: '', teacherName: '' }]);
       }
     } catch {
-      setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '' }]);
+      setBuilderEntries([{ subject: '', examDate: '', examTime: '', roomName: '', teacherId: '', teacherName: '' }]);
     } finally { setBuilderLoading(false); }
   };
 
@@ -2413,6 +2434,8 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
           examDate: e.examDate,
           examTime: e.examTime || '',
           roomName: e.roomName || '',
+          teacherId: e.teacherId || '',
+          teacherName: e.teacherName || '',
         })),
       });
       toast({ title: 'Date sheet saved', description: `${deptLabel(builderProgram)} · ${builderExam.name} — Part ${part}. Pick another program to build its sheet, or Close.` });
@@ -2605,17 +2628,49 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
               <>
                 <div className="space-y-2">
                   {/* Header row */}
-                  <div className="hidden md:grid grid-cols-[1fr_140px_120px_1fr_36px] gap-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-1">
+                  <div className="hidden md:grid grid-cols-[1fr_1fr_130px_105px_120px_32px] gap-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-1">
+                    <span>Teacher</span>
                     <span>Subject</span>
                     <span>Date</span>
                     <span>Time</span>
-                    <span>Room (optional)</span>
+                    <span>Room (opt.)</span>
                     <span></span>
                   </div>
-                  {builderEntries.map((r, i) => (
-                    <div key={i} className="grid grid-cols-1 md:grid-cols-[1fr_140px_120px_1fr_36px] gap-2 items-end">
+                  {builderEntries.map((r, i) => {
+                    const subjOpts = r.teacherId ? teacherSubjects(r.teacherId) : [];
+                    return (
+                    <div key={i} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_130px_105px_120px_32px] gap-2 items-end">
+                      <Field label={i === 0 ? 'Teacher' : undefined}>
+                        <Select
+                          value={r.teacherId || undefined}
+                          onValueChange={(v) => {
+                            const t = teachers.find((x) => x.id === v);
+                            const n = [...builderEntries];
+                            n[i] = { ...n[i], teacherId: v, teacherName: t?.name || '', subject: '' };
+                            setBuilderEntries(n);
+                          }}
+                        >
+                          <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Select teacher" /></SelectTrigger>
+                          <SelectContent>
+                            {teachers.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-gray-500">No teachers yet.</div>
+                            ) : teachers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` · ${t.rollNo}` : ''}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </Field>
                       <Field label={i === 0 ? 'Subject' : undefined}>
-                        <Input value={r.subject} onChange={(e) => { const n = [...builderEntries]; n[i].subject = e.target.value; setBuilderEntries(n); }} className={inputCls} placeholder="Mathematics" />
+                        <Select
+                          value={r.subject || undefined}
+                          onValueChange={(v) => { const n = [...builderEntries]; n[i].subject = v; setBuilderEntries(n); }}
+                          disabled={!r.teacherId}
+                        >
+                          <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder={r.teacherId ? 'Select subject' : 'Pick teacher first'} /></SelectTrigger>
+                          <SelectContent>
+                            {subjOpts.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-gray-500">This teacher has no subject in {deptLabel(builderProgram)} · Part {part}.</div>
+                            ) : subjOpts.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       </Field>
                       <Field label={i === 0 ? 'Date' : undefined}>
                         <Input type="date" value={r.examDate} onChange={(e) => { const n = [...builderEntries]; n[i].examDate = e.target.value; setBuilderEntries(n); }} className={inputCls} />
@@ -2624,7 +2679,7 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
                         <Input type="time" value={r.examTime} onChange={(e) => { const n = [...builderEntries]; n[i].examTime = e.target.value; setBuilderEntries(n); }} className={inputCls} />
                       </Field>
                       <Field label={i === 0 ? 'Room' : undefined}>
-                        <Input value={r.roomName} onChange={(e) => { const n = [...builderEntries]; n[i].roomName = e.target.value; setBuilderEntries(n); }} className={inputCls} placeholder="Room 101" />
+                        <Input value={r.roomName} onChange={(e) => { const n = [...builderEntries]; n[i].roomName = e.target.value; setBuilderEntries(n); }} className={inputCls} placeholder="101" />
                       </Field>
                       <button
                         onClick={() => i > 0 && setBuilderEntries(builderEntries.filter((_, j) => j !== i))}
@@ -2635,10 +2690,11 @@ function ExamsAndDateSheetsView({ user }: { user: any }) {
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => setBuilderEntries([...builderEntries, { subject: '', examDate: '', examTime: '', roomName: '' }])} className={btnSecondary}>
+                  <button onClick={() => setBuilderEntries([...builderEntries, { subject: '', examDate: '', examTime: '', roomName: '', teacherId: '', teacherName: '' }])} className={btnSecondary}>
                     <Plus className="h-4 w-4" /> Add Row
                   </button>
                   <button onClick={saveDateSheet} disabled={builderSaving} className={btnPrimary}>

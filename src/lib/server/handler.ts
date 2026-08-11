@@ -4497,8 +4497,8 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           if (!e.subject || !e.examDate) continue;
           const eId = nextId('DSE');
           await db.execute({
-            sql: 'INSERT INTO date_sheet_entries (id, dateSheetId, subject, examDate, examTime, roomName) VALUES (?, ?, ?, ?, ?, ?)',
-            args: [eId, sheetId, e.subject, e.examDate, e.examTime || '', e.roomName || ''],
+            sql: 'INSERT INTO date_sheet_entries (id, dateSheetId, subject, examDate, examTime, roomName, teacherId, teacherName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            args: [eId, sheetId, e.subject, e.examDate, e.examTime || '', e.roomName || '', e.teacherId || null, e.teacherName || null],
           });
         }
       }

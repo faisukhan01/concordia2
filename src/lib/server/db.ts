@@ -194,6 +194,10 @@ const MIGRATION_STATEMENTS: string[] = [
   // Date sheets are now per Program (department) as well as Part, so each
   // program gets its own subject-wise schedule for an exam.
   `ALTER TABLE date_sheets ADD COLUMN program TEXT`,
+  // Each date-sheet subject row is tied to the teacher who teaches it, so the
+  // marks-entry for that subject is routed to (and limited to) that teacher.
+  `ALTER TABLE date_sheet_entries ADD COLUMN teacherId TEXT`,
+  `ALTER TABLE date_sheet_entries ADD COLUMN teacherName TEXT`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===
