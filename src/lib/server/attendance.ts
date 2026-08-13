@@ -157,27 +157,27 @@ export async function ingestPunches(payload: IngestPayload): Promise<{
   const settings = await getSettings();
   for (const key of affected) {
     const [sid, date] = key.split('|');
-    // Snapshot prior check-in so we only notify on the FIRST one.
+    // Snapshot prior check-in/out so we fire each notification only ONCE
+    // (on the first check-in, and on the first appearance of a check-out).
     const prior = await db.execute({
-      sql: `SELECT check_in_at FROM attendance_daily WHERE student_id = ? AND date = ?`,
+      sql: `SELECT check_in_at, check_out_at FROM attendance_daily WHERE student_id = ? AND date = ?`,
       args: [sid, date],
     });
-    const hadCheckIn = !!(prior.rows[0]?.check_in_at);
+    const priorIn = (prior.rows[0]?.check_in_at as string) || null;
+    const priorOut = (prior.rows[0]?.check_out_at as string) || null;
 
     await recomputeAttendance(sid, date);
 
-    if (!hadCheckIn && date === today && settings.notify_parents === 1) {
+    if (date === today && settings.notify_parents === 1) {
       const after = await db.execute({
-        sql: `SELECT check_in_at, status FROM attendance_daily WHERE student_id = ? AND date = ?`,
+        sql: `SELECT check_in_at, check_out_at FROM attendance_daily WHERE student_id = ? AND date = ?`,
         args: [sid, date],
       });
-      const checkIn = after.rows[0]?.check_in_at as string | undefined;
-      if (checkIn) {
-        // Fire-and-forget — never let a push failure break ingest.
-        notifyParentsOfCheckIn(sid, checkIn).catch((e) =>
-          console.error('[attendance] parent notify failed:', e),
-        );
-      }
+      const newIn = (after.rows[0]?.check_in_at as string) || null;
+      const newOut = (after.rows[0]?.check_out_at as string) || null;
+      // Fire-and-forget — a push failure must never break ingest.
+      if (!priorIn && newIn) notifyGate(sid, 'in', newIn).catch((e) => console.error('[attendance] check-in notify failed:', e));
+      if (!priorOut && newOut) notifyGate(sid, 'out', newOut).catch((e) => console.error('[attendance] check-out notify failed:', e));
     }
   }
 
@@ -210,29 +210,22 @@ export async function applyHeartbeat(b: any): Promise<{ ok: true }> {
   return { ok: true };
 }
 
-// ---------------------------------------------------------------- parent push
+// ---------------------------------------------------------------- gate push
 
-/** Push "Ahmed checked in at 8:05 AM" to every parent linked to the student. */
-async function notifyParentsOfCheckIn(studentId: string, checkInIso: string): Promise<void> {
-  const stu = await db.execute({
-    sql: `SELECT name FROM users WHERE id = ?`,
-    args: [studentId],
-  });
+/**
+ * Push a gate check-in / check-out to the STUDENT. sendPushToUser then mirrors
+ * it to any linked parent account automatically, so the student AND parents get
+ * it on both the mobile app (push + bell) and the website — instantly.
+ */
+async function notifyGate(studentId: string, kind: 'in' | 'out', iso: string): Promise<void> {
+  const stu = await db.execute({ sql: `SELECT name FROM users WHERE id = ?`, args: [studentId] });
   const name = (stu.rows[0]?.name as string) || 'Your child';
-  // Parents link to the student via ward / wardId (same pattern as elsewhere).
-  const parents = await db.execute({
-    sql: `SELECT id FROM users WHERE role = 'parent' AND (wardId = ? OR ward = ?)`,
-    args: [studentId, name],
-  });
-  if (parents.rows.length === 0) return;
   const { sendPushToUser } = await import('./fcm');
-  const title = '🟢 Checked in';
-  const body = `${name} checked in at ${localClock(checkInIso)}.`;
-  for (const p of parents.rows) {
-    await sendPushToUser(String((p as any).id), 'attendance', title, body, {
-      route: 'student-biometric',
-    });
-  }
+  const title = kind === 'in' ? '🟢 Checked in' : '🔵 Checked out';
+  const verb = kind === 'in' ? 'checked in' : 'checked out';
+  await sendPushToUser(studentId, 'attendance', title, `${name} ${verb} at ${localClock(iso)}.`, {
+    route: 'student-biometric',
+  });
 }
 
 // ---------------------------------------------------------------- rules engine

@@ -86,6 +86,9 @@ export type NotifType =
   | 'fee-paid'
   | 'salary'
   | 'app-update'
+  | 'feedback'
+  | 'syllabus'
+  | 'timetable'
   | 'general';
 
 async function persistNotification(
@@ -353,17 +356,53 @@ async function sendToTokens(
 
 // ───────────────────────── Public helpers ─────────────────────────
 
-/** Send a notification to ONE user. Persists the in-app row + pushes to all their devices. */
+// ── Parent mirroring ──────────────────────────────────────────────────────
+// Every notification aimed at a STUDENT is automatically mirrored to any
+// SEPARATE parent accounts linked to that student (role='parent' with
+// wardId = studentId). This means fees, results, attendance, exams, date
+// sheets, timetable, biometric check-in/out — everything a student is notified
+// about — reaches the parent too, with zero changes at each call site.
+//
+// (Parents who log in using the student's own credentials already receive
+// everything, because the device token is registered under the student id.
+// This covers the case where a parent has their own login.)
+async function linkedParentIds(studentIds: string[]): Promise<string[]> {
+  if (studentIds.length === 0) return [];
+  try {
+    const placeholders = studentIds.map(() => '?').join(',');
+    const r = await db.execute({
+      sql: `SELECT id FROM users WHERE role = 'parent' AND status = 'Active' AND wardId IN (${placeholders})`,
+      args: studentIds,
+    });
+    return r.rows.map((x: any) => String(x.id));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Send a notification to ONE user. Persists the in-app row + pushes to all
+ * their devices, and (unless _skipParents) mirrors it to linked parent
+ * accounts. When the target isn't a student, the parent lookup simply returns
+ * nothing — so this is safe to call for any user.
+ */
 export async function sendPushToUser(
   userId: string,
   type: NotifType,
   title: string,
   body: string,
   data?: Record<string, string>,
+  _skipParents = false,
 ): Promise<{ notificationId: string; pushed: number }> {
   // v4.4.0: Respect the user's mute + DND preferences. Skip BOTH the persist
   // AND the push if the user has muted this type or is in their DND window.
   if (await isMutedForUser(userId, type)) {
+    // Still mirror to parents — they have their own mute prefs.
+    if (!_skipParents) {
+      for (const pid of await linkedParentIds([userId])) {
+        await sendPushToUser(pid, type, title, body, data, true);
+      }
+    }
     return { notificationId: 'muted', pushed: 0 };
   }
   const notificationId = await persistNotification(userId, type, title, body, data);
@@ -376,6 +415,12 @@ export async function sendPushToUser(
     // can't be delivered. They need to open the app so the bridge can
     // register the token.
     console.warn(`[fcm] ⚠ NO TOKENS for user ${userId} — push "${title.slice(0, 40)}" was saved to DB but NOT delivered. The user must open the app to register their device token.`);
+  }
+  // Mirror to any separate parent accounts linked to this student.
+  if (!_skipParents) {
+    for (const pid of await linkedParentIds([userId])) {
+      await sendPushToUser(pid, type, title, body, data, true);
+    }
   }
   return { notificationId, pushed: tokens.length };
 }
@@ -563,10 +608,19 @@ export async function sendPushToUsers(
   title: string,
   body: string,
   data?: Record<string, string>,
+  _skipParents = false,
 ): Promise<{ sent: number }> {
   if (userIds.length === 0) return { sent: 0 };
   // De-duplicate
   const unique = Array.from(new Set(userIds));
+  // Mirror the whole batch to any separate parent accounts linked to these
+  // students (one query for the batch, then a single guarded recursion).
+  if (!_skipParents) {
+    const parents = await linkedParentIds(unique);
+    if (parents.length > 0) {
+      await sendPushToUsers(parents, type, title, body, data, true);
+    }
+  }
   // v4.4.0: Filter out users who have muted this type OR are in their DND
   // window. We do this BEFORE persist so muted users don't even get a row
   // in their notifications list (which would be confusing — seeing a
