@@ -254,6 +254,76 @@ export const api = {
     const qs = q.toString();
     return request<any[]>(qs ? `syllabus?${qs}` : 'syllabus');
   },
+
+  // ── Biometric Attendance (ZKTeco gate) ──────────────────────────────────
+  // Daily register for a date, optionally filtered by program/part/section/status.
+  bioRegister: (params?: { date?: string; program?: string; part?: string; section?: string; status?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.date) q.set('date', params.date);
+    if (params?.program) q.set('program', params.program);
+    if (params?.part) q.set('part', params.part);
+    if (params?.section) q.set('section', params.section);
+    if (params?.status) q.set('status', params.status);
+    const qs = q.toString();
+    return request<{ date: string; entries: any[] }>(qs ? `biometric/attendance?${qs}` : 'biometric/attendance');
+  },
+  // One student's history + calendar. For student/parent the id is ignored
+  // server-side and scoped to their own linked student — pass 'me' for clarity.
+  bioStudentHistory: (studentId: string, month?: string) =>
+    request<{ studentId: string; entries: any[]; totals: any }>(
+      `biometric/attendance/student/${encodeURIComponent(studentId)}${month ? `?month=${month}` : ''}`,
+    ),
+  bioDeviceStatus: () => request<any>('biometric/devices/status'),
+  bioLivePunches: () => request<any[]>('biometric/punches/live'),
+  bioUnmappedPins: () => request<any[]>('biometric/punches/unmapped'),
+  bioAssignPin: async (pin: string, studentId: string) => {
+    const r = await request<{ success: boolean; datesRecomputed: number }>('biometric/punches/assign', {
+      method: 'POST', body: JSON.stringify({ pin, studentId }),
+    });
+    invalidateCache();
+    return r;
+  },
+  bioOverride: (body: { studentId: string; date: string; status: string; note?: string; check_in_at?: string; check_out_at?: string }) =>
+    request<{ success: boolean }>('biometric/attendance/manual', {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+  bioRecompute: (from: string, to: string) =>
+    request<{ success: boolean; pairsRecomputed: number }>('biometric/attendance/recompute', {
+      method: 'POST', body: JSON.stringify({ from, to }),
+    }),
+  bioAllocatePin: async (studentId: string) => {
+    const r = await request<{ success: boolean; pin: string; studentName: string }>(
+      `biometric/students/${encodeURIComponent(studentId)}/allocate-pin`, { method: 'POST' },
+    );
+    invalidateCache(); // the enrollment list (cached) just changed
+    return r;
+  },
+  bioAllocateSection: async (program: string, part: string, section: string) => {
+    const r = await request<{ success: boolean; allocated: number }>('biometric/allocate-pin-section', {
+      method: 'POST', body: JSON.stringify({ program, part, section }),
+    });
+    invalidateCache();
+    return r;
+  },
+  // Cached (60s, stale-while-revalidate) — the enrollment list is loaded on
+  // every biometric page open; mutations above invalidate it.
+  bioEnrollment: () => cachedGet<any[]>('biometric/enrollment'),
+  bioSummary: (params?: { month?: string; program?: string; section?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.month) q.set('month', params.month);
+    if (params?.program) q.set('program', params.program);
+    if (params?.section) q.set('section', params.section);
+    const qs = q.toString();
+    return request<{ month: string; students: any[] }>(qs ? `biometric/summary?${qs}` : 'biometric/summary');
+  },
+  bioGetSettings: () => request<any>('biometric/settings'),
+  bioUpdateSettings: (body: Partial<{ late_after_time: string; half_day_after_time: string; dedup_window_minutes: number; working_days: string; notify_parents: boolean }>) =>
+    request<any>('biometric/settings', { method: 'PATCH', body: JSON.stringify(body) }),
+  bioGetHolidays: () => request<any[]>('biometric/holidays'),
+  bioAddHoliday: (date: string, name?: string) =>
+    request<{ success: boolean }>('biometric/holidays', { method: 'POST', body: JSON.stringify({ date, name }) }),
+  bioDeleteHoliday: (idOrDate: string) =>
+    request<{ success: boolean }>(`biometric/holidays/${encodeURIComponent(idOrDate)}`, { method: 'DELETE' }),
   getSessionInfo: () =>
     cachedGet<{
       currentSession: { token: string; issuedAt: number; expiresAt: number } | null;

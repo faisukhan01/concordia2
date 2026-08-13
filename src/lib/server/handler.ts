@@ -2951,6 +2951,392 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       }
     }
 
+    // ═══════════════════ BIOMETRIC ATTENDANCE (ZKTeco gate) ═══════════════════
+    // A Python bridge on the college LAN forwards fingerprint punches here.
+    // Bridge routes authenticate with BRIDGE_API_KEY (machine client), NOT a
+    // session. `body` was already parsed at the top of this dispatcher.
+
+    if (method === 'POST' && path === 'bridge/punches') {
+      const { authorizeBridge, ingestPunches } = await import('./attendance');
+      if (!authorizeBridge(req.headers.get('authorization'))) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }
+      return NextResponse.json(await ingestPunches(body || {}));
+    }
+
+    if (method === 'POST' && path === 'bridge/heartbeat') {
+      const { authorizeBridge, applyHeartbeat } = await import('./attendance');
+      if (!authorizeBridge(req.headers.get('authorization'))) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }
+      return NextResponse.json(await applyHeartbeat(body || {}));
+    }
+
+    // Nightly absent job — Vercel Cron (UTC schedule). Vercel injects
+    // `Authorization: Bearer $CRON_SECRET` automatically when CRON_SECRET is set.
+    if (method === 'GET' && path === 'cron/mark-absent') {
+      if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }
+      const { markAbsentNow } = await import('./attendance');
+      return NextResponse.json(await markAbsentNow());
+    }
+
+    // ── Session-authenticated biometric routes (namespaced under biometric/*
+    //    because GET/POST 'attendance' is already the teachers' manual register).
+    const isBio = pathSegments[0] === 'biometric';
+
+    // Roles helper: office staff inherit branch-manager (see auth.ts). Admin has
+    // full control; accountant read-only; admissions enrollment; student/parent
+    // own data only (scoped server-side, never trusting a client-supplied id).
+    const bioScopedStudentId = (u: any, requested?: string): string | null => {
+      if (u.role === 'student') return u.id;
+      if (u.role === 'parent') return u.wardId || null;
+      return requested || null; // staff may query any student
+    };
+
+    // GET biometric/attendance — daily register. Every ENROLLED student for a
+    // date (LEFT JOIN so intra-day "not_marked" students still appear), with
+    // optional class/section/part/status filters.
+    if (method === 'GET' && isBio && path === 'biometric/attendance') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'super-admin');
+      const date = query.date || new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
+      const filters: string[] = [];
+      const args: any[] = [date];
+      if (user.branchId) { filters.push('u.branchId = ?'); args.push(user.branchId); }
+      if (query.program) { filters.push('u.class = ?'); args.push(query.program); }
+      if (query.section) { filters.push('u.section = ?'); args.push(String(query.section).toUpperCase()); }
+      if (query.part) { filters.push("COALESCE(u.part,'1') = ?"); args.push(query.part === '2' ? '2' : '1'); }
+      const where = filters.length ? ' AND ' + filters.join(' AND ') : '';
+      const r = await db.execute({
+        sql: `SELECT u.id AS studentId, u.name, u.rollNo, u.class, u.section, u.part,
+                     du.device_pin AS pin,
+                     a.id AS attendanceId, a.status, a.check_in_at, a.check_out_at,
+                     a.minutes_late, a.source, a.note
+              FROM device_users du
+              JOIN users u ON u.id = du.student_id
+              LEFT JOIN attendance_daily a ON a.student_id = u.id AND a.date = ?
+              WHERE du.is_active = 1 AND u.role = 'student' AND u.status = 'Active'${where}
+              ORDER BY u.class, u.section, u.name`,
+        args,
+      });
+      let rows = r.rows.map((x: any) => ({ ...x, status: x.status || 'not_marked' }));
+      if (query.status) rows = rows.filter((x: any) => x.status === query.status);
+      return NextResponse.json({ date, entries: rows });
+    }
+
+    // GET biometric/attendance/student/:id — one student's history + calendar.
+    // Student → own only; parent → their ward only (id from the URL is ignored
+    // for non-staff, so tampering is impossible).
+    if (method === 'GET' && isBio && pathSegments[1] === 'attendance' && pathSegments[2] === 'student' && pathSegments[3]) {
+      const user = await requireAuth(req);
+      const studentId = bioScopedStudentId(user, pathSegments[3]);
+      if (!studentId) return NextResponse.json({ error: 'No linked student' }, { status: 404 });
+      // Optional month filter YYYY-MM.
+      const args: any[] = [studentId];
+      let dateClause = '';
+      if (query.month) { dateClause = ' AND date LIKE ?'; args.push(`${query.month}%`); }
+      const r = await db.execute({
+        sql: `SELECT id, date, check_in_at, check_out_at, status, minutes_late, source, note
+              FROM attendance_daily WHERE student_id = ?${dateClause} ORDER BY date DESC`,
+        args,
+      });
+      const rows = r.rows as any[];
+      const count = (s: string) => rows.filter((x) => x.status === s).length;
+      const present = count('present');
+      const late = count('late');
+      const half = count('half_day');
+      const absent = count('absent');
+      const attended = present + late + half;
+      const totalMarked = attended + absent;
+      return NextResponse.json({
+        studentId,
+        entries: rows,
+        totals: {
+          present, late, half_day: half, absent,
+          leave: count('leave'), holiday: count('holiday'),
+          percentage: totalMarked > 0 ? Math.round(((present + late + half * 0.5) / totalMarked) * 100) : 0,
+        },
+      });
+    }
+
+    // GET biometric/devices/status — device health card + derived online flag.
+    if (method === 'GET' && isBio && path === 'biometric/devices/status') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'super-admin');
+      const dev = await db.execute('SELECT * FROM devices ORDER BY id LIMIT 1');
+      const device = dev.rows[0] as any || null;
+      const online = !!(device?.last_heartbeat_at &&
+        Date.now() - new Date(device.last_heartbeat_at).getTime() < 3 * 60 * 1000);
+      const today = new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
+      const stats = await db.execute({
+        sql: `SELECT
+                (SELECT COUNT(*) FROM raw_punches) AS totalPunches,
+                (SELECT COUNT(*) FROM raw_punches WHERE local_date = ?) AS todayPunches,
+                (SELECT COUNT(DISTINCT device_pin) FROM raw_punches WHERE student_id IS NULL) AS unmappedPins,
+                (SELECT COUNT(*) FROM device_users WHERE is_active = 1) AS enrolled`,
+        args: [today],
+      });
+      return NextResponse.json({ device, online, ...(stats.rows[0] as any) });
+    }
+
+    // GET biometric/punches/live — last 50 raw punches (newest first), including
+    // unmapped ones with the raw PIN. This is the admin's test/debug feed.
+    if (method === 'GET' && isBio && path === 'biometric/punches/live') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'super-admin');
+      const r = await db.execute({
+        sql: `SELECT p.id, p.device_pin AS pin, p.punched_at, p.local_date, p.received_at,
+                     u.name AS studentName, u.rollNo, u.class, u.section
+              FROM raw_punches p LEFT JOIN users u ON u.id = p.student_id
+              ORDER BY p.punched_at DESC LIMIT 50`,
+        args: [],
+      });
+      return NextResponse.json(r.rows);
+    }
+
+    // GET biometric/punches/unmapped — PINs seen on the device with no student.
+    if (method === 'GET' && isBio && path === 'biometric/punches/unmapped') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'super-admin');
+      const r = await db.execute({
+        sql: `SELECT device_pin AS pin, COUNT(*) AS punches,
+                     MIN(punched_at) AS firstSeen, MAX(punched_at) AS lastSeen
+              FROM raw_punches WHERE student_id IS NULL
+              GROUP BY device_pin ORDER BY lastSeen DESC`,
+        args: [],
+      });
+      return NextResponse.json(r.rows);
+    }
+
+    // POST biometric/punches/assign — map an orphan PIN to a student, backfill
+    // its historical punches, then recompute the affected dates.
+    if (method === 'POST' && isBio && path === 'biometric/punches/assign') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'admissions', 'super-admin');
+      const { pin, studentId } = body || {};
+      if (!pin || !studentId) return NextResponse.json({ error: 'pin and studentId are required' }, { status: 400 });
+      const stu = await db.execute({ sql: `SELECT id FROM users WHERE id = ? AND role = 'student'`, args: [studentId] });
+      if (stu.rows.length === 0) return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+      // Upsert the mapping (device_pin is UNIQUE). Confirm enrollment now since
+      // this PIN has already punched at least once.
+      await db.execute({
+        sql: `INSERT INTO device_users (student_id, device_pin, enrolled_at, is_active)
+              VALUES (?, ?, datetime('now'), 1)
+              ON CONFLICT(device_pin) DO UPDATE SET student_id = excluded.student_id, is_active = 1,
+                enrolled_at = COALESCE(device_users.enrolled_at, datetime('now'))`,
+        args: [studentId, String(pin)],
+      });
+      // Backfill raw_punches, capturing which dates need a rebuild.
+      const affected = await db.execute({
+        sql: `SELECT DISTINCT local_date FROM raw_punches WHERE device_pin = ? AND student_id IS NULL`,
+        args: [String(pin)],
+      });
+      await db.execute({
+        sql: `UPDATE raw_punches SET student_id = ? WHERE device_pin = ? AND student_id IS NULL`,
+        args: [studentId, String(pin)],
+      });
+      const { recomputeAttendance } = await import('./attendance');
+      for (const row of affected.rows) {
+        await recomputeAttendance(studentId, String((row as any).local_date));
+      }
+      return NextResponse.json({ success: true, datesRecomputed: affected.rows.length });
+    }
+
+    // PATCH biometric/attendance/:id — manual override. Sets source='manual'
+    // (never overwritten by recompute) and records edited_by. Works even when
+    // no row exists yet (upsert by studentId+date for a "not_marked" student).
+    if (method === 'PATCH' && isBio && pathSegments[1] === 'attendance' && pathSegments[2]) {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'super-admin');
+      const idSeg = pathSegments[2];
+      let { studentId, date, status, note, check_in_at, check_out_at } = body || {};
+      // Resolve studentId/date from the existing row when only an id was given.
+      if ((!studentId || !date) && /^\d+$/.test(idSeg)) {
+        const ex = await db.execute({ sql: 'SELECT student_id, date FROM attendance_daily WHERE id = ?', args: [Number(idSeg)] });
+        if (ex.rows[0]) { studentId = studentId || (ex.rows[0] as any).student_id; date = date || (ex.rows[0] as any).date; }
+      }
+      if (!studentId || !date || !status) {
+        return NextResponse.json({ error: 'studentId, date and status are required' }, { status: 400 });
+      }
+      await db.execute({
+        sql: `INSERT INTO attendance_daily
+                (student_id, date, check_in_at, check_out_at, status, minutes_late, source, edited_by, note, updated_at)
+              VALUES (?, ?, ?, ?, ?, 0, 'manual', ?, ?, datetime('now'))
+              ON CONFLICT (student_id, date) DO UPDATE SET
+                status = excluded.status, note = excluded.note,
+                check_in_at = COALESCE(excluded.check_in_at, attendance_daily.check_in_at),
+                check_out_at = COALESCE(excluded.check_out_at, attendance_daily.check_out_at),
+                source = 'manual', edited_by = excluded.edited_by, updated_at = datetime('now')`,
+        args: [studentId, date, check_in_at || null, check_out_at || null, status, user.id, note || null],
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // POST biometric/attendance/recompute — rebuild a date range from raw_punches.
+    if (method === 'POST' && isBio && path === 'biometric/attendance/recompute') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'super-admin');
+      const { from, to } = body || {};
+      if (!from || !to) return NextResponse.json({ error: 'from and to (YYYY-MM-DD) are required' }, { status: 400 });
+      const { recomputeRange } = await import('./attendance');
+      const pairs = await recomputeRange(from, to);
+      return NextResponse.json({ success: true, pairsRecomputed: pairs });
+    }
+
+    // POST biometric/students/:id/allocate-pin — assign a 7-digit device PIN.
+    if (method === 'POST' && isBio && pathSegments[1] === 'students' && pathSegments[3] === 'allocate-pin') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
+      const studentId = pathSegments[2];
+      const stu = await db.execute({ sql: `SELECT id, name FROM users WHERE id = ? AND role = 'student'`, args: [studentId] });
+      if (stu.rows.length === 0) return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+      const { allocatePin } = await import('./attendance');
+      const pin = await allocatePin(studentId);
+      return NextResponse.json({ success: true, pin, studentName: (stu.rows[0] as any).name });
+    }
+
+    // POST biometric/allocate-pin-section — allocate PINs to every student in a
+    // Program → Part → Section who doesn't have one yet, in a single pass.
+    if (method === 'POST' && isBio && path === 'biometric/allocate-pin-section') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
+      const { program, part, section } = body || {};
+      if (!program || !section) return NextResponse.json({ error: 'program and section are required' }, { status: 400 });
+      const prt = part === '2' ? '2' : '1';
+      const sec = String(section).toUpperCase();
+      const args: any[] = [];
+      let where = "u.role = 'student' AND u.status = 'Active' AND u.class = ? AND COALESCE(u.part,'1') = ? AND u.section = ? AND du.device_pin IS NULL";
+      args.push(program, prt, sec);
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      const students = await db.execute({
+        sql: `SELECT u.id FROM users u
+              LEFT JOIN device_users du ON du.student_id = u.id AND du.is_active = 1
+              WHERE ${where}`,
+        args,
+      });
+      const ids = students.rows.map((r: any) => String(r.id));
+      const { allocatePinsBulk } = await import('./attendance');
+      const res = await allocatePinsBulk(ids);
+      return NextResponse.json({ success: true, allocated: res.length });
+    }
+
+    // GET biometric/enrollment — enrollment queue for Admissions: every student
+    // with their PIN + fingerprint-confirmed status.
+    if (method === 'GET' && isBio && path === 'biometric/enrollment') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
+      const args: any[] = [];
+      let where = "u.role = 'student' AND u.status = 'Active'";
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      const r = await db.execute({
+        sql: `SELECT u.id, u.name, u.rollNo, u.class, u.section, u.part,
+                     du.device_pin AS pin, du.enrolled_at
+              FROM users u
+              LEFT JOIN device_users du ON du.student_id = u.id AND du.is_active = 1
+              WHERE ${where}
+              ORDER BY (du.device_pin IS NOT NULL), u.class, u.section, u.name`,
+        args,
+      });
+      return NextResponse.json(r.rows.map((x: any) => ({
+        ...x,
+        pinAllocated: !!x.pin,
+        fingerprintConfirmed: !!x.enrolled_at,
+      })));
+    }
+
+    // GET biometric/summary — monthly per-student aggregates (accountant/admin).
+    if (method === 'GET' && isBio && path === 'biometric/summary') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'super-admin');
+      const month = query.month || new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 7);
+      const args: any[] = [`${month}%`];
+      let where = 'a.date LIKE ?';
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      if (query.program) { where += ' AND u.class = ?'; args.push(query.program); }
+      if (query.section) { where += ' AND u.section = ?'; args.push(String(query.section).toUpperCase()); }
+      const r = await db.execute({
+        sql: `SELECT a.student_id AS studentId, u.name, u.rollNo, u.class, u.section, u.part,
+                     a.status, COUNT(*) AS c
+              FROM attendance_daily a JOIN users u ON u.id = a.student_id
+              WHERE ${where}
+              GROUP BY a.student_id, a.status`,
+        args,
+      });
+      const byStudent = new Map<string, any>();
+      for (const row of r.rows as any[]) {
+        let s = byStudent.get(row.studentId);
+        if (!s) {
+          s = { studentId: row.studentId, name: row.name, rollNo: row.rollNo, class: row.class, section: row.section, part: row.part,
+                present: 0, late: 0, half_day: 0, absent: 0, leave: 0, holiday: 0 };
+          byStudent.set(row.studentId, s);
+        }
+        if (s[row.status] !== undefined) s[row.status] += Number(row.c);
+      }
+      const students = [...byStudent.values()].map((s) => {
+        const attended = s.present + s.late + s.half_day;
+        const totalMarked = attended + s.absent;
+        return { ...s, percentage: totalMarked > 0 ? Math.round(((s.present + s.late + s.half_day * 0.5) / totalMarked) * 100) : 0 };
+      }).sort((a, b) => a.percentage - b.percentage);
+      return NextResponse.json({ month, students });
+    }
+
+    // GET/PATCH biometric/settings — late/half-day times, dedup, working days,
+    // parent-notify toggle.
+    if (method === 'GET' && isBio && path === 'biometric/settings') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'super-admin');
+      const r = await db.execute('SELECT * FROM attendance_settings WHERE id = 1');
+      return NextResponse.json(r.rows[0] || {});
+    }
+    if (method === 'PATCH' && isBio && path === 'biometric/settings') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      const { late_after_time, half_day_after_time, dedup_window_minutes, working_days, notify_parents } = body || {};
+      await db.execute({
+        sql: `UPDATE attendance_settings SET
+                late_after_time = COALESCE(?, late_after_time),
+                half_day_after_time = COALESCE(?, half_day_after_time),
+                dedup_window_minutes = COALESCE(?, dedup_window_minutes),
+                working_days = COALESCE(?, working_days),
+                notify_parents = COALESCE(?, notify_parents)
+              WHERE id = 1`,
+        args: [
+          late_after_time ?? null, half_day_after_time ?? null,
+          dedup_window_minutes ?? null, working_days ?? null,
+          notify_parents === undefined ? null : (notify_parents ? 1 : 0),
+        ],
+      });
+      const r = await db.execute('SELECT * FROM attendance_settings WHERE id = 1');
+      return NextResponse.json(r.rows[0] || {});
+    }
+
+    // GET/POST/DELETE biometric/holidays.
+    if (method === 'GET' && isBio && path === 'biometric/holidays') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'super-admin');
+      const r = await db.execute('SELECT id, date, name FROM holidays ORDER BY date DESC');
+      return NextResponse.json(r.rows);
+    }
+    if (method === 'POST' && isBio && path === 'biometric/holidays') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      const { date, name } = body || {};
+      if (!date) return NextResponse.json({ error: 'date is required' }, { status: 400 });
+      await db.execute({ sql: 'INSERT OR IGNORE INTO holidays (date, name) VALUES (?, ?)', args: [date, name || null] });
+      // A new holiday reclassifies that day for enrolled students (manual rows kept).
+      const { recomputeRange } = await import('./attendance');
+      await recomputeRange(date, date);
+      return NextResponse.json({ success: true });
+    }
+    if (method === 'DELETE' && isBio && pathSegments[1] === 'holidays' && pathSegments[2]) {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'super-admin');
+      await db.execute({ sql: 'DELETE FROM holidays WHERE id = ? OR date = ?', args: [Number(pathSegments[2]) || -1, pathSegments[2]] });
+      return NextResponse.json({ success: true });
+    }
+
     // ===================== RESULTS =====================
     if (method === 'POST' && path === 'results') {
       const user = await requireAuth(req);

@@ -1,0 +1,5 @@
+# Runtime artifacts created by bridge.py on the on-site machine — never commit.
+.env
+queue.db
+bridge.log
+bridge.log.*

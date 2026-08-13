@@ -32,6 +32,8 @@ import { cn } from '@/lib/utils';
 import { useApp, useNavState } from '@/lib/store';
 // Delegated Student Records (detail page → mark fee Paid + provide login).
 import { AdmissionsPortal } from './admissions-portal';
+import dynamic from 'next/dynamic';
+const BiometricAttendance = dynamic(() => import('./shared/biometric-attendance'), { ssr: false });
 import {
   DEPARTMENTS,
   DeptCardGrid,
@@ -1053,6 +1055,8 @@ export function AccountantPortal({ activeModule, user }: Props) {
   if (activeModule && activeModule.includes(':')) {
     const [, modId] = activeModule.split(':', 2);
     content = <AdmissionsPortal activeModule={modId || ''} user={user} />;
+  } else if (activeModule === 'accountant-biometric') {
+    content = <BiometricAttendance user={user} mode="accountant" />;
   } else if (activeModule === 'accountant-classes') {
     content = (
       <AccountantClassesView user={user} classes={classes} loading={loading} onRefresh={refresh} />

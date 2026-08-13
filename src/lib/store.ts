@@ -55,6 +55,11 @@ type AppState = {
   feeFocusStudentId: string | null;
   // Per-view drill/navigation state (see NavState). Mirrored to the URL.
   nav: NavState;
+  // Persisted UI state (open tab, drill level, filters) keyed by a stable
+  // string. Like `nav` it survives page reload — but it is NOT mirrored to the
+  // URL/history, so it's safe for any component to keep its own position across
+  // a refresh without fighting the URL sync in page.tsx. Use via `useUiState`.
+  ui: Record<string, unknown>;
   // v4.6.0: App update availability — set by the update-checker hook.
   // When true, the sidebar "Update App" button shows a badge + bold styling.
   appUpdateAvailable: boolean;
@@ -67,6 +72,7 @@ type AppState = {
   setFeeFocusStudentId: (id: string | null) => void;
   setNav: (key: string, value: unknown | ((prev: unknown) => unknown)) => void;
   setNavAll: (nav: NavState) => void;
+  setUiState: (key: string, value: unknown | ((prev: unknown) => unknown)) => void;
   setAppUpdateAvailable: (available: boolean, version?: string | null) => void;
   logout: () => void;
 };
@@ -110,6 +116,7 @@ export const useApp = create<AppState>()(
       pendingExamName: null,
       feeFocusStudentId: null,
       nav: {},
+      ui: {},
       appUpdateAvailable: false,
       latestAppVersion: null,
       setView: (v) => set({ view: v }),
@@ -124,8 +131,13 @@ export const useApp = create<AppState>()(
         return { nav: { ...s.nav, [key]: next } };
       }),
       setNavAll: (nav) => set({ nav: nav || {} }),
+      setUiState: (key, value) => set((s) => {
+        const prev = s.ui[key];
+        const next = typeof value === 'function' ? (value as (p: unknown) => unknown)(prev) : value;
+        return { ui: { ...s.ui, [key]: next } };
+      }),
       setAppUpdateAvailable: (available, version = null) => set({ appUpdateAvailable: available, latestAppVersion: version }),
-      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, feeFocusStudentId: null, nav: {}, appUpdateAvailable: false, latestAppVersion: null }),
+      logout: () => set({ view: 'login', user: null, token: null, activeModule: 'dashboard', pendingExamName: null, feeFocusStudentId: null, nav: {}, ui: {}, appUpdateAvailable: false, latestAppVersion: null }),
     }),
     {
       name: 'concordia-app',
@@ -155,6 +167,32 @@ export function useNavState<T>(
   const value = stored === undefined ? initial : stored;
   const setValue = (updater: T | ((prev: T) => T)) => {
     setNav(key, (prev: unknown) => {
+      const base = (prev === undefined ? initial : prev) as T;
+      return typeof updater === 'function' ? (updater as (p: T) => T)(base) : updater;
+    });
+  };
+  return [value, setValue];
+}
+
+// ─────────────────────────────────────────────────────────────
+// useUiState — like useNavState, but stored in the `ui` slice which is NOT
+// mirrored to the URL/history. Use it for per-page UI position (open tab,
+// drill level, filters) that should survive a browser reload without being
+// reset by the URL sync in page.tsx. Persisted the same way as the rest of the
+// store (sessionStorage in the browser, localStorage in the mobile app).
+//
+// Same API as useState (incl. functional updates):
+//   const [drill, setDrill] = useUiState('bio-admin', { dept: null });
+// ─────────────────────────────────────────────────────────────
+export function useUiState<T>(
+  key: string,
+  initial: T,
+): [T, (updater: T | ((prev: T) => T)) => void] {
+  const stored = useApp((s) => s.ui[key]) as T | undefined;
+  const setUiState = useApp((s) => s.setUiState);
+  const value = stored === undefined ? initial : stored;
+  const setValue = (updater: T | ((prev: T) => T)) => {
+    setUiState(key, (prev: unknown) => {
       const base = (prev === undefined ? initial : prev) as T;
       return typeof updater === 'function' ? (updater as (p: T) => T)(base) : updater;
     });

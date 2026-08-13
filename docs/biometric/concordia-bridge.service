@@ -1,0 +1,42 @@
+# systemd unit for the Concordia biometric bridge (Linux / Raspberry Pi).
+#
+# Install:
+#   sudo cp concordia-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now concordia-bridge
+#
+# Watch it:   journalctl -u concordia-bridge -f
+# Restart:    sudo systemctl restart concordia-bridge
+# Stop:       sudo systemctl stop concordia-bridge
+#
+# Edit the three paths below (User, WorkingDirectory, ExecStart) to match where
+# you cloned this folder and which user should run it.
+
+[Unit]
+Description=Concordia College — ZKTeco fingerprint bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=concordia
+WorkingDirectory=/opt/concordia-bridge
+# Use the venv's python if you created one (recommended):
+#   python3 -m venv /opt/concordia-bridge/venv
+#   /opt/concordia-bridge/venv/bin/pip install -r requirements.txt
+ExecStart=/opt/concordia-bridge/venv/bin/python /opt/concordia-bridge/bridge.py
+
+# Keep it alive across device reboots, network drops, and crashes.
+Restart=always
+RestartSec=5
+
+# Don't let a runaway restart loop hammer the box.
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+# journald already captures stdout; bridge.py ALSO rotates its own bridge.log.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -110,6 +110,35 @@ const SCHEMA_STATEMENTS: string[] = [
   // it to skip muted types per user.
   `CREATE TABLE IF NOT EXISTS notification_preferences (userId TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', updatedAt TEXT DEFAULT (datetime('now')))`,
 
+  // ── Biometric Attendance (ZKTeco gate terminal) ──────────────────────────
+  // A Python bridge on the college LAN forwards fingerprint punches to the API.
+  // ADAPTED from docs/biometric/migration-attendance.sql to THIS schema:
+  //   • There is no `students` table — students are rows in `users`
+  //     (id TEXT, role='student', status='Active'). So every student_id here
+  //     is TEXT and references users(id); there is no is_active on the student.
+  //   • The daily-attendance table is named `attendance_daily`, NOT `attendance`
+  //     — an `attendance` table already exists (teachers' manual JSON register)
+  //     and `CREATE TABLE IF NOT EXISTS attendance` would silently no-op.
+  //   • raw_punches is the immutable source of truth; attendance_daily is a
+  //     projection rebuildable at any time except rows where source='manual'.
+  `CREATE TABLE IF NOT EXISTS devices (id INTEGER PRIMARY KEY AUTOINCREMENT, serial_number TEXT NOT NULL UNIQUE, label TEXT, ip_address TEXT, firmware TEXT, last_heartbeat_at TEXT, device_log_count INTEGER DEFAULT 0, queue_depth INTEGER DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
+  `CREATE TABLE IF NOT EXISTS device_users (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT NOT NULL, device_pin TEXT NOT NULL UNIQUE, enrolled_at TEXT, is_active INTEGER NOT NULL DEFAULT 1)`,
+  `CREATE INDEX IF NOT EXISTS idx_device_users_student ON device_users(student_id)`,
+  // Immutable audit log. Never edited, never deleted.
+  `CREATE TABLE IF NOT EXISTS raw_punches (id INTEGER PRIMARY KEY AUTOINCREMENT, device_serial TEXT NOT NULL, device_pin TEXT NOT NULL, student_id TEXT, punched_at TEXT NOT NULL, local_date TEXT NOT NULL, punch_state INTEGER, status_code INTEGER, received_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (device_serial, device_pin, punched_at))`,
+  `CREATE INDEX IF NOT EXISTS idx_raw_punches_lookup ON raw_punches(local_date, student_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_raw_punches_pin ON raw_punches(device_pin, local_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_raw_punches_received ON raw_punches(received_at DESC)`,
+  // Derived from raw_punches. Rebuildable at any time (manual rows preserved).
+  `CREATE TABLE IF NOT EXISTS attendance_daily (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT NOT NULL, date TEXT NOT NULL, check_in_at TEXT, check_out_at TEXT, status TEXT NOT NULL, minutes_late INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'biometric', edited_by TEXT, note TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (student_id, date))`,
+  `CREATE INDEX IF NOT EXISTS idx_attendance_daily_date ON attendance_daily(date, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_attendance_daily_student ON attendance_daily(student_id, date)`,
+  `CREATE TABLE IF NOT EXISTS attendance_settings (id INTEGER PRIMARY KEY CHECK (id = 1), late_after_time TEXT NOT NULL DEFAULT '08:15', half_day_after_time TEXT NOT NULL DEFAULT '10:00', dedup_window_minutes INTEGER NOT NULL DEFAULT 3, working_days TEXT NOT NULL DEFAULT '1,2,3,4,5,6', notify_parents INTEGER NOT NULL DEFAULT 1)`,
+  `CREATE TABLE IF NOT EXISTS holidays (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL UNIQUE, name TEXT)`,
+  // Singleton settings row + the one physical gate device (idempotent seeds).
+  `INSERT OR IGNORE INTO attendance_settings (id) VALUES (1)`,
+  `INSERT OR IGNORE INTO devices (serial_number, label, ip_address) VALUES ('A8N5232460400', 'Main Gate', '192.168.100.201')`,
+
   // NOTE: legacy tables (diary, sms_log, complaints, library_books,
   // transport_routes, course_materials, royalty_settings, royalty_invoices)
   // are intentionally NOT created here — they are unused by the Concordia

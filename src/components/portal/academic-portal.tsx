@@ -111,6 +111,8 @@ import {
 import { AdmissionsPortal } from './admissions-portal';
 import { AccountantPortal } from './accountant-portal';
 import { StudentImportDialog } from './shared/student-import-dialog';
+import dynamic from 'next/dynamic';
+const BiometricAttendance = dynamic(() => import('./shared/biometric-attendance'), { ssr: false });
 
 type Props = { activeModule: string; user: any };
 
@@ -3165,6 +3167,8 @@ export function AcademicPortal({ activeModule, user }: Props) {
     ) : (
       <TimetableView user={user} classes={classes} teachers={teachers} />
     );
+  } else if (effectiveModule === 'academic-biometric') {
+    content = <BiometricAttendance user={user} mode="academic" />;
   } else if (effectiveModule === 'academic-exams') {
     content = <ExamsAndDateSheetsView user={user} />;
   } else if (effectiveModule === 'report-cards') {

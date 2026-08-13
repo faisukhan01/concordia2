@@ -20,7 +20,7 @@ import {
   ClipboardList, FileText, Bell, CreditCard, Calendar, Award,
   UserPlus, UserCog, Receipt, CalendarDays, Megaphone, KeyRound,
   MessageCircle, FileSpreadsheet, Inbox, CheckCircle2,
-  LifeBuoy,
+  LifeBuoy, Fingerprint,
   Download as DownloadIcon,
 } from 'lucide-react';
 
@@ -117,11 +117,13 @@ export const ROLE_MODULES: RoleModules = {
     { group: 'Admission Office', items: [
       { id: 'admissions:admissions-new', name: 'New Enrollment', icon: UserPlus, color: PRIMARY },
       { id: 'admissions:admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
+      { id: 'admissions:admissions-biometric', name: 'Biometric Enrollment', icon: Fingerprint, color: PRIMARY },
     ]},
     { group: 'Accountant', items: [
       { id: 'accountant:accountant-new', name: 'New Enrollments', icon: UserPlus, color: PRIMARY },
       { id: 'accountant:accountant-classes', name: 'Classes & Sections', icon: BookOpen, color: PRIMARY },
       { id: 'accountant:accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
+      { id: 'accountant:accountant-biometric', name: 'Biometric Attendance', icon: CalendarCheck, color: SECONDARY },
       { id: 'accountant:accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
     ]},
     { group: 'Academic Office', items: [
@@ -130,6 +132,10 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'academic:timetable', name: 'Timetable', icon: Calendar, color: SECONDARY },
       { id: 'academic:academic-exams', name: 'Exams & Date Sheets', icon: FileText, color: PRIMARY },
       { id: 'academic:report-cards', name: 'Result Cards', icon: Award, color: PRIMARY },
+      { id: 'academic:academic-biometric', name: 'Biometric Records', icon: Fingerprint, color: SECONDARY },
+    ]},
+    { group: 'Attendance', items: [
+      { id: 'biometric-attendance', name: 'Biometric Attendance', icon: Fingerprint, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
@@ -147,6 +153,7 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'admissions-overview', name: 'Dashboard', icon: LayoutDashboard, color: PRIMARY },
       { id: 'admissions-new', name: 'New Enrollment', icon: UserPlus, color: PRIMARY },
       { id: 'admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
+      { id: 'admissions-biometric', name: 'Biometric Enrollment', icon: Fingerprint, color: PRIMARY },
     ]},
     { group: 'Account', flat: true, items: [
       { id: 'notifications', name: 'Notifications', icon: Bell, color: SECONDARY },
@@ -166,6 +173,7 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'accountant-classes', name: 'Classes & Sections', icon: BookOpen, color: PRIMARY },
       { id: 'admissions:admissions-students', name: 'Student Records', icon: GraduationCap, color: PRIMARY },
       { id: 'accountant-challans', name: 'Fee & Installments', icon: Receipt, color: PRIMARY },
+      { id: 'accountant-biometric', name: 'Biometric Attendance', icon: CalendarCheck, color: SECONDARY },
       { id: 'accountant-misc', name: 'Miscellaneous Charges', icon: DollarSign, color: SECONDARY },
     ]},
     { group: 'Account', flat: true, items: [
@@ -195,6 +203,7 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'timetable', name: 'Timetable', icon: Calendar, color: SECONDARY },
       { id: 'academic-exams', name: 'Exams & Date Sheets', icon: FileText, color: PRIMARY },
       { id: 'report-cards', name: 'Result Cards', icon: Award, color: PRIMARY },
+      { id: 'academic-biometric', name: 'Biometric Attendance', icon: Fingerprint, color: SECONDARY },
     ]},
     // Student Records — the Academic Office can now enroll students with full
     // details and manage their fees, exactly like Admissions + Accountant.
@@ -254,6 +263,7 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'student-syllabus', name: 'Syllabus', icon: BookOpen, color: PRIMARY },
       { id: 'student-report-card', name: 'Report Card', icon: Award, color: PRIMARY },
       { id: 'student-attendance', name: 'My Attendance', icon: CalendarCheck, color: SECONDARY },
+      { id: 'student-biometric', name: 'Biometric Attendance', icon: Fingerprint, color: SECONDARY },
       { id: 'student-timetable', name: 'Timetable', icon: Calendar, color: SECONDARY },
       { id: 'student-datesheet', name: 'Date Sheets', icon: CalendarDays, color: SECONDARY },
       { id: 'student-announcements', name: 'Announcements', icon: Bell, color: SECONDARY },
@@ -281,6 +291,7 @@ export const ROLE_MODULES: RoleModules = {
       { id: 'student-results', name: 'Results', icon: GraduationCap, color: PRIMARY },
       { id: 'student-report-card', name: 'Report Card', icon: Award, color: PRIMARY },
       { id: 'student-attendance', name: 'Attendance', icon: CalendarCheck, color: SECONDARY },
+      { id: 'student-biometric', name: 'Biometric Attendance', icon: Fingerprint, color: SECONDARY },
       { id: 'student-timetable', name: 'Timetable', icon: Calendar, color: SECONDARY },
       { id: 'student-datesheet', name: 'Date Sheets', icon: CalendarDays, color: SECONDARY },
       { id: 'student-announcements', name: 'Announcements', icon: Bell, color: SECONDARY },

@@ -76,6 +76,8 @@ import {
 } from 'lucide-react';
 import { savePdf, fmtMoney as pdfFmtMoney } from '@/lib/pdf-utils';
 import { buildConcordiaChallan } from '@/lib/challan';
+import dynamic from 'next/dynamic';
+const BiometricAttendance = dynamic(() => import('./shared/biometric-attendance'), { ssr: false });
 
 type Props = { activeModule: string; user: any };
 
@@ -507,6 +509,8 @@ export function StudentPortal({ activeModule, user }: Props) {
       return <StudentReportCard user={user} />;
     case 'student-attendance':
       return <StudentAttendance user={user} />;
+    case 'student-biometric':
+      return <BiometricAttendance user={user} mode="student" />;
     case 'student-timetable':
       return <StudentTimetable user={user} />;
     case 'student-datesheet':

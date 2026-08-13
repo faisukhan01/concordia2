@@ -112,6 +112,8 @@ import {
   ChartCard,
 } from './shared/concordia-charts';
 import { StudentImportDialog } from './shared/student-import-dialog';
+import dynamic from 'next/dynamic';
+const BiometricAttendance = dynamic(() => import('./shared/biometric-attendance'), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -235,7 +237,9 @@ export function AdmissionsPortal({ activeModule, user }: Props) {
     });
 
   let content: React.ReactNode;
-  if (activeModule === 'admissions-new')
+  if (activeModule === 'admissions-biometric')
+    content = <BiometricAttendance user={user} mode="admission" />;
+  else if (activeModule === 'admissions-new')
     content = (
       <NewEnrollmentView
         user={user}

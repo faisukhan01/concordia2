@@ -54,6 +54,8 @@ import { AcademicPortal } from './academic-portal';
 import { useApp } from '@/lib/store';
 import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
 import { DEPARTMENTS, deptLabel } from './shared/concordia-hierarchy';
+import dynamic from 'next/dynamic';
+const BiometricAttendance = dynamic(() => import('./shared/biometric-attendance'), { ssr: false });
 import { motion } from 'framer-motion';
 
 type Props = { activeModule: string; user: any };
@@ -731,6 +733,9 @@ export function AdminPortal({ activeModule, user }: Props) {
     case 'admin-dashboard':
     case 'admin-overview':
       content = <AdminDashboard user={user} setActiveModule={setActiveModule} />;
+      break;
+    case 'biometric-attendance':
+      content = <BiometricAttendance user={user} mode="admin" />;
       break;
     // `settings` is intentionally NOT rendered here (handled in role-portal.tsx).
     default:
