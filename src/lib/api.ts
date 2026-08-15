@@ -586,6 +586,11 @@ export const api = {
   },
   getAllInvoices: () => request<any[]>('fee-invoices?all=1'),
   getBranchInvoices: () => cachedGet<any[]>('fee-invoices/branch'),
+  markInvoiceUnpaid: async (id: string) => {
+    const r = await request<any>(`fee-invoices/${id}/unpay`, { method: 'PATCH' });
+    invalidateCache();
+    return r;
+  },
   markInvoicePaid: async (id: string, paidAmount?: number, paymentMethod?: string) => {
     const r = await request<any>(`fee-invoices/${id}/pay`, { method: 'PATCH', body: JSON.stringify({ paidAmount, paymentMethod }) });
     invalidateCache();

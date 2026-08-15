@@ -117,6 +117,7 @@ import {
   Layers,
   Zap,
   PieChart,
+  RotateCcw,
 } from 'lucide-react';
 import { savePdf, printPdf } from '@/lib/pdf-utils';
 import { buildConcordiaChallan, buildConcordiaChallanBook } from '@/lib/challan';
@@ -2146,14 +2147,26 @@ function FeeInstallmentsView({
   // All invoices for the selected student
   const studentInvoices = useMemo(() => {
     if (!selected) return [];
+    // Installment sequence = the trailing "-N" in the challan number
+    // (CH-INST-YYYYMM-{roll}-{n}). This is the canonical order — sorting by
+    // dueDate was showing installment 1 in the middle when due dates were equal
+    // or out of order.
+    const seq = (inv: any) => {
+      const m = String(inv.challanNo || '').match(/-(\d+)\s*$/);
+      return m ? parseInt(m[1], 10) : 9999;
+    };
     return invoices
       .filter((i) => i.studentId === selected.id || i.userId === selected.id)
       .sort((a, b) => {
-        // Installments first (by dueDate), then monthly (by year/month desc)
+        // Installments first (by installment number), then monthly (year/month desc)
         const aType = (a.type || '').toLowerCase() === 'installment' ? 0 : 1;
         const bType = (b.type || '').toLowerCase() === 'installment' ? 0 : 1;
         if (aType !== bType) return aType - bType;
-        if (aType === 0) return (a.dueDate || '').localeCompare(b.dueDate || '');
+        if (aType === 0) {
+          const sa = seq(a), sb = seq(b);
+          if (sa !== sb) return sa - sb;
+          return (a.dueDate || '').localeCompare(b.dueDate || '');
+        }
         return (b.year || 0) - (a.year || 0) || (a.month || '').localeCompare(b.month || '');
       });
   }, [invoices, selected]);
@@ -2263,21 +2276,24 @@ function FeeInstallmentsView({
         title: 'Marked as paid',
         description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}`,
       });
-      // If first payment (no real login yet), issue the login. The SERVER
-      // generates an easy name-based password (e.g. "Azan@4821"), unique per
-      // student, and the student can't change it — so the office/parents can
-      // always look it up and re-share it later.
-      if (selected && !hasRealLogin(selected)) {
+      // Surface the login after payment. If the student has no real login yet,
+      // the SERVER generates an easy name-based password (e.g. "Azan@4821"),
+      // unique per student and unchangeable by them. If they already have one,
+      // fetch it so the accountant can still hand over / print the credentials.
+      if (selected) {
         try {
-          const gen = await api.generateStudentLogin(selected.id, selected.rollNo || undefined);
-          onStudentUpdate({ ...selected, rollNo: gen.rollNo, email: gen.email, password: gen.password });
-          setGeneratedLogin({ rollNo: String(gen.rollNo), password: gen.password });
-          toast({
-            title: 'Student login generated',
-            description: `Username ${gen.rollNo} — share the credentials below.`,
-          });
+          if (!hasRealLogin(selected)) {
+            const gen = await api.generateStudentLogin(selected.id, selected.rollNo || undefined);
+            onStudentUpdate({ ...selected, rollNo: gen.rollNo, email: gen.email, password: gen.password });
+            setGeneratedLogin({ rollNo: String(gen.rollNo), password: gen.password });
+            toast({ title: 'Student login generated', description: `Username ${gen.rollNo} — share the credentials below.` });
+          } else {
+            const info = await api.getUserPassword(selected.id).catch(() => null);
+            const rollNo = selected.rollNo || selected.email?.split('@')[0] || selected.id;
+            setGeneratedLogin({ rollNo: String(rollNo), password: info?.password || selected.password || '' });
+          }
         } catch (e: any) {
-          toast({ title: 'Could not generate login', description: e?.message || 'Try again from the student record.', variant: 'destructive' });
+          toast({ title: 'Login note', description: 'Fee saved. Open the student record to view the login.', });
         }
       }
     } catch (e: any) {
@@ -2286,6 +2302,20 @@ function FeeInstallmentsView({
         description: e?.message || 'Please try again.',
         variant: 'destructive',
       });
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
+  // Revert a Paid installment back to Unpaid (correct a mistake).
+  const markUnpaid = async (inv: any) => {
+    setMarkingId(inv.id);
+    try {
+      await api.markInvoiceUnpaid(inv.id);
+      onInvoiceUpdate({ ...inv, status: 'Unpaid', paidAmount: 0, paidAt: null, paidDate: null, paymentMethod: null });
+      toast({ title: 'Marked as unpaid', description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}` });
+    } catch (e: any) {
+      toast({ title: 'Could not mark unpaid', description: e?.message || 'Please try again.', variant: 'destructive' });
     } finally {
       setMarkingId(null);
     }
@@ -2784,6 +2814,7 @@ function FeeInstallmentsView({
                   {studentInvoices.map((inv) => {
                     const isPaid = (inv.status || '').toLowerCase() === 'paid';
                     const isInstallment = (inv.type || '').toLowerCase() === 'installment';
+                    const instNo = isInstallment ? (String(inv.challanNo || '').match(/-(\d+)\s*$/)?.[1] || '') : '';
                     return (
                       <div
                         key={inv.id}
@@ -2796,7 +2827,7 @@ function FeeInstallmentsView({
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm font-medium text-gray-900">
                               {isInstallment
-                                ? `Installment — Due ${formatDate(inv.dueDate)}`
+                                ? `Installment ${instNo || ''} — Due ${formatDate(inv.dueDate)}`
                                 : `${inv.type || 'Tuition'} — ${inv.month ? monthName(inv.month) : ''} ${inv.year || ''}`}
                             </p>
                             <StatusBadge status={inv.status} />
@@ -2865,7 +2896,7 @@ function FeeInstallmentsView({
                               Edit
                             </Button>
                           )}
-                          {!isPaid && (
+                          {!isPaid ? (
                             <Button
                               size="sm"
                               className="h-8 px-2.5 text-xs bg-[#F26522] hover:bg-[#D4541E] text-white"
@@ -2878,6 +2909,21 @@ function FeeInstallmentsView({
                                 <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
                               )}
                               Mark Paid
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 text-xs border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700"
+                              onClick={() => markUnpaid(inv)}
+                              disabled={markingId === inv.id}
+                            >
+                              {markingId === inv.id ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              Mark Unpaid
                             </Button>
                           )}
                         </div>

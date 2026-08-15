@@ -3619,6 +3619,21 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ success: true, status: 'Paid' });
     }
 
+    // Revert a Paid invoice back to Unpaid (correct a mistake). Clears the
+    // paid metadata so Collected/Outstanding recompute correctly.
+    if (method === 'PATCH' && pathSegments[0] === 'fee-invoices' && pathSegments[2] === 'unpay') {
+      const user = await requireAuth(req);
+      requireRole(user, 'branch-manager', 'institute-admin');
+      const id = pathSegments[1];
+      const inv = await db.execute({ sql: 'SELECT id FROM fee_invoices WHERE id = ?', args: [id] });
+      if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+      await db.execute({
+        sql: `UPDATE fee_invoices SET status = 'Unpaid', paidDate = NULL, paidAmount = 0, paymentMethod = NULL WHERE id = ?`,
+        args: [id],
+      });
+      return NextResponse.json({ success: true, status: 'Unpaid' });
+    }
+
     if (method === 'GET' && pathSegments[0] === 'fee-invoices' && pathSegments[2] === 'challan') {
       const user = await requireAuth(req);
       const id = pathSegments[1];
