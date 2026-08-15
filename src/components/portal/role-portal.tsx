@@ -1618,8 +1618,10 @@ export function RolePortal() {
           {/* Must change password banner — shown on ALL portals when user has
               default/admin-assigned password. v4.5.2: snoozeable for 7 days so
               it doesn't follow the user on every page forever. Re-appears
-              automatically after the snooze window expires. */}
-          {user?.mustChangePassword && activeModule !== 'settings' && !pwBannerSnoozed && (
+              automatically after the snooze window expires.
+              NOT shown to students/parents — they can't change their password
+              (the college office owns it), so the prompt would be a dead end. */}
+          {user?.mustChangePassword && user?.role !== 'student' && user?.role !== 'parent' && activeModule !== 'settings' && !pwBannerSnoozed && (
             <motion.div
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}

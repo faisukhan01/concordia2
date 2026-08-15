@@ -176,7 +176,7 @@ function HistoryDownload({ program, part, section, studentMode }: {
   };
 
   const options: [('week' | 'month' | 'all'), string][] = [
-    ['week', 'Last week'], ['month', 'Last month'], ['all', 'Complete (since 17 Aug)'],
+    ['week', 'Last week'], ['month', 'Last month'], ['all', 'Complete'],
   ];
 
   return (
