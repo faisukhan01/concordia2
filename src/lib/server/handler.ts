@@ -3286,6 +3286,32 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ month, students });
     }
 
+    // GET biometric/history — full check-in/out history for a section over a
+    // date range (staff export). Floors the range at 2026-08-17 (the college's
+    // biometric go-live date — there is no data before it).
+    if (method === 'GET' && isBio && path === 'biometric/history') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
+      const BIO_START = '2026-08-17';
+      const from = (query.from && query.from > BIO_START) ? query.from : BIO_START;
+      const to = query.to || new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
+      const args: any[] = [from, to];
+      let where = 'a.date >= ? AND a.date <= ?';
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      if (query.program) { where += ' AND u.class = ?'; args.push(query.program); }
+      if (query.section) { where += ' AND u.section = ?'; args.push(String(query.section).toUpperCase()); }
+      if (query.part) { where += " AND COALESCE(u.part,'1') = ?"; args.push(query.part === '2' ? '2' : '1'); }
+      const r = await db.execute({
+        sql: `SELECT u.id AS studentId, u.name, u.rollNo, u.class, u.section, u.part,
+                     a.date, a.check_in_at, a.check_out_at, a.status, a.minutes_late
+              FROM attendance_daily a JOIN users u ON u.id = a.student_id
+              WHERE ${where}
+              ORDER BY u.class, u.section, u.name, a.date`,
+        args,
+      });
+      return NextResponse.json({ from, to, rows: r.rows });
+    }
+
     // GET/PATCH biometric/settings — late/half-day times, dedup, working days,
     // parent-notify toggle.
     if (method === 'GET' && isBio && path === 'biometric/settings') {

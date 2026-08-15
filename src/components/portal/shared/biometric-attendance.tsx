@@ -112,6 +112,98 @@ function clockPK(iso?: string | null): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Download check-in/out history as Excel — Last week / Last month / Complete.
+// Staff → the whole section; student → their own. Range floored at go-live.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BIO_START = '2026-08-17'; // college biometric go-live — no data before this
+
+function historyRange(kind: 'week' | 'month' | 'all'): { from: string; to: string } {
+  const to = todayKarachi();
+  if (kind === 'all') return { from: BIO_START, to };
+  const d = new Date(`${to}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - (kind === 'week' ? 7 : 30));
+  let from = d.toISOString().slice(0, 10);
+  if (from < BIO_START) from = BIO_START;
+  return { from, to };
+}
+
+function HistoryDownload({ program, part, section, studentMode }: {
+  program?: string; part?: string; section?: string; studentMode?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const download = async (kind: 'week' | 'month' | 'all') => {
+    setBusy(kind);
+    try {
+      const { from, to } = historyRange(kind);
+      const XLSX = await import('xlsx');
+      let rows: any[] = [];
+      let fname = '';
+      if (studentMode) {
+        const data = await api.bioStudentHistory('me');
+        rows = (data.entries || [])
+          .filter((e: any) => e.date >= from && e.date <= to)
+          .sort((a: any, b: any) => a.date.localeCompare(b.date))
+          .map((e: any) => ({
+            Date: e.date, 'Check-in': clockPK(e.check_in_at), 'Check-out': clockPK(e.check_out_at),
+            Status: STATUS_STYLES[e.status]?.label || e.status, 'Minutes Late': e.minutes_late || 0,
+          }));
+        fname = `MyGateAttendance_${from}_to_${to}.xlsx`;
+      } else {
+        const data = await api.bioHistory({ program, part, section, from, to });
+        rows = (data.rows || []).map((r: any) => ({
+          'Roll No': r.rollNo || '', Name: r.name, Class: deptLabel(r.class), Section: r.section, Part: r.part,
+          Date: r.date, 'Check-in': clockPK(r.check_in_at), 'Check-out': clockPK(r.check_out_at),
+          Status: STATUS_STYLES[r.status]?.label || r.status, 'Minutes Late': r.minutes_late || 0,
+        }));
+        fname = `GateAttendance_${section ? deptLabel(program || '') + '_P' + part + '_' + section + '_' : ''}${from}_to_${to}.xlsx`;
+      }
+      if (rows.length === 0) {
+        toast({ title: 'No records', description: `No check-in/out records between ${from} and ${to}.` });
+        setOpen(false); return;
+      }
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Check-in History');
+      XLSX.writeFile(wb, fname);
+      toast({ title: 'Excel downloaded', description: `${rows.length} record${rows.length === 1 ? '' : 's'}.` });
+      setOpen(false);
+    } catch (e: any) {
+      toast({ title: 'Could not download', description: e?.message || 'Try again.', variant: 'destructive' });
+    } finally { setBusy(null); }
+  };
+
+  const options: [('week' | 'month' | 'all'), string][] = [
+    ['week', 'Last week'], ['month', 'Last month'], ['all', 'Complete (since 17 Aug)'],
+  ];
+
+  return (
+    <div className="relative">
+      <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)}>
+        <Download className="w-3.5 h-3.5 mr-1.5" /> Download History
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-20 w-56 rounded-lg border border-gray-200 bg-white shadow-lg p-1">
+            <p className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-gray-400">Download as Excel</p>
+            {options.map(([k, label]) => (
+              <button key={k} onClick={() => download(k)} disabled={!!busy}
+                className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-orange-50 flex items-center gap-2 disabled:opacity-60">
+                {busy === k ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5 text-gray-400" />}
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Root — routes to the correct mode.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -472,6 +564,7 @@ function SectionRegister({ program, part, section, enroll, reloadEnroll, readOnl
           </Select>
         </div>
         <Button variant="outline" size="sm" onClick={loadRows}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />{loadingRows ? 'Loading…' : 'Refresh'}</Button>
+        <HistoryDownload program={program} part={part} section={section} />
       </div>
 
       {sectionPending.length > 0 && (
@@ -1076,10 +1169,11 @@ function EnrollmentView({ navKey }: { navKey: string }) {
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <button onClick={() => setSection(null)} className="text-sm text-gray-500 hover:text-[#1A1A1A]">← Sections</button>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-xs text-gray-400">
                       <Users className="w-3.5 h-3.5 inline mr-1" />{sectionStudents.length} students · {sectionPending.length} without PIN
                     </span>
+                    <HistoryDownload program={dept} part={part} section={section} />
                     <Button
                       size="sm" disabled={busy || sectionPending.length === 0}
                       onClick={allocateSection}
@@ -1224,7 +1318,11 @@ function StudentCalendarView({ user, navKey }: { user: any; navKey: string }) {
 
   return (
     <>
-      <PageHeader title={isParent ? "Ward's Gate Attendance" : 'Biometric Attendance'} subtitle="When you check IN and OUT at the college gate — daily, weekly, and by date" />
+      <PageHeader
+        title={isParent ? "Ward's Gate Attendance" : 'Biometric Attendance'}
+        subtitle="When you check IN and OUT at the college gate — daily, weekly, and by date"
+        action={<HistoryDownload studentMode />}
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card className="text-center"><p className="text-2xl font-bold text-emerald-600">{monthStats.percentage}%</p><p className="text-xs text-gray-400 uppercase tracking-wide">This month</p></Card>

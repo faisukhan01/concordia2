@@ -316,6 +316,17 @@ export const api = {
     const qs = q.toString();
     return request<{ month: string; students: any[] }>(qs ? `biometric/summary?${qs}` : 'biometric/summary');
   },
+  // Section-wide check-in/out history for a date range (staff Excel export).
+  bioHistory: (params: { program?: string; part?: string; section?: string; from?: string; to?: string }) => {
+    const q = new URLSearchParams();
+    if (params.program) q.set('program', params.program);
+    if (params.part) q.set('part', params.part);
+    if (params.section) q.set('section', params.section);
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
+    const qs = q.toString();
+    return request<{ from: string; to: string; rows: any[] }>(qs ? `biometric/history?${qs}` : 'biometric/history');
+  },
   bioGetSettings: () => request<any>('biometric/settings'),
   bioUpdateSettings: (body: Partial<{ late_after_time: string; half_day_after_time: string; dedup_window_minutes: number; working_days: string; notify_parents: boolean }>) =>
     request<any>('biometric/settings', { method: 'PATCH', body: JSON.stringify(body) }),
