@@ -619,6 +619,7 @@ function StudentDashboard({ user }: { user: any }) {
   const [reportCards, setReportCards] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [notifs, setNotifs] = useState<{ items: any[]; unread: number } | null>(null);
+  const [fees, setFees] = useState<any[]>([]);
   const [retryCount, setRetryCount] = useState(0);
 
   const studentId = user?.id;
@@ -642,13 +643,15 @@ function StudentDashboard({ user }: { user: any }) {
       studentId ? api.getReportCards({ studentId }) : Promise.reject(new Error('no id')),
       api.getAnnouncements(),
       api.getNotifications().catch(() => null),
-    ]).then(([a, r, rc, an, nf]) => {
+      studentId ? api.getFeeInvoices(studentId) : Promise.reject(new Error('no id')),
+    ]).then(([a, r, rc, an, nf, fe]) => {
       if (cancelled) return;
       if (a.status === 'fulfilled') setAtt(a.value);
       if (r.status === 'fulfilled') {
         const d = r.value;
         setResults(Array.isArray(d) ? d : d?.entries || []);
       }
+      if (fe.status === 'fulfilled') setFees(Array.isArray(fe.value) ? fe.value : []);
       if (rc.status === 'fulfilled') setReportCards(Array.isArray(rc.value) ? rc.value : []);
       if (an.status === 'fulfilled') {
         const all = Array.isArray(an.value) ? an.value : [];
@@ -686,6 +689,17 @@ function StudentDashboard({ user }: { user: any }) {
         .slice(0, 3),
     [results],
   );
+
+  // Fee overview (matches the My Fees page totals).
+  const feeSummary = useMemo(() => {
+    const totalPayable = fees.reduce((acc, i) => acc + Number(i.amount || 0), 0);
+    const paid = fees
+      .filter((i) => (i.status || '').toLowerCase() === 'paid')
+      .reduce((acc, i) => acc + Number(i.paidAmount || i.amount || 0), 0);
+    const outstanding = Math.max(0, totalPayable - paid);
+    const pendingCount = fees.filter((i) => (i.status || '').toLowerCase() !== 'paid').length;
+    return { totalPayable, paid, outstanding, pendingCount, count: fees.length };
+  }, [fees]);
 
   const reportCardCount = reportCards.length;
   const announcementCount = announcements.length;
@@ -793,6 +807,43 @@ function StudentDashboard({ user }: { user: any }) {
             }
           />
         </div>
+      )}
+
+      {/* Fee overview — total payable / paid / outstanding, links to My Fees */}
+      {!loading && feeSummary.count > 0 && (
+        <button
+          onClick={() => setActiveModule('student-fees')}
+          className="group w-full text-left rounded-xl border border-gray-200 bg-white p-5 hover:border-[#F26522]/40 hover:shadow-sm transition-all"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="h-9 w-9 rounded-lg bg-[#FFF4ED] border border-[#FDE8D5] grid place-items-center">
+                <Receipt className="h-[18px] w-[18px] text-[#F26522]" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-[#1A1A1A]">{isParent ? "Ward's Fees" : 'My Fees'}</h3>
+                <p className="text-xs text-gray-500">{feeSummary.count} invoice(s) · {feeSummary.pendingCount} pending</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-400 group-hover:text-[#F26522] transition-colors">
+              View all <ArrowRight className="h-3 w-3" />
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg bg-gray-50 border border-gray-100 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 font-medium">Total Payable</p>
+              <p className="text-lg font-bold text-[#1A1A1A] mt-0.5 tabular-nums">{pdfFmtMoney(feeSummary.totalPayable)}</p>
+            </div>
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-emerald-600 font-medium">Paid</p>
+              <p className="text-lg font-bold text-emerald-700 mt-0.5 tabular-nums">{pdfFmtMoney(feeSummary.paid)}</p>
+            </div>
+            <div className={cn('rounded-lg border p-3', feeSummary.outstanding > 0 ? 'bg-rose-50 border-rose-100' : 'bg-gray-50 border-gray-100')}>
+              <p className={cn('text-[10px] uppercase tracking-wide font-medium', feeSummary.outstanding > 0 ? 'text-rose-600' : 'text-gray-400')}>Outstanding</p>
+              <p className={cn('text-lg font-bold mt-0.5 tabular-nums', feeSummary.outstanding > 0 ? 'text-rose-700' : 'text-[#1A1A1A]')}>{pdfFmtMoney(feeSummary.outstanding)}</p>
+            </div>
+          </div>
+        </button>
       )}
 
       {/* Two-column body: recent announcements + recent results */}
@@ -987,13 +1038,22 @@ function StudentFees({ user }: { user: any }) {
     load();
   }, [studentId]);
 
-  // Sort: installments first (by dueDate asc), then monthly (by year/month desc)
+  // Installment number = the trailing "-N" in the challan (CH-INST-…-{n}).
+  const instSeq = (inv: any) => {
+    const m = String(inv.challanNo || '').match(/-(\d+)\s*$/);
+    return m ? parseInt(m[1], 10) : 9999;
+  };
+  // Sort: installments first (by installment NUMBER, not due date), then monthly.
   const sorted = useMemo(() => {
     return [...invoices].sort((a, b) => {
       const aType = (a.type || '').toLowerCase() === 'installment' ? 0 : 1;
       const bType = (b.type || '').toLowerCase() === 'installment' ? 0 : 1;
       if (aType !== bType) return aType - bType;
-      if (aType === 0) return (a.dueDate || '').localeCompare(b.dueDate || '');
+      if (aType === 0) {
+        const sa = instSeq(a), sb = instSeq(b);
+        if (sa !== sb) return sa - sb;
+        return (a.dueDate || '').localeCompare(b.dueDate || '');
+      }
       return (b.year || 0) - (a.year || 0) || (a.month || '').localeCompare(b.month || '');
     });
   }, [invoices]);
@@ -1128,10 +1188,11 @@ function StudentFees({ user }: { user: any }) {
               <TableBody>
                 {installments.map((inv, i) => {
                   const isPaid = (inv.status || '').toLowerCase() === 'paid';
+                  const seq = instSeq(inv);
                   return (
                     <TableRow key={inv.id} className="border-gray-100 hover:bg-gray-50">
                       <TableCell className="text-sm font-medium text-gray-900">
-                        Installment #{i + 1}
+                        Installment #{seq !== 9999 ? seq : i + 1}
                         <div className="text-[11px] text-gray-500 mt-0.5 font-mono">
                           {inv.challanNo || String(inv.id || '').slice(0, 12)}
                         </div>
