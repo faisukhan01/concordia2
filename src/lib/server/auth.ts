@@ -58,6 +58,17 @@ export function nextId(prefix: string) {
   return prefix + '-' + crypto.randomBytes(4).toString('hex');
 }
 
+// Easy-to-remember student password: FirstName + '@' + a random 4-digit number,
+// e.g. "Azan@4821". Each student gets a DIFFERENT number so passwords aren't
+// shared. Students cannot change it (locked in the portal + server), so the
+// Accountant/Admin can always look it up and re-share it if a student forgets.
+export function genEasyPassword(name?: string): string {
+  const first = String(name || '').trim().split(/\s+/)[0].replace(/[^a-zA-Z]/g, '');
+  const base = first ? first.charAt(0).toUpperCase() + first.slice(1).toLowerCase() : 'Student';
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `${base}@${num}`;
+}
+
 export async function createSession(user: any) {
   const token = 'concordia-' + crypto.randomBytes(32).toString('hex');
   const now = Date.now();

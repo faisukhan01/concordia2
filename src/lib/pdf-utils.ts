@@ -875,6 +875,56 @@ export async function buildReportCard(data: ReportCardData): Promise<jsPDF> {
 }
 
 // ---------------------------------------------------------------------------
+// Student credentials slip — printable handout with the student's details +
+// portal username & password. Given to students/parents when the login is
+// issued, and re-printable any time from the student record.
+// ---------------------------------------------------------------------------
+
+export interface StudentCredentialsData {
+  name?: string;
+  fatherName?: string;
+  program?: string;      // human label
+  part?: string;
+  section?: string;
+  rollNo?: string;       // = username
+  password?: string;
+  cnic?: string;
+  phone?: string;
+  baseFee?: number | string | null;
+  campus?: string;
+}
+
+export function buildStudentCredentialsSlip(d: StudentCredentialsData): jsPDF {
+  const doc = new jsPDF();
+  doc.setFontSize(20); doc.setTextColor('#F26522'); doc.text('Concordia College', 20, 24);
+  doc.setTextColor('#111827'); doc.setFontSize(13); doc.text('Student Record & Portal Login', 20, 35);
+  doc.setDrawColor('#e5e7eb'); doc.line(20, 40, 190, 40);
+  doc.setFontSize(11);
+  let y = 54;
+  const line = (label: string, val: any) => {
+    doc.setTextColor('#6b7280'); doc.text(`${label}:`, 20, y);
+    doc.setTextColor('#111827'); doc.text(String(val ?? '—'), 75, y);
+    y += 10;
+  };
+  line('Student Name', d.name);
+  line('Father / Guardian', d.fatherName);
+  line('Program', d.program);
+  line('Part / Section', [d.part ? `Part ${d.part}` : '', d.section].filter(Boolean).join(' · ') || '—');
+  line('CNIC / B-Form', d.cnic);
+  line('Contact', d.phone);
+  if (d.baseFee != null && d.baseFee !== '') line('Base Fee', `Rs ${Number(d.baseFee).toLocaleString()}`);
+  y += 4; doc.setDrawColor('#e5e7eb'); doc.line(20, y, 190, y); y += 12;
+  doc.setFontSize(13); doc.setTextColor('#111827'); doc.text('Portal Login', 20, y); y += 12;
+  doc.setFontSize(13);
+  doc.text(`Username / Roll No:   ${d.rollNo ?? '—'}`, 20, y); y += 11;
+  doc.text(`Password:   ${d.password ?? '—'}`, 20, y); y += 12;
+  doc.setFontSize(9); doc.setTextColor('#6b7280');
+  doc.text('Sign in at the Concordia portal (web or mobile app) with the above. Keep these safe —', 20, y); y += 6;
+  doc.text('the password is managed by the college; for a reset, contact the Accountant office.', 20, y);
+  return doc;
+}
+
+// ---------------------------------------------------------------------------
 // Convenience helpers — caller chooses download vs print
 // ---------------------------------------------------------------------------
 

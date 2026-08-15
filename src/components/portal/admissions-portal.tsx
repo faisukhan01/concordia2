@@ -2805,19 +2805,34 @@ function StudentFeeLoginPanel({
   onUpdated: (u: any) => void;
 }) {
   const role = user?.role;
-  const canAct = role === 'accountant' || role === 'academic';
+  // Any office staff on the student record can provide/regenerate + SEE the
+  // password. (The password endpoint is staff-only on the server too.)
+  const canAct = role === 'accountant' || role === 'academic' || role === 'admin' || role === 'admissions';
   const [feePaid, setFeePaid] = useState<boolean>(!!student.baseFeePaid);
   const [hasLogin, setHasLogin] = useState<boolean>(studentHasLogin(student));
   const [rollNoInput, setRollNoInput] = useState<string>(student.rollNo || '');
   const [creds, setCreds] = useState<{ rollNo: string; password: string } | null>(null);
+  const [pwd, setPwd] = useState<string | null>(null);   // saved password (fetched)
+  const [showPwd, setShowPwd] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setFeePaid(!!student.baseFeePaid);
     setHasLogin(studentHasLogin(student));
     setRollNoInput(student.rollNo || '');
-    setCreds(null);
+    setCreds(null); setShowPwd(false); setPwd(null);
   }, [student]);
+
+  // Staff can always look up the current saved password (so a forgetful
+  // student can be re-told, and parents can keep tracking the portal).
+  useEffect(() => {
+    let cancel = false;
+    if (canAct && studentHasLogin(student)) {
+      api.getUserPassword(student.id).then((r: any) => { if (!cancel) setPwd(r?.password || null); }).catch(() => {});
+    }
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student.id]);
 
   const markPaid = async () => {
     setBusy(true);
@@ -2831,37 +2846,35 @@ function StudentFeeLoginPanel({
     } finally { setBusy(false); }
   };
 
-  const provideLogin = async () => {
-    const rn = rollNoInput.trim();
-    if (!rn) { toast({ title: 'Enter the roll number first', variant: 'destructive' }); return; }
+  // Provide (or regenerate) the login. The SERVER makes an easy name-based
+  // password (e.g. "Azan@4821"), unique per student; the student can't change it.
+  const issueLogin = async (opts?: { regenerate?: boolean }) => {
     setBusy(true);
     try {
-      const password = 'concordia1234'; // default first-time password
-      const email = `${rn.toLowerCase()}@concordia.edu.pk`;
-      await api.editUser(student.id, { rollNo: rn, email, password });
+      const gen = await api.generateStudentLogin(student.id, (rollNoInput || student.rollNo || '').trim() || undefined);
       setHasLogin(true);
-      setCreds({ rollNo: rn, password });
-      onUpdated({ ...student, rollNo: rn, email, password });
-      toast({ title: 'Login provided', description: `Roll no ${rn}` });
+      setPwd(gen.password);
+      setShowPwd(true);
+      setCreds({ rollNo: gen.rollNo, password: gen.password });
+      setRollNoInput(gen.rollNo);
+      onUpdated({ ...student, rollNo: gen.rollNo, email: gen.email, password: gen.password });
+      toast({ title: opts?.regenerate ? 'New password generated' : 'Login provided', description: `Username ${gen.rollNo} — ${gen.password}` });
     } catch (e: any) {
-      toast({ title: 'Could not provide login', description: e?.message || 'Try again', variant: 'destructive' });
+      toast({ title: 'Could not issue login', description: e?.message || 'Try again', variant: 'destructive' });
     } finally { setBusy(false); }
   };
 
-  // Reset a forgotten login back to the default password (roll number kept).
-  const resetLogin = async () => {
-    const rn = (student.rollNo || rollNoInput).trim();
-    if (!rn) { toast({ title: 'No roll number on file', variant: 'destructive' }); return; }
-    setBusy(true);
-    try {
-      const password = 'concordia1234';
-      await api.editUser(student.id, { password });
-      setCreds({ rollNo: rn, password });
-      onUpdated({ ...student, password });
-      toast({ title: 'Login reset', description: `Password reset to the default for ${rn}` });
-    } catch (e: any) {
-      toast({ title: 'Could not reset login', description: e?.message || 'Try again', variant: 'destructive' });
-    } finally { setBusy(false); }
+  const downloadPdf = async () => {
+    const { buildStudentCredentialsSlip } = await import('@/lib/pdf-utils');
+    const rn = student.rollNo || creds?.rollNo || rollNoInput || '';
+    const password = creds?.password || pwd || '';
+    const doc = buildStudentCredentialsSlip({
+      name: student.name, fatherName: student.fatherName || student.guardian,
+      program: deptLabel(student.program), part: student.part, section: student.section,
+      rollNo: rn, password, cnic: student.cnic, phone: student.guardianPhone,
+      baseFee: student.baseFee, campus: user?.campus,
+    });
+    savePdf(doc, `Student-${rn || student.name || 'login'}.pdf`);
   };
 
   return (
@@ -2884,21 +2897,38 @@ function StudentFeeLoginPanel({
 
       {!canAct ? (
         <p className="text-xs text-gray-500">
-          Only the Accountant / Academic Office can mark the fee paid and provide the login.
+          Only the college office can mark the fee paid and manage the login.
         </p>
       ) : hasLogin ? (
-        <div className="space-y-2">
-          <p className="text-xs text-emerald-700">
-            Login is active. The student signs in with their roll number and changes the password on first login.
-          </p>
-          <button
-            onClick={resetLogin}
-            disabled={busy}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 text-xs font-semibold disabled:opacity-60"
-          >
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
-            Reset Login (to default)
-          </button>
+        <div className="space-y-2.5">
+          {/* Saved credentials — always visible to staff */}
+          <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">Username / Roll No</span>
+              <span className="font-mono font-bold text-gray-900">{student.rollNo || rollNoInput || '—'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-500">Password</span>
+              <span className="flex items-center gap-2">
+                <span className="font-mono font-bold text-gray-900">{showPwd ? (pwd ?? 'loading…') : '••••••••'}</span>
+                <button onClick={() => setShowPwd((s) => !s)} className="text-[#F26522] hover:underline inline-flex items-center gap-1">
+                  <Eye className="h-3.5 w-3.5" />{showPwd ? 'Hide' : 'Show'}
+                </button>
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => issueLogin({ regenerate: true })} disabled={busy}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 text-xs font-semibold disabled:opacity-60">
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+              Regenerate Password
+            </button>
+            <button onClick={downloadPdf}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 text-xs font-semibold">
+              <Download className="h-3.5 w-3.5" /> Download PDF
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400">The student cannot change this password — regenerate here if forgotten.</p>
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -2914,11 +2944,11 @@ function StudentFeeLoginPanel({
           ) : (
             <div className="flex items-end gap-2 flex-wrap">
               <div className="flex-1 min-w-[150px]">
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">Roll Number (assigned by college)</label>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Roll Number (optional — auto-assigned if blank)</label>
                 <Input value={rollNoInput} onChange={(e) => setRollNoInput(e.target.value)} placeholder="e.g. 1024" className={inputCls} />
               </div>
               <button
-                onClick={provideLogin}
+                onClick={() => issueLogin()}
                 disabled={busy}
                 className="inline-flex items-center gap-2 rounded-lg bg-[#F26522] hover:bg-[#D4541E] text-white px-3 py-2 text-xs font-semibold h-10 disabled:opacity-60"
               >
@@ -2928,11 +2958,13 @@ function StudentFeeLoginPanel({
             </div>
           )}
           {creds && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 space-y-1">
-              <p className="font-semibold">Login created — share with the student:</p>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 space-y-1.5">
+              <p className="font-semibold">Login created — share with the student &amp; parents:</p>
               <p>Roll No / Username: <span className="font-mono font-bold">{creds.rollNo}</span></p>
               <p>Password: <span className="font-mono font-bold">{creds.password}</span></p>
-              <p className="text-emerald-600">They change it on first login.</p>
+              <button onClick={downloadPdf} className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-800 px-3 py-1.5 text-xs font-semibold mt-1">
+                <Download className="h-3.5 w-3.5" /> Download PDF slip
+              </button>
             </div>
           )}
         </div>

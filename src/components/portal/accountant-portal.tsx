@@ -2263,28 +2263,21 @@ function FeeInstallmentsView({
         title: 'Marked as paid',
         description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}`,
       });
-      // If first payment (no real login yet), issue the login. Every student's
-      // first-time password is the SAME default — they change it on first login.
+      // If first payment (no real login yet), issue the login. The SERVER
+      // generates an easy name-based password (e.g. "Azan@4821"), unique per
+      // student, and the student can't change it — so the office/parents can
+      // always look it up and re-share it later.
       if (selected && !hasRealLogin(selected)) {
-        const password = 'concordia1234';
-        const rollNo = selected.rollNo || selected.email?.split('@')[0] || selected.id;
         try {
-          await api.editUser(selected.id, {
-            email: `${String(rollNo).toLowerCase()}@concordia.edu.pk`,
-            password,
-          });
-          onStudentUpdate({
-            ...selected,
-            email: `${String(rollNo).toLowerCase()}@concordia.edu.pk`,
-            password,
-          });
-          setGeneratedLogin({ rollNo: String(rollNo), password });
+          const gen = await api.generateStudentLogin(selected.id, selected.rollNo || undefined);
+          onStudentUpdate({ ...selected, rollNo: gen.rollNo, email: gen.email, password: gen.password });
+          setGeneratedLogin({ rollNo: String(gen.rollNo), password: gen.password });
           toast({
             title: 'Student login generated',
-            description: `Username ${rollNo} — share the credentials below.`,
+            description: `Username ${gen.rollNo} — share the credentials below.`,
           });
-        } catch {
-          setGeneratedLogin({ rollNo: String(rollNo), password });
+        } catch (e: any) {
+          toast({ title: 'Could not generate login', description: e?.message || 'Try again from the student record.', variant: 'destructive' });
         }
       }
     } catch (e: any) {
@@ -2326,7 +2319,8 @@ function FeeInstallmentsView({
     doc.text(`Roll No / Username:   ${generatedLogin.rollNo}`, 20, y); y += 11;
     doc.text(`Password:   ${generatedLogin.password}`, 20, y); y += 12;
     doc.setFontSize(9); doc.setTextColor('#6b7280');
-    doc.text('Sign in at the Concordia portal with the above. Change your password after first sign-in.', 20, y);
+    doc.text('Sign in at the Concordia portal with the above. Keep these credentials safe — for a', 20, y); y += 6;
+    doc.text('reset, please contact the college Accountant office.', 20, y);
     savePdf(doc, `Student-${generatedLogin.rollNo}.pdf`);
   };
 
@@ -2899,7 +2893,7 @@ function FeeInstallmentsView({
               <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-600" /> Student login created</DialogTitle>
-                  <DialogDescription>Share these with {selected?.name || 'the student'} — they change the password on first sign-in.</DialogDescription>
+                  <DialogDescription>Share these with {selected?.name || 'the student'} and their parents. The password is managed by the office — a student can&apos;t change it; regenerate it here if forgotten.</DialogDescription>
                 </DialogHeader>
                 {generatedLogin && (
                   <div className="space-y-3">
@@ -4556,8 +4550,9 @@ function LoginsView({
           <p className="font-semibold text-gray-900">Per spec §3 — when to issue logins.</p>
           <p className="mt-1">
             Student logins are created by the Accountant after the first fee payment is
-            confirmed. The username is the student&apos;s roll number and the password is a
-            system-generated default that the student must change on first sign-in.
+            confirmed. The username is the student&apos;s roll number and the password is an
+            easy name-based one (e.g. &quot;Azan@4821&quot;), unique per student. The student can&apos;t
+            change it — the office owns it and can view / regenerate it any time.
           </p>
         </div>
       </div>

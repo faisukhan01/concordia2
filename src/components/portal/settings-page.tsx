@@ -934,7 +934,21 @@ export function SettingsPage({ user }: { user: any }) {
         )}
       </Card>
 
-      {/* ─── Change Password ─── */}
+      {/* ─── Password ─── */}
+      {/* Students & parents CANNOT change the password — the college office owns
+          it so a parent can always track their child's portal. Show a note. */}
+      {(user?.role === 'student' || user?.role === 'parent') ? (
+        <Card className="p-6">
+          <h3 className="font-bold text-base flex items-center gap-2 mb-2">
+            <Lock className="h-4 w-4 text-primary" /> Password
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Your password is managed by the college office. If you forget it, please contact the
+            <strong className="text-foreground"> Accountant</strong> to get it again — for security it
+            cannot be changed from the portal.
+          </p>
+        </Card>
+      ) : (
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base flex items-center gap-2">
@@ -1013,6 +1027,7 @@ export function SettingsPage({ user }: { user: any }) {
           </Button>
         </div>
       </Card>
+      )}
 
       {/* ─── About App ─── */}
       <Card className="p-6">

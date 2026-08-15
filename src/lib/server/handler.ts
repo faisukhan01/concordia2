@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, initDB } from './db';
-import { requireAuth, requireRole, createSession, buildUserProfile, nextId, registerFailedAttempt, ROLE_LABELS } from './auth';
+import { requireAuth, requireRole, createSession, buildUserProfile, nextId, registerFailedAttempt, genEasyPassword, ROLE_LABELS } from './auth';
 
 // Concordia API request handler — converts the previous Express service (~2200 lines, 81 endpoints)
 // into a single Next.js API dispatcher. Each Express `app.<method>('/api/<path>', ...)` block
@@ -138,6 +138,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
 
     if (method === 'POST' && path === 'auth/change-password') {
       const user = await requireAuth(req);
+      // Students & parents CANNOT change their own password — the Accountant/
+      // Admin owns and re-shares it (so a parent can always track their child's
+      // portal). Enforced here server-side, not just hidden in the UI.
+      if (user.role === 'student' || user.role === 'parent') {
+        return NextResponse.json({ error: 'Password is managed by the college office. Please contact the Accountant to reset it.' }, { status: 403 });
+      }
       const { currentPassword, newPassword } = body || {};
       if (!newPassword || newPassword.length < 4) return NextResponse.json({ error: 'Password too short' }, { status: 400 });
       if (user.password !== currentPassword) return NextResponse.json({ error: 'Current password incorrect' }, { status: 401 });
@@ -1038,14 +1044,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           // Email derived from roll number — ensures login by roll number
           // always works (login query matches email OR rollNo).
           const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
-          // Real password — student can log in immediately. mustChangePassword
-          // is set to 1 so they're prompted to set their own on first login.
-          const password = 'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
+          // Easy name-based password (e.g. "Azan@4821"). mustChangePassword=0 —
+          // students can't change it; the office owns and re-shares it.
+          const password = genEasyPassword(name);
           const id = nextId('U');
           const baseFee = row.baseFee != null && row.baseFee !== '' && !Number.isNaN(Number(row.baseFee)) ? Number(row.baseFee) : null;
           await db.execute({
             sql: `INSERT INTO users (id, name, email, rollNo, password, role, status, title, mustChangePassword, blocked, instituteId, branchId, class, section, part, guardianPhone, fatherName, cnic, fatherCnic, gender, address, prevResult, program, baseFee, baseFeeLocked, createdById)
-                  VALUES (?, ?, ?, ?, ?, 'student', 'Active', 'Student', 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  VALUES (?, ?, ?, ?, ?, 'student', 'Active', 'Student', 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [id, name, email, rollNo, password, instId, brId, program || null, section, part,
               String(row.phone || '').trim() || null, fatherName, String(row.cnic || '').trim() || null,
               String(row.fatherCnic || '').trim() || null, String(row.gender || '').trim() || null,
@@ -1132,7 +1138,13 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
 
       if (name) await db.execute({ sql: 'UPDATE users SET name = ? WHERE id = ?', args: [name, target.id] });
       if (email) await db.execute({ sql: 'UPDATE users SET email = ? WHERE id = ?', args: [email, target.id] });
-      if (password) await db.execute({ sql: 'UPDATE users SET password = ?, mustChangePassword = 1 WHERE id = ?', args: [password, target.id] });
+      // Students/parents can't change their own password, so never force a
+      // change on them (that would lock them out). Staff/teachers keep the
+      // "change on first login" prompt.
+      if (password) {
+        const forceChange = (target.role === 'student' || target.role === 'parent') ? 0 : 1;
+        await db.execute({ sql: 'UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?', args: [password, forceChange, target.id] });
+      }
       if (blocked !== undefined) {
         await db.execute({ sql: 'UPDATE users SET blocked = ? WHERE id = ?', args: [blocked ? 1 : 0, target.id] });
         if (blocked) await db.execute({ sql: 'DELETE FROM sessions WHERE userId = ?', args: [target.id] });
@@ -1332,6 +1344,9 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
 
     if (method === 'GET' && pathSegments[0] === 'platform' && pathSegments[1] === 'users' && pathSegments[3] === 'password') {
       const user = await requireAuth(req);
+      // Staff only — a student/parent must NEVER be able to read a password
+      // (their own or anyone else's) by hitting this endpoint directly.
+      requireRole(user, 'accountant', 'admissions', 'academic', 'admin', 'branch-manager', 'institute-admin', 'super-admin');
       const id = pathSegments[2];
       const r = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
       if (r.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -1419,17 +1434,15 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           error: `Email "${email}" is already used by ${c.name || 'another user'}. Use a different roll number.`,
         }, { status: 409 });
       }
-      // Random memorable password: "concordia" + 4 digits. Matches the
-      // accountant portal's genDefaultPassword() format so existing UI copy
-      // ("Login Ready", copy button, etc.) keeps working unchanged.
-      const password = 'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
+      // Easy-to-remember password tied to the student's name, e.g. "Azan@4821".
+      // Each student gets a different number. mustChangePassword=0 because the
+      // student is NOT allowed to change it — the office owns it and can re-share
+      // it any time from the student record (parents can always track the child).
+      const password = genEasyPassword(target.name);
 
-      // 4) Persist — set rollNo + email + password + mustChangePassword in one
-      //    round-trip. mustChangePassword=1 forces the student to set their own
-      //    password on first login (handled by the portal's change-password
-      //    prompt).
+      // 4) Persist — set rollNo + email + password in one round-trip.
       await db.execute({
-        sql: `UPDATE users SET rollNo = ?, email = ?, password = ?, mustChangePassword = 1 WHERE id = ?`,
+        sql: `UPDATE users SET rollNo = ?, email = ?, password = ?, mustChangePassword = 0 WHERE id = ?`,
         args: [rollNo, email, password, target.id],
       });
 
@@ -1437,7 +1450,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         rollNo,
         email,
         password,
-        mustChangePassword: true,
+        mustChangePassword: false,
       });
     }
 
@@ -1521,10 +1534,10 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
           rollNo = String(Math.max(1001, branchMaxRoll[brId]));
         }
         const email = `${String(rollNo).toLowerCase()}@concordia.edu.pk`;
-        const password = 'concordia' + Math.floor(1000 + Math.random() * 9000).toString();
+        const password = genEasyPassword(s.name);
         try {
           await db.execute({
-            sql: `UPDATE users SET rollNo = ?, email = ?, password = ?, mustChangePassword = 1 WHERE id = ?`,
+            sql: `UPDATE users SET rollNo = ?, email = ?, password = ?, mustChangePassword = 0 WHERE id = ?`,
             args: [rollNo, email, password, s.id],
           });
           credentials.push({ id: s.id, name: s.name, rollNo, email, password });
