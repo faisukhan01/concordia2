@@ -1028,8 +1028,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         const fatherName = String(row.fatherName || '').trim() || null;
         const cnicDigits = String(row.cnic || '').replace(/\D/g, '');
         const nf = `${name.toLowerCase()}|${String(fatherName || '').toLowerCase()}`;
-        if ((cnicDigits && cnicSet.has(cnicDigits)) || nameFatherSet.has(nf)) {
-          skipped.push({ index: i, name, reason: 'Duplicate' });
+        // Duplicate-skipping is OFF by default so NO student is ever silently
+        // dropped (blank father names used to cause false "duplicate" skips).
+        // The client can opt in with { dedupe: true } if it ever wants the old
+        // behaviour. When on, only skip on a real CNIC match (not name+father).
+        if (body?.dedupe === true && cnicDigits && cnicSet.has(cnicDigits)) {
+          skipped.push({ index: i, name, reason: 'Duplicate CNIC' });
           continue;
         }
         try {

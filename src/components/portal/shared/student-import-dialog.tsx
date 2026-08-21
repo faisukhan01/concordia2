@@ -65,26 +65,34 @@ function computeInstallmentPlan(baseFee: number): { amount: number; dueDate?: st
 }
 
 // Map the (normalised) header row to column indices for each field.
+// Deliberately FUZZY so almost any enrollment sheet format maps correctly —
+// the columns are matched by keywords, tried in priority order.
 function buildColMap(headers: string[]) {
-  const find = (pred: (h: string) => boolean) => headers.findIndex(pred);
-  let name = find((h) => h.includes('studentname'));
-  if (name < 0) name = find((h) => h === 'name');
-  let phone = find((h) => h.includes('contactno1'));
-  if (phone < 0) phone = find((h) => h.includes('contact'));
-  let fee = find((h) => h.includes('tuitionfee'));
-  if (fee < 0) fee = find((h) => h === 'fee' || (h.includes('fee') && !h.includes('test') && !h.includes('session') && !h.includes('install')));
+  // Try each predicate in order; return the first header index that matches.
+  const find = (...preds: ((h: string) => boolean)[]) => {
+    for (const p of preds) { const i = headers.findIndex(p); if (i >= 0) return i; }
+    return -1;
+  };
+  const eq = (...vals: string[]) => (h: string) => vals.includes(h);
+  const has = (...subs: string[]) => (h: string) => subs.some((s) => h.includes(s));
+
   return {
-    name,
-    fatherName: find((h) => h.includes('fathername')),
-    phone,
-    program: find((h) => h.includes('program')),
-    fee,
-    cnic: find((h) => (h.includes('cnic') || h.includes('bform')) && !h.includes('father')),
+    name: find(has('studentname', 'candidatename', 'studentsname', 'fullname', 'nameofstudent'), eq('name'), has('student')),
+    fatherName: find(has('fathername', 'fathersname', 'guardianname'), eq('father', 'guardian', 'so', 'wdo', 'parentname')),
+    phone: find(has('contactno', 'contactnumber', 'mobileno', 'mobilenumber', 'cellno', 'whatsapp'), has('contact', 'mobile', 'cell', 'phone')),
+    program: find(has('program'), eq('class', 'course', 'faculty', 'group', 'discipline'), has('classname', 'coursename')),
+    section: find(eq('section', 'sec'), has('section')),
+    part: find(eq('part', 'year'), has('partno', 'partyear')),
+    // "Tuition" wins; then generic monthly/fee — but ignore test/session/
+    // admission/installment/exam/arrear/previous fee columns per the spec.
+    fee: find(has('tuitionfee'), has('monthlyfee'), has('feeamount', 'basefee'), eq('fee'),
+      (h) => h.includes('fee') && !/(test|session|admission|install|exam|late|arrear|previous|prev|challan|paid)/.test(h)),
+    cnic: find((h) => (h.includes('cnic') || h.includes('bform') || h.includes('nic')) && !h.includes('father')),
     fatherCnic: find((h) => h.includes('cnic') && h.includes('father')),
-    gender: find((h) => h.includes('gender')),
-    address: find((h) => h.includes('address')),
-    prevResult: find((h) => h.includes('10thmarks') || h.includes('marks')),
-    rollNo: find((h) => h === 'rollno'),
+    gender: find(has('gender'), eq('sex')),
+    address: find(has('address')),
+    prevResult: find(has('10thmarks', 'matricmarks', 'previousresult', 'lastresult', 'obtainedmarks'), has('marks', 'percentage', 'grade')),
+    rollNo: find(eq('rollno', 'roll', 'gr', 'grno'), has('rollnumber', 'registrationno', 'regno', 'admissionno')),
   };
 }
 
@@ -142,12 +150,18 @@ export function StudentImportDialog({
       const sheet = wb.Sheets[wb.SheetNames[0]];
       // Formatted text (raw:false) keeps CNIC/phone as displayed strings.
       const aoa: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-      let headerIdx = aoa.findIndex((r) => r.some((c) => norm(c).includes('studentname')));
+      // Find the header row flexibly: any row with a name-ish column. Handles
+      // sheets that have title/blank rows above the real header.
+      let headerIdx = aoa.findIndex((r) => r.some((c) => {
+        const n = norm(c);
+        return n.includes('studentname') || n === 'name' || n.includes('candidatename') || n.includes('studentsname') || n.includes('nameofstudent');
+      }));
+      if (headerIdx < 0) headerIdx = aoa.findIndex((r) => r.some((c) => norm(c).includes('name')));
       if (headerIdx < 0) headerIdx = 0;
       const headers = (aoa[headerIdx] || []).map((h) => norm(h));
       const col = buildColMap(headers);
       if (col.name < 0) {
-        toast({ title: 'Could not find a "Student Name" column', description: 'Make sure the sheet has a header row with Student Name, Father Name, Program, etc.', variant: 'destructive' });
+        toast({ title: 'Could not find a name column', description: 'Make sure the sheet has a header row with a Student Name (or Name / Candidate Name) column.', variant: 'destructive' });
         setParsing(false);
         return;
       }
@@ -157,11 +171,19 @@ export function StudentImportDialog({
         if (!nm) continue;
         const rawProgram = String(cell(r, col.program) ?? '').trim();
         const detectedProgram = preselectedProgram || detectProgram(rawProgram);
+        // Per-row section/part from the sheet (used only when NOT importing into
+        // a locked drill-down section — see doImport). Part: anything with 2/II
+        // → '2', else '1'.
+        const rawSection = String(cell(r, col.section) ?? '').trim().toUpperCase();
+        const rawPartCell = String(cell(r, col.part) ?? '').trim().toLowerCase();
+        const rowPart = /(^|[^0-9])2([^0-9]|$)|second|ii/.test(rawPartCell) ? '2' : (rawPartCell ? '1' : '');
         parsed.push({
           name: nm,
           fatherName: String(cell(r, col.fatherName) ?? '').trim(),
           phone: normPhone(cell(r, col.phone)),
           program: detectedProgram,
+          section: rawSection || undefined,
+          part: (rowPart || undefined) as any,
           baseFee: parseFee(cell(r, col.fee)),
           cnic: String(cell(r, col.cnic) ?? '').trim(),
           fatherCnic: String(cell(r, col.fatherCnic) ?? '').trim(),
@@ -205,13 +227,17 @@ export function StudentImportDialog({
     const effSection = (preselectedSection || section).trim().toUpperCase() || 'A';
     try {
       const payload: ImportStudentRow[] = included.map((r) => {
+        // Locked drill-down → the drill's section/part win. Otherwise use the
+        // sheet's own Section/Part columns when present, else the dialog values.
+        const rowPart = preselectedPart ? effPart : ((r as any).part === '2' ? '2' : ((r as any).part === '1' ? '1' : effPart));
+        const rowSection = preselectedSection ? effSection : ((r.section && String(r.section).trim().toUpperCase()) || effSection);
         const baseRow: ImportStudentRow = {
           name: r.name,
           fatherName: r.fatherName,
           phone: r.phone,
           program: r.program,
-          part: effPart,
-          section: effSection,
+          part: rowPart as any,
+          section: rowSection,
           baseFee: r.baseFee,
           cnic: r.cnic,
           fatherCnic: r.fatherCnic,
