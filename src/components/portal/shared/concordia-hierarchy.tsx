@@ -74,9 +74,12 @@ export type Program = {
 };
 
 // Fallback catalog used before the API responds (and if it ever fails).
+// NOTE: does NOT reference DEPT_META — that const is declared later in this
+// file, so touching it here would hit the temporal dead zone at module load.
+// The card grid resolves each program's description from DEPT_META at render.
 export const BUILTIN_PROGRAMS: Program[] = DEPARTMENTS.map((name) => ({
   id: `PROG-${name}`, name, label: DEPT_LABELS[name] || name,
-  kind: 'intermediate' as ProgramKind, levels: 2, description: DEPT_META[name]?.desc,
+  kind: 'intermediate' as ProgramKind, levels: 2,
 }));
 
 function normalizeProgram(r: any): Program {
