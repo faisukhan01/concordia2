@@ -46,7 +46,7 @@ import {
   Wifi, WifiOff, Download, Trash2, Plus, ArrowRight, Users,
 } from 'lucide-react';
 import {
-  DeptCardGrid, PartToggle, SectionCardGrid, HierarchyBreadcrumb, deptLabel,
+  DeptCardGrid, PartToggle, LevelToggle, SectionCardGrid, HierarchyBreadcrumb, deptLabel, usePrograms,
 } from './concordia-hierarchy';
 
 type Props = { user: any; mode: 'admin' | 'accountant' | 'academic' | 'admission' | 'student' };
@@ -448,6 +448,7 @@ function SectionDrill({ navKey, children }: {
   navKey: string;
   children: (sel: { program: string; part: string; section: string }, enroll: any[], reload: () => Promise<void>) => React.ReactNode;
 }) {
+  const progs = usePrograms();
   const [enroll, setEnroll] = useState<any[]>([]);
   // Drill state lives in the app's nav layer so it survives page reload AND
   // steps through the Back button — same as every other drill-down page.
@@ -496,11 +497,11 @@ function SectionDrill({ navKey, children }: {
           <div className="space-y-4">
             <div className="flex items-center gap-3 flex-wrap">
               <button onClick={() => { setDept(null); setSection(null); }} className="text-sm text-gray-500 hover:text-[#1A1A1A]">← Programs</button>
-              <PartToggle value={part} onChange={(p) => { setPart(p); setSection(null); }} />
+              <LevelToggle program={dept} value={part} onChange={(p) => { setPart(p); setSection(null); }} kind={progs.kindOf(dept)} levels={progs.levelsOf(dept)} />
             </div>
             {sectionCards.length > 0
               ? <SectionCardGrid sections={sectionCards} onSelect={(s) => setSection(s.section)} getStudentCount={(id) => sectionCount(id)} />
-              : <p className="text-sm text-gray-400 py-6 text-center">No enrolled sections found for {deptLabel(dept)} · Part {part}.</p>}
+              : <p className="text-sm text-gray-400 py-6 text-center">No enrolled sections found for {progs.labelOf(dept)} · {progs.levelLabel(dept, part)}.</p>}
           </div>
         )}
     </Card>
@@ -890,6 +891,7 @@ function HolidaysTab() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function SummaryView({ user, readOnly }: { user: any; readOnly?: boolean }) {
+  const progs = usePrograms();
   const [month, setMonth] = useState(monthKarachi());
   const [program, setProgram] = useState('all');
   const [section, setSection] = useState('');
@@ -956,7 +958,7 @@ function SummaryView({ user, readOnly }: { user: any; readOnly?: boolean }) {
             <Label className="text-xs text-gray-500">Program</Label>
             <Select value={program} onValueChange={setProgram}>
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All programs</SelectItem>{DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+              <SelectContent><SelectItem value="all">All programs</SelectItem>{progs.programs.map((d) => <SelectItem key={d.name} value={d.name}>{d.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div><Label className="text-xs text-gray-500">Section</Label><Input value={section} onChange={(e) => setSection(e.target.value.toUpperCase())} placeholder="e.g. MK" className="w-24" /></div>
@@ -1048,6 +1050,7 @@ function EnrollmentTable({ rows, loading, emptyText, onAllocate, onView }: {
 // Program → Part → Section drill-down (the app's standard hierarchy), then the
 // section's students with a "Allocate PIN to whole section" button.
 function EnrollmentView({ navKey }: { navKey: string }) {
+  const progs = usePrograms();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [pinInfo, setPinInfo] = useState<any | null>(null);
@@ -1156,11 +1159,11 @@ function EnrollmentView({ navKey }: { navKey: string }) {
               <div className="space-y-4">
                 <div className="flex items-center gap-3 flex-wrap">
                   <button onClick={() => { setDept(null); setSection(null); }} className="text-sm text-gray-500 hover:text-[#1A1A1A]">← Programs</button>
-                  <PartToggle value={part} onChange={(p) => { setPart(p); setSection(null); }} />
+                  <LevelToggle program={dept} value={part} onChange={(p) => { setPart(p); setSection(null); }} kind={progs.kindOf(dept)} levels={progs.levelsOf(dept)} />
                 </div>
                 {sectionCards.length > 0
                   ? <SectionCardGrid sections={sectionCards} onSelect={(s) => setSection(s.section)} getStudentCount={(id) => sectionCount(id)} />
-                  : <p className="text-sm text-gray-400 py-6 text-center">No sections found for {deptLabel(dept)} · Part {part}.</p>}
+                  : <p className="text-sm text-gray-400 py-6 text-center">No sections found for {progs.labelOf(dept)} · {progs.levelLabel(dept, part)}.</p>}
               </div>
             )}
 

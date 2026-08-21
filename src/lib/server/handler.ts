@@ -904,7 +904,8 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       }
       const instId = instituteId || user.instituteId;
       const brId = branchId || user.branchId;
-      const prt = part === '2' ? '2' : '1';
+      // Level: '1'/'2' for Intermediate, '1'..'N' for ADP semesters.
+      const prt = /^\d{1,2}$/.test(String(part)) ? String(part) : '1';
 
       if (email) {
         const existing = await db.execute({ sql: 'SELECT id FROM users WHERE LOWER(email) = ?', args: [email.toLowerCase()] });
@@ -1023,7 +1024,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         const name = String(row.name || '').trim();
         if (!name) { skipped.push({ index: i, reason: 'No name' }); continue; }
         const program = String(row.program || '').trim();
-        const part = row.part === '2' ? '2' : '1';
+        const part = /^\d{1,2}$/.test(String(row.part)) ? String(row.part) : '1';
         const section = (String(row.section || 'A').trim().toUpperCase() || 'A');
         const fatherName = String(row.fatherName || '').trim() || null;
         const cnicDigits = String(row.cnic || '').replace(/\D/g, '');
@@ -1169,7 +1170,12 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (gender !== undefined) await db.execute({ sql: 'UPDATE users SET gender = ? WHERE id = ?', args: [gender || null, target.id] });
       if (cls !== undefined) await db.execute({ sql: 'UPDATE users SET class = ? WHERE id = ?', args: [cls || null, target.id] });
       if (section !== undefined) await db.execute({ sql: 'UPDATE users SET section = ? WHERE id = ?', args: [section || null, target.id] });
-      if (part !== undefined) await db.execute({ sql: 'UPDATE users SET part = ? WHERE id = ?', args: [part === '2' ? '2' : '1', target.id] });
+      // part = the student's LEVEL: '1'/'2' for Intermediate, '1'..'N' for ADP
+      // semesters. Accept any 1–2 digit level (not just 1/2).
+      if (part !== undefined) {
+        const lvl = /^\d{1,2}$/.test(String(part)) ? String(part) : '1';
+        await db.execute({ sql: 'UPDATE users SET part = ? WHERE id = ?', args: [lvl, target.id] });
+      }
       if (subjects !== undefined) await db.execute({ sql: 'UPDATE users SET subjects = ? WHERE id = ?', args: [subjects ? JSON.stringify(subjects) : null, target.id] });
       if (classes !== undefined) await db.execute({ sql: 'UPDATE users SET classes = ? WHERE id = ?', args: [classes ? JSON.stringify(classes) : null, target.id] });
       if (assignments !== undefined) await db.execute({ sql: 'UPDATE users SET assignments = ? WHERE id = ?', args: [assignments ? JSON.stringify(assignments) : null, target.id] });
@@ -1480,24 +1486,42 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         : [];
       const toSection = String(body?.toSection || '').trim().toUpperCase();
       const graduateExisting = body?.graduateExisting !== false; // default true
-      if (!program || fromSections.length === 0 || !toSection) {
+      // Levels: fromLevel → toLevel. Default 1 → 2 (Intermediate Part 1→2).
+      // For ADP: e.g. Sem 1→2, 2→3, 3→4. toLevel '' or 'Passed' = graduate the
+      // source students themselves (final semester → passed out).
+      const fromLevel = /^\d{1,2}$/.test(String(body?.fromLevel)) ? String(body.fromLevel) : '1';
+      const graduateSource = body?.toLevel === 'Passed' || body?.toLevel === '';
+      const toLevel = graduateSource ? 'Passed' : (/^\d{1,2}$/.test(String(body?.toLevel)) ? String(body.toLevel) : '2');
+      if (!program || fromSections.length === 0 || (!toSection && !graduateSource)) {
         return NextResponse.json({ error: 'program, fromSections and toSection are required' }, { status: 400 });
       }
       const brId = user.branchId;
       const now = new Date().toISOString();
 
-      // 1) Graduate the outgoing Part 2 students in the target section.
+      // Final-semester promotion = graduate the source students directly.
+      if (graduateSource) {
+        const placeholders = fromSections.map(() => '?').join(',');
+        const g = await db.execute({
+          sql: `UPDATE users SET status = 'Graduated', part = 'Passed', graduatedAt = ?
+                WHERE role = 'student' AND status = 'Active'
+                  AND class = ? AND COALESCE(part,'1') = ? AND section IN (${placeholders})
+                  ${brId ? 'AND branchId = ?' : ''}`,
+          args: brId ? [now, program, fromLevel, ...fromSections, brId] : [now, program, fromLevel, ...fromSections],
+        });
+        return NextResponse.json({ success: true, promoted: 0, graduated: Number(g.rowsAffected || 0), program });
+      }
+
+      // 1) Graduate the outgoing students already at the TARGET level+section.
       let graduated = 0;
       if (graduateExisting) {
         const g = await db.execute({
           sql: `UPDATE users SET status = 'Graduated', part = 'Passed', graduatedAt = ?
                 WHERE role = 'student' AND status = 'Active'
-                  AND class = ? AND COALESCE(part,'1') = '2' AND section = ?
+                  AND class = ? AND COALESCE(part,'1') = ? AND section = ?
                   ${brId ? 'AND branchId = ?' : ''}`,
-          args: brId ? [now, program, toSection, brId] : [now, program, toSection],
+          args: brId ? [now, program, toLevel, toSection, brId] : [now, program, toLevel, toSection],
         });
         graduated = Number(g.rowsAffected || 0);
-        // Their active sessions are void now.
         await db.execute({
           sql: `DELETE FROM sessions WHERE userId IN (
                   SELECT id FROM users WHERE role='student' AND status='Graduated' AND class=? AND section=? AND graduatedAt=?
@@ -1506,28 +1530,28 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         }).catch(() => {});
       }
 
-      // 2) Ensure the Part 2 class row for the target section exists.
+      // 2) Ensure the target-level class row for the section exists.
       const clsEx = await db.execute({
-        sql: `SELECT id FROM classes WHERE branchId = ? AND name = ? AND section = ? AND COALESCE(part,'1') = '2'`,
-        args: [brId, program, toSection],
+        sql: `SELECT id FROM classes WHERE branchId = ? AND name = ? AND section = ? AND COALESCE(part,'1') = ?`,
+        args: [brId, program, toSection, toLevel],
       });
       if (clsEx.rows.length === 0) {
         await db.execute({
-          sql: `INSERT INTO classes (id, branchId, name, section, program, part) VALUES (?, ?, ?, ?, ?, '2')`,
-          args: [nextId('CLS'), brId, program, toSection, program],
+          sql: `INSERT INTO classes (id, branchId, name, section, program, part) VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [nextId('CLS'), brId, program, toSection, program, toLevel],
         });
       }
 
-      // 3) Promote the Part 1 students of the chosen source sections → Part 2.
+      // 3) Promote the source-level students of the chosen sections → target level.
       const placeholders = fromSections.map(() => '?').join(',');
       const p = await db.execute({
-        sql: `UPDATE users SET part = '2', section = ?, class = ?
+        sql: `UPDATE users SET part = ?, section = ?, class = ?
               WHERE role = 'student' AND status = 'Active'
-                AND class = ? AND COALESCE(part,'1') = '1' AND section IN (${placeholders})
+                AND class = ? AND COALESCE(part,'1') = ? AND section IN (${placeholders})
                 ${brId ? 'AND branchId = ?' : ''}`,
         args: brId
-          ? [toSection, program, program, ...fromSections, brId]
-          : [toSection, program, program, ...fromSections],
+          ? [toLevel, toSection, program, program, fromLevel, ...fromSections, brId]
+          : [toLevel, toSection, program, program, fromLevel, ...fromSections],
       });
       const promoted = Number(p.rowsAffected || 0);
 
@@ -1642,6 +1666,87 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (!brId) return NextResponse.json([]);
       const r = await db.execute({ sql: 'SELECT * FROM classes WHERE branchId = ? ORDER BY name', args: [brId] });
       return NextResponse.json(r.rows);
+    }
+
+    // ── Programs catalog (dynamic Intermediate / ADP) ─────────────────────────
+    // GET returns the global built-in programs (branchId NULL) + this branch's
+    // custom programs. Each program's `kind` ('intermediate'|'adp') + `levels`
+    // drive whether the UI shows Part 1..N or Semester 1..N.
+    if (method === 'GET' && path === 'programs') {
+      const user = await requireAuth(req);
+      const brId = query.branchId || user.branchId || null;
+      const r = await db.execute({
+        sql: `SELECT * FROM programs WHERE branchId IS NULL OR branchId = ? ORDER BY sortOrder, name`,
+        args: [brId],
+      });
+      return NextResponse.json(r.rows);
+    }
+    if (method === 'POST' && path === 'programs') {
+      const user = await requireAuth(req);
+      requireRole(user, 'accountant', 'academic', 'admissions', 'admin', 'branch-manager', 'institute-admin', 'super-admin');
+      const name = String(body?.name || '').trim();
+      const label = String(body?.label || '').trim() || name;
+      const kind = body?.kind === 'adp' ? 'adp' : 'intermediate';
+      let levels = Number(body?.levels);
+      if (!Number.isFinite(levels) || levels < 1) levels = kind === 'adp' ? 4 : 2;
+      levels = Math.min(12, Math.max(1, Math.round(levels)));
+      const description = String(body?.description || '').trim() || null;
+      if (!name) return NextResponse.json({ error: 'Program name is required' }, { status: 400 });
+      const brId = user.branchId || null;
+      // Uniqueness within the branch (and against the global built-ins).
+      const clash = await db.execute({
+        sql: `SELECT id FROM programs WHERE (branchId IS NULL OR branchId = ?) AND LOWER(name) = ?`,
+        args: [brId, name.toLowerCase()],
+      });
+      if (clash.rows.length > 0) return NextResponse.json({ error: `A program named "${name}" already exists.` }, { status: 409 });
+      const id = nextId('PROG');
+      await db.execute({
+        sql: `INSERT INTO programs (id, branchId, name, label, kind, levels, description, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, 200)`,
+        args: [id, brId, name, label, kind, levels, description],
+      });
+      return NextResponse.json({ id, name, label, kind, levels, description }, { status: 201 });
+    }
+    if (method === 'PATCH' && pathSegments[0] === 'programs' && pathSegments[1]) {
+      const user = await requireAuth(req);
+      requireRole(user, 'accountant', 'academic', 'admissions', 'admin', 'branch-manager', 'institute-admin', 'super-admin');
+      const id = pathSegments[1];
+      const cur = await db.execute({ sql: 'SELECT * FROM programs WHERE id = ?', args: [id] });
+      if (cur.rows.length === 0) return NextResponse.json({ error: 'Program not found' }, { status: 404 });
+      const p = cur.rows[0] as any;
+      const label = body?.label !== undefined ? String(body.label).trim() : p.label;
+      const kind = body?.kind !== undefined ? (body.kind === 'adp' ? 'adp' : 'intermediate') : p.kind;
+      let levels = body?.levels !== undefined ? Number(body.levels) : p.levels;
+      if (!Number.isFinite(levels) || levels < 1) levels = p.levels;
+      levels = Math.min(12, Math.max(1, Math.round(levels)));
+      const description = body?.description !== undefined ? (String(body.description).trim() || null) : p.description;
+      await db.execute({
+        sql: `UPDATE programs SET label = ?, kind = ?, levels = ?, description = ? WHERE id = ?`,
+        args: [label, kind, levels, description, id],
+      });
+      return NextResponse.json({ success: true });
+    }
+    if (method === 'DELETE' && pathSegments[0] === 'programs' && pathSegments[1]) {
+      const user = await requireAuth(req);
+      requireRole(user, 'accountant', 'academic', 'admissions', 'admin', 'branch-manager', 'institute-admin', 'super-admin');
+      const id = pathSegments[1];
+      const cur = await db.execute({ sql: 'SELECT * FROM programs WHERE id = ?', args: [id] });
+      if (cur.rows.length === 0) return NextResponse.json({ error: 'Program not found' }, { status: 404 });
+      const p = cur.rows[0] as any;
+      // Guard: block delete when active students are still enrolled in it, unless
+      // ?force=1. Empty programs (and their empty class/section rows) delete freely.
+      const brId = user.branchId;
+      const cnt = await db.execute({
+        sql: `SELECT COUNT(*) AS n FROM users WHERE role='student' AND status='Active' AND class = ?${brId ? ' AND branchId = ?' : ''}`,
+        args: brId ? [p.name, brId] : [p.name],
+      });
+      const n = Number((cnt.rows[0] as any).n || 0);
+      if (n > 0 && query.force !== '1') {
+        return NextResponse.json({ error: `${n} active student(s) are still in "${p.label || p.name}". Move or remove them first, or delete with force.`, students: n }, { status: 409 });
+      }
+      // Remove the program + its (now-empty) class/section rows for this branch.
+      await db.execute({ sql: 'DELETE FROM programs WHERE id = ?', args: [id] });
+      await db.execute({ sql: `DELETE FROM classes WHERE name = ?${brId ? ' AND branchId = ?' : ''}`, args: brId ? [p.name, brId] : [p.name] });
+      return NextResponse.json({ success: true });
     }
 
     // Reference data — common lookup lists used by admissions/academic forms.
@@ -3091,7 +3196,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (user.branchId) { filters.push('u.branchId = ?'); args.push(user.branchId); }
       if (query.program) { filters.push('u.class = ?'); args.push(query.program); }
       if (query.section) { filters.push('u.section = ?'); args.push(String(query.section).toUpperCase()); }
-      if (query.part) { filters.push("COALESCE(u.part,'1') = ?"); args.push(query.part === '2' ? '2' : '1'); }
+      if (query.part) { filters.push("COALESCE(u.part,'1') = ?"); args.push(/^\d{1,2}$/.test(query.part) ? query.part : '1'); }
       const where = filters.length ? ' AND ' + filters.join(' AND ') : '';
       const r = await db.execute({
         sql: `SELECT u.id AS studentId, u.name, u.rollNo, u.class, u.section, u.part,
@@ -3288,7 +3393,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
       const { program, part, section } = body || {};
       if (!program || !section) return NextResponse.json({ error: 'program and section are required' }, { status: 400 });
-      const prt = part === '2' ? '2' : '1';
+      const prt = /^\d{1,2}$/.test(String(part)) ? String(part) : '1';
       const sec = String(section).toUpperCase();
       const args: any[] = [];
       let where = "u.role = 'student' AND u.status = 'Active' AND u.class = ? AND COALESCE(u.part,'1') = ? AND u.section = ? AND du.device_pin IS NULL";
@@ -3380,7 +3485,7 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
       if (query.program) { where += ' AND u.class = ?'; args.push(query.program); }
       if (query.section) { where += ' AND u.section = ?'; args.push(String(query.section).toUpperCase()); }
-      if (query.part) { where += " AND COALESCE(u.part,'1') = ?"; args.push(query.part === '2' ? '2' : '1'); }
+      if (query.part) { where += " AND COALESCE(u.part,'1') = ?"; args.push(/^\d{1,2}$/.test(query.part) ? query.part : '1'); }
       const r = await db.execute({
         sql: `SELECT u.id AS studentId, u.name, u.rollNo, u.class, u.section, u.part,
                      a.date, a.check_in_at, a.check_out_at, a.status, a.minutes_late

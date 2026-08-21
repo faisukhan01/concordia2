@@ -38,6 +38,8 @@ import {
   DEPARTMENTS,
   DeptCardGrid,
   PartToggle,
+  LevelToggle,
+  usePrograms,
   ClassCardGrid,
   SectionCardGrid,
   HierarchyBreadcrumb,
@@ -120,6 +122,7 @@ import {
   RotateCcw,
   X,
   ArrowRightLeft,
+  BookOpen,
 } from 'lucide-react';
 import { savePdf, printPdf } from '@/lib/pdf-utils';
 import { buildConcordiaChallan, buildConcordiaChallanBook } from '@/lib/challan';
@@ -886,24 +889,35 @@ function SectionChip({ row, onRename, onDelete }: {
 }
 
 function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
+  const progs = usePrograms(user?.branchId);
   const [dept, setDept] = useState<string | null>(null);
-  const [part, setPart] = useState<'1' | '2'>('1');
+  const [level, setLevel] = useState<string>('1');
   const [newSection, setNewSection] = useState('');
   const [saving, setSaving] = useState(false);
+  const [progDialog, setProgDialog] = useState<null | { mode: 'add' | 'edit'; program?: any }>(null);
 
-  // Section rows (id + letter) for the selected program + part, deduped.
+  const selectedProgram = dept ? progs.byName.get(dept) : null;
+
+  // Student counts per program (for the cards).
+  const countsByProgram = useMemo(() => {
+    // Derived from classes is not enough (classes are sections, not students);
+    // leave counts to the caller-less default 0 — the cards still render.
+    return undefined as Record<string, number> | undefined;
+  }, []);
+
+  // Section rows (id + letter) for the selected program + level, deduped.
   const sectionRows = useMemo(() => {
     if (!dept) return [] as { id: string; section: string }[];
     const seen = new Set<string>();
     const out: { id: string; section: string }[] = [];
     for (const c of (classes || [])) {
-      if ((c.program || '').trim() === dept && String(c.part || '1') === part && c.section) {
+      if ((c.program || '').trim() === dept && String(c.part || '1') === level && c.section) {
         const s = String(c.section).toUpperCase();
         if (!seen.has(s)) { seen.add(s); out.push({ id: c.id, section: s }); }
       }
     }
     return out.sort((a, b) => a.section.localeCompare(b.section));
-  }, [classes, dept, part]);
+  }, [classes, dept, level]);
 
   const addSection = async () => {
     const sec = newSection.trim().toUpperCase();
@@ -911,8 +925,8 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
     if (sectionRows.some((r) => r.section === sec)) { toast({ title: 'Section already exists', variant: 'destructive' }); return; }
     setSaving(true);
     try {
-      await api.createClass(dept!, sec, user?.branchId, dept!, part);
-      toast({ title: 'Section created', description: `${deptLabel(dept)} · Part ${part} · Section ${sec}` });
+      await api.createClass(dept!, sec, user?.branchId, dept!, level);
+      toast({ title: 'Section created', description: `${progs.labelOf(dept)} · ${progs.levelLabel(dept, level)} · Section ${sec}` });
       setNewSection('');
       onRefresh();
     } catch (e: any) {
@@ -929,16 +943,70 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
     catch (e: any) { toast({ title: 'Delete failed', description: e?.message, variant: 'destructive' }); }
   };
 
+  const deleteProgram = async (prog: any) => {
+    if (!confirm(`Delete the program "${prog.label || prog.name}"? Empty sections will be removed. Students already in it must be moved first.`)) return;
+    try {
+      await api.deleteProgram(prog.id);
+      toast({ title: 'Program deleted', description: prog.label || prog.name });
+      if (dept === prog.name) setDept(null);
+      progs.reload(); onRefresh();
+    } catch (e: any) {
+      // 409 with a student count — offer force.
+      if (/still in|active student/i.test(e?.message || '')) {
+        if (confirm(`${e.message}\n\nForce delete anyway? (Students stay in the DB but the program card is removed.)`)) {
+          try { await api.deleteProgram(prog.id, true); toast({ title: 'Program force-deleted' }); if (dept === prog.name) setDept(null); progs.reload(); onRefresh(); }
+          catch (e2: any) { toast({ title: 'Delete failed', description: e2?.message, variant: 'destructive' }); }
+        }
+      } else {
+        toast({ title: 'Delete failed', description: e?.message, variant: 'destructive' });
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Classes & Sections" subtitle="Create the sections for each program. Students are assigned to these sections during New Enrollments (new students are Part 1)." />
+      <PageHeader
+        title="Classes & Sections"
+        subtitle="Add programs (Intermediate = Part 1/2, ADP = Semesters), then create their sections. New students are enrolled into these sections."
+        action={
+          <Button onClick={() => setProgDialog({ mode: 'add' })} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+            <Plus className="h-4 w-4 mr-1.5" /> Add Program
+          </Button>
+        }
+      />
       {!dept ? (
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">Select a program</h2>
-          {loading ? (
+          {loading || progs.loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-32 rounded-2xl bg-gray-100 animate-pulse" />)}</div>
           ) : (
-            <DeptCardGrid onSelect={(d) => setDept(d)} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {progs.programs.map((prog) => (
+                <div key={prog.name} className="relative group">
+                  <button
+                    onClick={() => { setDept(prog.name); setLevel('1'); }}
+                    className={cn('w-full text-left rounded-2xl border border-gray-200 bg-gradient-to-br p-5 transition-all hover:shadow-lg hover:border-[#F26522]/40 hover:-translate-y-0.5',
+                      prog.kind === 'adp' ? 'from-indigo-50 to-indigo-100/40' : 'from-orange-50/50 to-white')}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white border border-gray-200 shadow-sm">
+                        {prog.kind === 'adp' ? <Layers className="h-5 w-5 text-indigo-600" /> : <BookOpen className="h-5 w-5 text-[#F26522]" />}
+                      </div>
+                      <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', prog.kind === 'adp' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-gray-500 border-gray-200')}>
+                        {prog.kind === 'adp' ? `ADP · ${prog.levels} Sem` : `Part 1–${prog.levels}`}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-bold text-gray-900">{prog.label}</h3>
+                    <p className="text-xs text-gray-500 line-clamp-2 mt-0.5">{prog.description || ''}</p>
+                  </button>
+                  {/* Edit / delete on hover */}
+                  <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); setProgDialog({ mode: 'edit', program: prog }); }} className="h-7 w-7 grid place-items-center rounded-lg bg-white border border-gray-200 hover:border-[#F26522] shadow-sm" title="Edit program"><Pencil className="h-3.5 w-3.5 text-gray-500" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); deleteProgram(prog); }} className="h-7 w-7 grid place-items-center rounded-lg bg-white border border-gray-200 hover:border-rose-400 shadow-sm" title="Delete program"><Trash2 className="h-3.5 w-3.5 text-rose-500" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       ) : (
@@ -946,11 +1014,12 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
           <div className="flex items-center gap-2 text-sm">
             <button onClick={() => setDept(null)} className="text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> All programs</button>
             <ChevronRight className="h-3.5 w-3.5 text-gray-300" />
-            <span className="font-semibold text-gray-900">{deptLabel(dept)}</span>
+            <span className="font-semibold text-gray-900">{progs.labelOf(dept)}</span>
+            {selectedProgram?.kind === 'adp' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">ADP</span>}
           </div>
-          <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+          <LevelToggle program={dept} value={level} onChange={setLevel} kind={selectedProgram?.kind} levels={selectedProgram?.levels} />
           <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Sections in {deptLabel(dept)} · Part {part}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Sections in {progs.labelOf(dept)} · {progs.levelLabel(dept, level)}</p>
             {sectionRows.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">No sections yet — add one below.</div>
             ) : (
@@ -972,7 +1041,107 @@ function AccountantClassesView({ user, classes, loading, onRefresh }: any) {
           </div>
         </div>
       )}
+
+      <ProgramDialog
+        state={progDialog}
+        onClose={() => setProgDialog(null)}
+        onSaved={() => { progs.reload(); onRefresh(); }}
+      />
     </div>
+  );
+}
+
+// Add / edit a program (name, display label, kind, number of levels).
+function ProgramDialog({ state, onClose, onSaved }: {
+  state: null | { mode: 'add' | 'edit'; program?: any };
+  onClose: () => void; onSaved: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [label, setLabel] = useState('');
+  const [kind, setKind] = useState<'intermediate' | 'adp'>('intermediate');
+  const [levels, setLevels] = useState(2);
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const editing = state?.mode === 'edit';
+
+  useEffect(() => {
+    if (!state) return;
+    const p = state.program;
+    setName(p?.name || '');
+    setLabel(p?.label || '');
+    setKind(p?.kind === 'adp' ? 'adp' : 'intermediate');
+    setLevels(Number(p?.levels) || (p?.kind === 'adp' ? 4 : 2));
+    setDescription(p?.description || '');
+  }, [state]);
+
+  // When switching kind, default the level count sensibly.
+  const switchKind = (k: 'intermediate' | 'adp') => {
+    setKind(k);
+    setLevels(k === 'adp' ? 4 : 2);
+  };
+
+  const save = async () => {
+    if (!editing && !name.trim()) { toast({ title: 'Enter a program name', variant: 'destructive' }); return; }
+    setBusy(true);
+    try {
+      if (editing) {
+        await api.updateProgram(state!.program.id, { label: label.trim() || name, kind, levels, description });
+        toast({ title: 'Program updated' });
+      } else {
+        await api.createProgram({ name: name.trim(), label: label.trim() || name.trim(), kind, levels, description });
+        toast({ title: 'Program added', description: name.trim() });
+      }
+      onSaved(); onClose();
+    } catch (e: any) {
+      toast({ title: 'Could not save', description: e?.message || 'Try again.', variant: 'destructive' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={!!state} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{editing ? 'Edit Program' : 'Add Program'}</DialogTitle>
+          <DialogDescription>Intermediate programs use Part 1/2; ADP programs use Semesters.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs text-gray-500">Program name {editing && <span className="text-gray-400">(can&apos;t change)</span>}</Label>
+            <Input value={name} disabled={editing} onChange={(e) => setName(e.target.value)} placeholder="e.g. ADP CS" className={inputCls} />
+          </div>
+          <div>
+            <Label className="text-xs text-gray-500">Display label</Label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. ADP (Computer Science)" className={inputCls} />
+          </div>
+          <div>
+            <Label className="text-xs text-gray-500">Type</Label>
+            <div className="flex gap-2 mt-1">
+              {(['intermediate', 'adp'] as const).map((k) => (
+                <button key={k} onClick={() => switchKind(k)}
+                  className={cn('flex-1 rounded-lg border px-3 py-2 text-sm font-medium', kind === k ? 'border-[#F26522] bg-orange-50 text-[#1A1A1A]' : 'border-gray-200 bg-white text-gray-600')}>
+                  {k === 'intermediate' ? 'Intermediate (Part)' : 'ADP (Semester)'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs text-gray-500">{kind === 'adp' ? 'Number of semesters' : 'Number of parts'}</Label>
+            <Input type="number" min={1} max={12} value={levels} onChange={(e) => setLevels(Math.min(12, Math.max(1, Number(e.target.value) || 1)))} className={cn(inputCls, 'w-28')} />
+            <p className="text-[11px] text-gray-400 mt-1">{kind === 'adp' ? `Students will be Sem 1…${levels}.` : `Students will be Part 1…${levels}.`}</p>
+          </div>
+          <div>
+            <Label className="text-xs text-gray-500">Description (optional)</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Associate Degree Program" className={inputCls} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={busy} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : (editing ? 'Save' : 'Add Program')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1133,8 +1302,10 @@ export function PromoteStudentsDialog({
 }: {
   open: boolean; onClose: () => void; students: any[]; branchId?: string;
 }) {
+  const progs = usePrograms(branchId);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [program, setProgram] = useState('');
+  const [fromLevel, setFromLevel] = useState('1');
   const [fromSections, setFromSections] = useState<string[]>([]);
   const [toSection, setToSection] = useState('');
   const [newSection, setNewSection] = useState('');
@@ -1144,49 +1315,55 @@ export function PromoteStudentsDialog({
   const [result, setResult] = useState<{ promoted: number; graduated: number } | null>(null);
 
   const reset = () => {
-    setStep(1); setProgram(''); setFromSections([]); setToSection(''); setNewSection('');
+    setStep(1); setProgram(''); setFromLevel('1'); setFromSections([]); setToSection(''); setNewSection('');
     setCreatingNew(false); setGraduateExisting(true); setResult(null);
   };
   const close = () => { reset(); onClose(); };
   useEffect(() => { if (open) reset(); }, [open]);
 
-  // Active students only (exclude already-graduated / passed).
-  const active = useMemo(() => students.filter((s) => (s.status || 'Active') === 'Active' && (s.part === '1' || s.part === '2')), [students]);
+  // Program metadata + the resulting target level.
+  const kind = progs.kindOf(program);
+  const totalLevels = progs.levelsOf(program);
+  const isFinalLevel = Number(fromLevel) >= totalLevels;        // last sem/part → graduate
+  const toLevel = isFinalLevel ? 'Passed' : String(Number(fromLevel) + 1);
+  const levelWord = kind === 'adp' ? 'Semester' : 'Part';
 
-  const part1Sections = useMemo(() => {
-    if (!program) return [] as { section: string; count: number }[];
-    const m = new Map<string, number>();
-    for (const s of active) if (s.program === program && String(s.part || '1') === '1' && s.section) m.set(s.section, (m.get(s.section) || 0) + 1);
-    return [...m.entries()].map(([section, count]) => ({ section, count })).sort((a, b) => a.section.localeCompare(b.section));
-  }, [active, program]);
+  // Active students only (exclude already-graduated / passed). Any numeric level.
+  const active = useMemo(() => students.filter((s) => (s.status || 'Active') === 'Active' && /^\d{1,2}$/.test(String(s.part || ''))), [students]);
 
-  const part2Sections = useMemo(() => {
-    if (!program) return [] as { section: string; count: number }[];
+  const sectionsAtLevel = (lvl: string) => {
     const m = new Map<string, number>();
-    for (const s of active) if (s.program === program && String(s.part || '1') === '2' && s.section) m.set(s.section, (m.get(s.section) || 0) + 1);
+    for (const s of active) if (s.program === program && String(s.part || '1') === lvl && s.section) m.set(s.section, (m.get(s.section) || 0) + 1);
     return [...m.entries()].map(([section, count]) => ({ section, count })).sort((a, b) => a.section.localeCompare(b.section));
-  }, [active, program]);
+  };
+  const sourceSections = useMemo(() => program ? sectionsAtLevel(fromLevel) : [], [active, program, fromLevel]);
+  const targetSections = useMemo(() => (program && !isFinalLevel) ? sectionsAtLevel(toLevel) : [], [active, program, toLevel, isFinalLevel]);
 
   const targetSection = (creatingNew ? newSection : toSection).trim().toUpperCase();
   const promoteCount = useMemo(
-    () => active.filter((s) => s.program === program && String(s.part || '1') === '1' && fromSections.includes(s.section)).length,
-    [active, program, fromSections],
+    () => active.filter((s) => s.program === program && String(s.part || '1') === fromLevel && fromSections.includes(s.section)).length,
+    [active, program, fromLevel, fromSections],
   );
   const graduateCount = useMemo(
-    () => (graduateExisting && targetSection)
-      ? active.filter((s) => s.program === program && String(s.part || '1') === '2' && s.section === targetSection).length
+    () => (!isFinalLevel && graduateExisting && targetSection)
+      ? active.filter((s) => s.program === program && String(s.part || '1') === toLevel && s.section === targetSection).length
       : 0,
-    [active, program, targetSection, graduateExisting],
+    [active, program, toLevel, targetSection, graduateExisting, isFinalLevel],
   );
 
   const toggleFrom = (sec: string) =>
     setFromSections((prev) => prev.includes(sec) ? prev.filter((x) => x !== sec) : [...prev, sec]);
 
   const run = async () => {
-    if (!program || fromSections.length === 0 || !targetSection) return;
+    if (!program || fromSections.length === 0 || (!isFinalLevel && !targetSection)) return;
     setBusy(true);
     try {
-      const r = await api.promoteStudents({ program, fromSections, toSection: targetSection, graduateExisting });
+      const r = await api.promoteStudents({
+        program, fromSections, fromLevel,
+        toLevel: isFinalLevel ? 'Passed' : toLevel,
+        toSection: isFinalLevel ? undefined : targetSection,
+        graduateExisting,
+      });
       setResult({ promoted: r.promoted, graduated: r.graduated });
       toast({ title: 'Promotion complete', description: `${r.promoted} promoted · ${r.graduated} passed out.` });
     } catch (e: any) {
@@ -1199,10 +1376,10 @@ export function PromoteStudentsDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <GraduationCap className="h-5 w-5 text-[#F26522]" /> Promote Students — Part 1 → Part 2
+            <GraduationCap className="h-5 w-5 text-[#F26522]" /> Promote Students
           </DialogTitle>
           <DialogDescription>
-            Move a program&apos;s Part 1 section up to Part 2 for the new academic year. The outgoing Part 2 students are kept as <b>Passed Out</b> records.
+            Move students up a {levelWord.toLowerCase()} for the new term. Outgoing students at the target are kept as <b>Passed Out</b> records.
           </DialogDescription>
         </DialogHeader>
 
@@ -1210,11 +1387,13 @@ export function PromoteStudentsDialog({
           <div className="py-6 text-center space-y-2">
             <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
             <p className="text-lg font-bold text-gray-900">Done!</p>
-            <p className="text-sm text-gray-600">
-              <b>{result.promoted}</b> student{result.promoted === 1 ? '' : 's'} promoted to {deptLabel(program)} · Part 2 · Section {targetSection}.
-            </p>
+            {result.promoted > 0 && (
+              <p className="text-sm text-gray-600">
+                <b>{result.promoted}</b> student{result.promoted === 1 ? '' : 's'} promoted to {progs.labelOf(program)} · {levelWord} {toLevel} · Section {targetSection}.
+              </p>
+            )}
             {result.graduated > 0 && (
-              <p className="text-sm text-gray-600"><b>{result.graduated}</b> previous Part 2 student{result.graduated === 1 ? '' : 's'} marked Passed Out.</p>
+              <p className="text-sm text-gray-600"><b>{result.graduated}</b> student{result.graduated === 1 ? '' : 's'} marked Passed Out.</p>
             )}
             <DialogFooter className="pt-4"><Button onClick={close} className="bg-[#F26522] hover:bg-[#D4541E] text-white">Close</Button></DialogFooter>
           </div>
@@ -1227,24 +1406,38 @@ export function PromoteStudentsDialog({
               ))}
             </div>
 
-            {/* Step 1 — program + Part 1 sections */}
+            {/* Step 1 — program + source level + sections */}
             {step === 1 && (
               <div className="space-y-4 py-2">
                 <div>
                   <Label className="text-xs text-gray-500">Program</Label>
-                  <Select value={program} onValueChange={(v) => { setProgram(v); setFromSections([]); setToSection(''); setCreatingNew(false); }}>
+                  <Select value={program} onValueChange={(v) => { setProgram(v); setFromLevel('1'); setFromSections([]); setToSection(''); setCreatingNew(false); }}>
                     <SelectTrigger><SelectValue placeholder="Select a program" /></SelectTrigger>
-                    <SelectContent>{DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}</SelectContent>
+                    <SelectContent>{progs.programs.map((p) => <SelectItem key={p.name} value={p.name}>{p.label}{p.kind === 'adp' ? ' · ADP' : ''}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 {program && (
                   <div>
-                    <Label className="text-xs text-gray-500">Part 1 section(s) to promote</Label>
-                    {part1Sections.length === 0 ? (
-                      <p className="text-sm text-gray-400 py-3">No Part 1 students in {deptLabel(program)}.</p>
+                    <Label className="text-xs text-gray-500">Promote from</Label>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {progs.levelValues(program).map((lv) => (
+                        <button key={lv} onClick={() => { setFromLevel(lv); setFromSections([]); setToSection(''); }}
+                          className={cn('rounded-lg border px-3 py-1.5 text-sm font-medium', fromLevel === lv ? 'border-[#F26522] bg-orange-50 text-[#1A1A1A]' : 'border-gray-200 bg-white text-gray-600')}>
+                          {levelWord} {lv}
+                        </button>
+                      ))}
+                    </div>
+                    {isFinalLevel && <p className="text-[11px] text-amber-600 mt-1.5">This is the final {levelWord.toLowerCase()} — these students will be marked Passed Out (graduated).</p>}
+                  </div>
+                )}
+                {program && (
+                  <div>
+                    <Label className="text-xs text-gray-500">{levelWord} {fromLevel} section(s) to promote</Label>
+                    {sourceSections.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-3">No {levelWord} {fromLevel} students in {progs.labelOf(program)}.</p>
                     ) : (
                       <div className="grid grid-cols-2 gap-2 mt-1">
-                        {part1Sections.map(({ section, count }) => (
+                        {sourceSections.map(({ section, count }) => (
                           <button key={section} onClick={() => toggleFrom(section)}
                             className={cn('flex items-center justify-between rounded-lg border px-3 py-2 text-sm',
                               fromSections.includes(section) ? 'border-[#F26522] bg-orange-50 text-[#1A1A1A]' : 'border-gray-200 bg-white text-gray-600')}>
@@ -1258,23 +1451,23 @@ export function PromoteStudentsDialog({
                 )}
                 <DialogFooter>
                   <Button variant="outline" onClick={close}>Cancel</Button>
-                  <Button disabled={!program || fromSections.length === 0} onClick={() => setStep(2)} className="bg-[#F26522] hover:bg-[#D4541E] text-white">Next</Button>
+                  <Button disabled={!program || fromSections.length === 0} onClick={() => setStep(isFinalLevel ? 3 : 2)} className="bg-[#F26522] hover:bg-[#D4541E] text-white">{isFinalLevel ? 'Review' : 'Next'}</Button>
                 </DialogFooter>
               </div>
             )}
 
-            {/* Step 2 — target Part 2 section */}
-            {step === 2 && (
+            {/* Step 2 — target level section (skipped when graduating) */}
+            {step === 2 && !isFinalLevel && (
               <div className="space-y-4 py-2">
                 <p className="text-sm text-gray-600">
-                  Promoting <b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} from {deptLabel(program)} · Part 1 · {fromSections.join(', ')}.
+                  Promoting <b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} from {progs.labelOf(program)} · {levelWord} {fromLevel} · {fromSections.join(', ')} → <b>{levelWord} {toLevel}</b>.
                 </p>
                 <div>
-                  <Label className="text-xs text-gray-500">Move them into Part 2 section</Label>
+                  <Label className="text-xs text-gray-500">Move them into {levelWord} {toLevel} section</Label>
                   {!creatingNew ? (
                     <>
                       <div className="grid grid-cols-2 gap-2 mt-1">
-                        {part2Sections.map(({ section, count }) => (
+                        {targetSections.map(({ section, count }) => (
                           <button key={section} onClick={() => setToSection(section)}
                             className={cn('flex items-center justify-between rounded-lg border px-3 py-2 text-sm',
                               toSection === section ? 'border-[#F26522] bg-orange-50' : 'border-gray-200 bg-white text-gray-600')}>
@@ -1294,11 +1487,11 @@ export function PromoteStudentsDialog({
                     </div>
                   )}
                 </div>
-                {targetSection && part2Sections.some((s) => s.section === targetSection) && (
+                {targetSection && targetSections.some((s) => s.section === targetSection) && (
                   <label className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 p-3 cursor-pointer">
                     <input type="checkbox" checked={graduateExisting} onChange={(e) => setGraduateExisting(e.target.checked)} className="h-4 w-4 mt-0.5 accent-[#F26522]" />
                     <span className="text-xs text-gray-700">
-                      Mark the <b>{graduateCount}</b> current Part 2 · {targetSection} student{graduateCount === 1 ? '' : 's'} as <b>Passed Out</b> (their records are kept). Uncheck to merge instead.
+                      Mark the <b>{graduateCount}</b> current {levelWord} {toLevel} · {targetSection} student{graduateCount === 1 ? '' : 's'} as <b>Passed Out</b> (their records are kept). Uncheck to merge instead.
                     </span>
                   </label>
                 )}
@@ -1314,16 +1507,22 @@ export function PromoteStudentsDialog({
               <div className="space-y-4 py-2">
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm space-y-2">
                   <div className="flex items-center gap-2 text-gray-900 font-semibold"><ArrowRightLeft className="h-4 w-4 text-[#F26522]" /> Confirm promotion</div>
-                  <p className="text-gray-700"><b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} · {deptLabel(program)} Part 1 ({fromSections.join(', ')}) → <b>Part 2 · Section {targetSection}</b>.</p>
-                  {graduateCount > 0
-                    ? <p className="text-gray-700"><b>{graduateCount}</b> current Part 2 · {targetSection} student{graduateCount === 1 ? '' : 's'} → <b>Passed Out</b> (kept as records, login disabled).</p>
-                    : <p className="text-gray-500">No current Part 2 · {targetSection} students will be graduated.</p>}
-                  <p className="text-[11px] text-gray-400">This changes live data for the new academic year. Promoted students keep their roll number, login and past fees.</p>
+                  {isFinalLevel ? (
+                    <p className="text-gray-700"><b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} · {progs.labelOf(program)} {levelWord} {fromLevel} ({fromSections.join(', ')}) → <b>Passed Out</b> (graduated). Records kept, login disabled.</p>
+                  ) : (
+                    <>
+                      <p className="text-gray-700"><b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} · {progs.labelOf(program)} {levelWord} {fromLevel} ({fromSections.join(', ')}) → <b>{levelWord} {toLevel} · Section {targetSection}</b>.</p>
+                      {graduateCount > 0
+                        ? <p className="text-gray-700"><b>{graduateCount}</b> current {levelWord} {toLevel} · {targetSection} student{graduateCount === 1 ? '' : 's'} → <b>Passed Out</b> (kept as records, login disabled).</p>
+                        : <p className="text-gray-500">No current {levelWord} {toLevel} · {targetSection} students will be graduated.</p>}
+                    </>
+                  )}
+                  <p className="text-[11px] text-gray-400">This changes live data for the new term. Promoted students keep their roll number, login and past fees.</p>
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setStep(2)} disabled={busy}>Back</Button>
+                  <Button variant="outline" onClick={() => setStep(isFinalLevel ? 1 : 2)} disabled={busy}>Back</Button>
                   <Button onClick={run} disabled={busy} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
-                    {busy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <GraduationCap className="h-4 w-4 mr-1.5" />} Promote now
+                    {busy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <GraduationCap className="h-4 w-4 mr-1.5" />} {isFinalLevel ? 'Graduate now' : 'Promote now'}
                   </Button>
                 </DialogFooter>
               </div>
@@ -1899,6 +2098,7 @@ function FeeInstallmentsView({
     section: { id: string; name: string; section: string } | null;
   };
 
+  const progs = usePrograms(user?.branchId);
   const feeFocusStudentId = useApp((s) => s.feeFocusStudentId);
   const setFeeFocusStudentId = useApp((s) => s.setFeeFocusStudentId);
 
@@ -3315,14 +3515,16 @@ function FeeInstallmentsView({
           <HierarchyBreadcrumb dept={drill.dept} part={drill.part} onClear={handleClearHierarchy} />
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{progs.labelOf(drill.dept)} Classes</h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.
+                {progs.kindOf(drill.dept) === 'adp' ? 'Select a semester, then pick a class.' : 'Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.'}
               </p>
             </div>
-            <PartToggle
+            <LevelToggle
+              program={drill.dept}
               value={drill.part}
               onChange={(p) => setDrill((d) => ({ ...d, part: p, cls: null, section: null }))}
+              kind={progs.kindOf(drill.dept)} levels={progs.levelsOf(drill.dept)}
             />
           </div>
           {loading ? (
@@ -3587,6 +3789,7 @@ function MiscChargesView({
     section: { id: string; name: string; section: string } | null;
   };
 
+  const progs = usePrograms(user?.branchId);
   const [charges, setCharges] = useState<MiscCharge[]>([]);
   const [chargesLoading, setChargesLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -3987,12 +4190,12 @@ function MiscChargesView({
           }
         />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Part toggle */}
+          {/* Level toggle */}
           <div>
             <Label className="text-xs font-semibold text-gray-700 mb-1.5 block">
-              Part
+              {progs.kindOf(bulkDept === 'All' ? null : bulkDept) === 'adp' ? 'Semester' : 'Part'}
             </Label>
-            <PartToggle value={bulkPart} onChange={setBulkPart} />
+            <LevelToggle program={bulkDept === 'All' ? null : bulkDept} value={bulkPart} onChange={setBulkPart} />
           </div>
           {/* Department select */}
           <Field label="Department (optional)">
@@ -4002,9 +4205,9 @@ function MiscChargesView({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="All">All Departments</SelectItem>
-                {DEPARTMENTS.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {deptLabel(d)}
+                {progs.programs.map((d) => (
+                  <SelectItem key={d.name} value={d.name}>
+                    {d.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -4154,14 +4357,16 @@ function MiscChargesView({
           <HierarchyBreadcrumb dept={drill.dept} part={drill.part} onClear={handleClearHierarchy} />
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">{drill.dept} Classes</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{progs.labelOf(drill.dept)} Classes</h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.
+                {progs.kindOf(drill.dept) === 'adp' ? 'Select a semester, then pick a class.' : 'Select Part 1 (1st year) or Part 2 (2nd year), then pick a class.'}
               </p>
             </div>
-            <PartToggle
+            <LevelToggle
+              program={drill.dept}
               value={drill.part}
               onChange={(p) => setDrill((d) => ({ ...d, part: p, cls: null, section: null }))}
+              kind={progs.kindOf(drill.dept)} levels={progs.levelsOf(drill.dept)}
             />
           </div>
           {loading ? (

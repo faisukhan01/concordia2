@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { api, type ImportStudentRow } from '@/lib/api';
-import { DEPARTMENTS, deptLabel, detectProgram, PartToggle } from './concordia-hierarchy';
+import { DEPARTMENTS, deptLabel, detectProgram, PartToggle, LevelToggle, usePrograms } from './concordia-hierarchy';
 import {
   Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle, X, ArrowLeft,
 } from 'lucide-react';
@@ -112,10 +112,11 @@ export function StudentImportDialog({
   /** When opened from Student Records drill-down, the part is pre-filled and locked. */
   preselectedPart?: '1' | '2';
 }) {
+  const progs = usePrograms(branchId);
   const [step, setStep] = useState<'upload' | 'preview' | 'done'>('upload');
   const [rows, setRows] = useState<Row[]>([]);
   const [fileName, setFileName] = useState('');
-  const [part, setPart] = useState<'1' | '2'>(preselectedPart || '1');
+  const [part, setPart] = useState<string>(preselectedPart || '1');
   const [section, setSection] = useState(preselectedSection || 'A');
   const [generateInstallments, setGenerateInstallments] = useState(true);
   const [importing, setImporting] = useState(false);
@@ -321,14 +322,14 @@ export function StudentImportDialog({
                 )}
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
-                    Enroll into Part {preselectedPart ? '(locked)' : ''}
+                    Enroll into {progs.kindOf(preselectedProgram) === 'adp' ? 'Semester' : 'Part'} {preselectedPart ? '(locked)' : ''}
                   </p>
                   {preselectedPart ? (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
-                      Part {preselectedPart}
+                      {progs.levelLabel(preselectedProgram, preselectedPart)}
                     </div>
                   ) : (
-                    <PartToggle value={part} onChange={(p) => setPart(p as '1' | '2')} />
+                    <LevelToggle program={preselectedProgram} value={part} onChange={setPart} kind={progs.kindOf(preselectedProgram)} levels={progs.levelsOf(preselectedProgram)} />
                   )}
                 </div>
                 <div>
@@ -408,7 +409,7 @@ export function StudentImportDialog({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">— Unassigned —</SelectItem>
-                              {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}
+                              {progs.programs.map((d) => <SelectItem key={d.name} value={d.name}>{d.label}{d.kind === 'adp' ? ' · ADP' : ''}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </td>

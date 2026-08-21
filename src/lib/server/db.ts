@@ -110,6 +110,16 @@ const SCHEMA_STATEMENTS: string[] = [
   // it to skip muted types per user.
   `CREATE TABLE IF NOT EXISTS notification_preferences (userId TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', updatedAt TEXT DEFAULT (datetime('now')))`,
 
+  // ── Programs catalog (dynamic) ──────────────────────────────────────────
+  // Each program has a KIND: 'intermediate' (levels = Part 1..N, usually 2) or
+  // 'adp' (levels = Semester 1..N, configurable). A student's level is stored
+  // in the existing users.part field ('1'..'N') and classes.part — so NO other
+  // schema changes are needed; this table just describes each program so the UI
+  // can render Part vs Semester and the right number of levels.
+  `CREATE TABLE IF NOT EXISTS programs (id TEXT PRIMARY KEY, branchId TEXT, name TEXT NOT NULL, label TEXT, kind TEXT NOT NULL DEFAULT 'intermediate', levels INTEGER NOT NULL DEFAULT 2, description TEXT, sortOrder INTEGER DEFAULT 100, createdAt TEXT DEFAULT (datetime('now')))`,
+  `CREATE INDEX IF NOT EXISTS idx_programs_branchId ON programs(branchId)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_programs_branch_name ON programs(branchId, name)`,
+
   // ── Biometric Attendance (ZKTeco gate terminal) ──────────────────────────
   // A Python bridge on the college LAN forwards fingerprint punches to the API.
   // ADAPTED from docs/biometric/migration-attendance.sql to THIS schema:
@@ -424,6 +434,28 @@ export async function initDB() {
         ];
         for (const s of inserts) { try { await db.execute(s); } catch {} }
       }
+    }
+
+    // ── Step 4b: seed the 6 built-in Intermediate programs (idempotent) ──
+    // These describe the existing hardcoded catalog so the app can move to a
+    // dynamic programs list without losing them. branchId is NULL = global
+    // defaults available to every branch. Custom programs (e.g. ADP) are added
+    // per-branch by staff.
+    try {
+      const defaults: [string, string, string, number, number][] = [
+        ['FSC Pre Med', 'Fsc(Pre-Medical)', 'intermediate', 2, 10],
+        ['FSC Pre Eng', 'Fsc(Pre-Engineering)', 'intermediate', 2, 20],
+        ['ICS Phy', 'Ics(Physics)', 'intermediate', 2, 30],
+        ['ICS Stats', 'Ics(Stats)', 'intermediate', 2, 40],
+        ['FA IT', 'FA(IT)', 'intermediate', 2, 50],
+        ['I.Com', 'I.Com', 'intermediate', 2, 60],
+      ];
+      await db.batch(defaults.map(([name, label, kind, levels, sortOrder]) => ({
+        sql: `INSERT OR IGNORE INTO programs (id, branchId, name, label, kind, levels, sortOrder) VALUES (?, NULL, ?, ?, ?, ?, ?)`,
+        args: [`PROG-${name.replace(/[^a-z0-9]/gi, '').toUpperCase()}`, name, label, kind, levels, sortOrder],
+      })));
+    } catch {
+      // best-effort — the UI falls back to the built-in catalog if empty.
     }
 
     // ── Step 5: legacy data cleanup (single batch) ──

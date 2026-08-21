@@ -105,6 +105,8 @@ import {
   HierarchyBreadcrumb,
   DEPARTMENTS,
   deptLabel,
+  usePrograms,
+  LevelToggle,
 } from './shared/concordia-hierarchy';
 import {
   SimpleBarChart,
@@ -782,6 +784,7 @@ function NewEnrollmentView({
   onCreated: () => void;
   onLocalUpsert: (s: any) => void;
 }) {
+  const progs = usePrograms(user?.branchId);
   const [form, setForm] = useState<EnrollForm>(emptyForm);
   const [classes, setClasses] = useState<any[]>([]);
   const [reference, setReference] = useState<{ sections: string[] }>({ sections: [] });
@@ -1371,9 +1374,9 @@ function NewEnrollmentView({
                   <SelectValue placeholder="Select program" />
                 </SelectTrigger>
                 <SelectContent>
-                  {PROGRAMS.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {deptLabel(p)}
+                  {progs.programs.map((p) => (
+                    <SelectItem key={p.name} value={p.name}>
+                      {p.label}{p.kind === 'adp' ? ' · ADP' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1556,6 +1559,7 @@ export function StudentRecordsView({
   onRefresh: () => void;
   onLocalUpsert: (s: any) => void;
 }) {
+  const progs = usePrograms(user?.branchId);
   const [search, setSearch] = useState('');
   const [drill, setDrill] = useNavState<Drill>('admissions-students', { dept: null, part: '1', cls: null, section: null });
   const [editing, setEditing] = useState<any | null>(null);
@@ -1829,15 +1833,15 @@ export function StudentRecordsView({
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h2 className="text-sm font-semibold text-gray-900">
-                {deptLabel(drill.dept)} · Part {drill.part} — {classesInDept.length} Section{classesInDept.length === 1 ? '' : 's'}
+                {progs.labelOf(drill.dept)} · {progs.levelLabel(drill.dept, drill.part)} — {classesInDept.length} Section{classesInDept.length === 1 ? '' : 's'}
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Pick Part 1 / Part 2, then choose a section to view its students.
+                {progs.kindOf(drill.dept) === 'adp' ? 'Pick a semester,' : 'Pick Part 1 / Part 2,'} then choose a section to view its students.
               </p>
             </div>
-            <PartToggle value={drill.part} onChange={(p) =>
+            <LevelToggle program={drill.dept} value={drill.part} onChange={(p) =>
               setDrill((d) => ({ ...d, part: p, cls: null, section: null }))
-            } />
+            } kind={progs.kindOf(drill.dept)} levels={progs.levelsOf(drill.dept)} />
           </div>
           {loading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -2984,6 +2988,7 @@ function EditStudentSheet({
   onClose: () => void;
   onSaved: (updated: any) => void;
 }) {
+  const progs = usePrograms(user?.branchId);
   const [form, setForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
 
@@ -2997,6 +3002,7 @@ function EditStudentSheet({
         address: student.address || '',
         prevResult: student.prevResult || '',
         program: student.program || '',
+        part: String(student.part || '1'),
         guardian: student.guardian || '',
         guardianPhone: student.guardianPhone || '',
         section: student.section || 'A',
@@ -3022,6 +3028,7 @@ function EditStudentSheet({
       address: form.address.trim(),
       prevResult: form.prevResult.trim(),
       program: form.program,
+      part: String(form.part || '1'),
       section: form.section,
     };
     try {
@@ -3109,10 +3116,20 @@ function EditStudentSheet({
                 <SelectValue placeholder="Select program" />
               </SelectTrigger>
               <SelectContent>
-                {PROGRAMS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {deptLabel(p)}
+                {progs.programs.map((p) => (
+                  <SelectItem key={p.name} value={p.name}>
+                    {p.label}{p.kind === 'adp' ? ' · ADP' : ''}
                   </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={progs.kindOf(form.program) === 'adp' ? 'Semester' : 'Part'}>
+            <Select value={String(form.part || '1')} onValueChange={(v) => set('part', v)}>
+              <SelectTrigger className={`${inputCls} w-full`}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {progs.levelValues(form.program).map((lv) => (
+                  <SelectItem key={lv} value={lv}>{progs.levelLabel(form.program, lv)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

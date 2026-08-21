@@ -430,7 +430,7 @@ export const api = {
   // Year-end promotion: move Part 1 students (program + fromSections) up to
   // Part 2 section `toSection`; optionally graduate (Pass Out) the outgoing
   // Part 2 students in that target section. Accountant / Admin only.
-  promoteStudents: async (body: { program: string; fromSections: string[]; toSection: string; graduateExisting?: boolean }) => {
+  promoteStudents: async (body: { program: string; fromSections: string[]; toSection?: string; fromLevel?: string; toLevel?: string; graduateExisting?: boolean }) => {
     const r = await request<{ success: boolean; promoted: number; graduated: number }>(
       'platform/students/promote', { method: 'POST', body: JSON.stringify(body) },
     );
@@ -527,6 +527,23 @@ export const api = {
   reference: () => cachedGet<{ classes: string[]; sections: string[]; subjects: string[]; programs: string[] }>('reference'),
   // classes & courses
   getClasses: (branchId?: string) => cachedGet<any[]>(branchId ? `classes?branchId=${branchId}` : 'classes'),
+  // ── Programs catalog (Intermediate / ADP) ──
+  getPrograms: (branchId?: string) => cachedGet<any[]>(branchId ? `programs?branchId=${branchId}` : 'programs'),
+  createProgram: async (body: { name: string; label?: string; kind: 'intermediate' | 'adp'; levels: number; description?: string }) => {
+    const r = await request<any>('programs', { method: 'POST', body: JSON.stringify(body) });
+    invalidateCache();
+    return r;
+  },
+  updateProgram: async (id: string, body: Partial<{ label: string; kind: 'intermediate' | 'adp'; levels: number; description: string }>) => {
+    const r = await request<any>(`programs/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    invalidateCache();
+    return r;
+  },
+  deleteProgram: async (id: string, force?: boolean) => {
+    const r = await request<any>(`programs/${id}${force ? '?force=1' : ''}`, { method: 'DELETE' });
+    invalidateCache();
+    return r;
+  },
   // `program` and `part` are optional — pre-existing callers that omit them
   // still work (the backend defaults them to NULL / '1'). New Academic
   // Office flows pass program + part to drive the department hierarchy.

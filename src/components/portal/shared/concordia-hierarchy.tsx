@@ -19,6 +19,8 @@
 import { motion } from 'framer-motion';
 import { ChevronRight, GraduationCap, Layers, Users, BookOpen, FlaskConical, Calculator, FileText, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '@/lib/api';
 
 // The canonical 6-department catalog for Concordia College.
 // NOTE: these are the STORED (canonical) values used across the DB and API.
@@ -52,6 +54,89 @@ export const DEPT_LABELS: Record<string, string> = {
 export function deptLabel(canonical?: string | null): string {
   if (!canonical) return '';
   return DEPT_LABELS[canonical] || canonical;
+}
+
+// ─────────────────────────────────────────────────────────────
+// DYNAMIC PROGRAMS — a program can be 'intermediate' (Part 1..N, usually 2) or
+// 'adp' (Semester 1..N, configurable). The 6 built-ins are intermediate/2.
+// usePrograms() loads the live catalog (built-ins + custom) and exposes helpers
+// so the whole UI can render Part vs Semester and the right number of levels.
+// A student's level is stored in the existing users.part field ('1'..'N').
+// ─────────────────────────────────────────────────────────────
+export type ProgramKind = 'intermediate' | 'adp';
+export type Program = {
+  id: string;
+  name: string;         // canonical (matches users.class / classes.program)
+  label: string;        // display label
+  kind: ProgramKind;
+  levels: number;       // number of parts/semesters
+  description?: string;
+};
+
+// Fallback catalog used before the API responds (and if it ever fails).
+export const BUILTIN_PROGRAMS: Program[] = DEPARTMENTS.map((name) => ({
+  id: `PROG-${name}`, name, label: DEPT_LABELS[name] || name,
+  kind: 'intermediate' as ProgramKind, levels: 2, description: DEPT_META[name]?.desc,
+}));
+
+function normalizeProgram(r: any): Program {
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    label: String(r.label || r.name),
+    kind: r.kind === 'adp' ? 'adp' : 'intermediate',
+    levels: Math.max(1, Number(r.levels) || 2),
+    description: r.description || undefined,
+  };
+}
+
+export type ProgramsApi = {
+  programs: Program[];
+  loading: boolean;
+  reload: () => void;
+  byName: Map<string, Program>;
+  labelOf: (name?: string | null) => string;
+  kindOf: (name?: string | null) => ProgramKind;
+  levelsOf: (name?: string | null) => number;
+  /** '1' → 'Part 1' (intermediate) or 'Semester 1' (adp). */
+  levelLabel: (name: string | null | undefined, n: string | number) => string;
+  /** '1' → 'Part 1' / 'Sem 1'. */
+  levelShort: (name: string | null | undefined, n: string | number) => string;
+  /** ['1','2',…] for the program's number of levels. */
+  levelValues: (name?: string | null) => string[];
+};
+
+/** Load the live programs catalog + level helpers. Falls back to built-ins. */
+export function usePrograms(branchId?: string): ProgramsApi {
+  const [programs, setPrograms] = useState<Program[]>(BUILTIN_PROGRAMS);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    api.getPrograms(branchId)
+      .then((rows: any[]) => {
+        if (cancel) return;
+        const list = Array.isArray(rows) ? rows.map(normalizeProgram) : [];
+        if (list.length) setPrograms(list);
+      })
+      .catch(() => { /* keep built-ins */ })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [branchId, tick]);
+
+  const byName = useMemo(() => new Map(programs.map((p) => [p.name, p])), [programs]);
+  const kindOf = (name?: string | null): ProgramKind => (name && byName.get(name)?.kind) || 'intermediate';
+  const levelsOf = (name?: string | null): number => (name && byName.get(name)?.levels) || 2;
+  const labelOf = (name?: string | null): string => (name && byName.get(name)?.label) || DEPT_LABELS[name || ''] || (name || '');
+  const levelLabel = (name: string | null | undefined, n: string | number) =>
+    `${kindOf(name) === 'adp' ? 'Semester' : 'Part'} ${n}`;
+  const levelShort = (name: string | null | undefined, n: string | number) =>
+    `${kindOf(name) === 'adp' ? 'Sem' : 'Part'} ${n}`;
+  const levelValues = (name?: string | null) => Array.from({ length: levelsOf(name) }, (_, i) => String(i + 1));
+
+  return { programs, loading, reload: () => setTick((t) => t + 1), byName, labelOf, kindOf, levelsOf, levelLabel, levelShort, levelValues };
 }
 
 // ── Program auto-detection (for Excel import) ──
@@ -122,39 +207,49 @@ export function HierarchyBreadcrumb(props: {
   );
 }
 
-// ── Department Card Grid ──
+// ── Department / Program Card Grid ──
+// Dynamic: renders the live programs catalog (built-ins + custom ADP etc.).
+// Pass `programs` to control the list, else it loads via usePrograms().
 export function DeptCardGrid(props: {
   onSelect: (dept: string) => void;
   studentCounts?: Record<string, number>;
+  programs?: Program[];
 }) {
   const { onSelect, studentCounts } = props;
+  const hook = usePrograms();
+  const programs = props.programs || hook.programs;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {DEPARTMENTS.map((dept, i) => {
-        const meta = DEPT_META[dept];
-        const Icon = meta?.icon || GraduationCap;
-        const count = studentCounts?.[dept] ?? 0;
+      {programs.map((prog, i) => {
+        const meta = DEPT_META[prog.name];
+        const Icon = meta?.icon || (prog.kind === 'adp' ? GraduationCap : BookOpen);
+        const count = studentCounts?.[prog.name] ?? 0;
         return (
           <motion.button
-            key={dept}
+            key={prog.name}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            onClick={() => onSelect(dept)}
-            className={`group relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br ${meta?.gradient || 'from-primary/10 to-primary/5'} p-5 text-left transition-all hover:shadow-lg hover:border-primary/40 hover:-translate-y-0.5`}
+            transition={{ delay: Math.min(i, 8) * 0.05 }}
+            onClick={() => onSelect(prog.name)}
+            className={`group relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br ${meta?.gradient || (prog.kind === 'adp' ? 'from-indigo-500/20 to-indigo-600/10' : 'from-primary/10 to-primary/5')} p-5 text-left transition-all hover:shadow-lg hover:border-primary/40 hover:-translate-y-0.5`}
           >
             <div className="flex items-start justify-between mb-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background/80 backdrop-blur-sm border border-border/50 shadow-sm">
                 <Icon className="h-6 w-6 text-primary" />
               </div>
-              {count > 0 && (
-                <span className="text-xs font-bold px-2 py-1 rounded-full bg-background/80 backdrop-blur-sm border border-border/50">
-                  {count} students
+              <div className="flex flex-col items-end gap-1">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${prog.kind === 'adp' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-background/80 border-border/50 text-muted-foreground'}`}>
+                  {prog.kind === 'adp' ? `ADP · ${prog.levels} Sem` : `Part 1–${prog.levels}`}
                 </span>
-              )}
+                {count > 0 && (
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm border border-border/50">
+                    {count} students
+                  </span>
+                )}
+              </div>
             </div>
-            <h3 className="text-base font-bold text-foreground mb-1">{deptLabel(dept)}</h3>
-            <p className="text-xs text-muted-foreground line-clamp-2">{meta?.desc || ''}</p>
+            <h3 className="text-base font-bold text-foreground mb-1">{prog.label}</h3>
+            <p className="text-xs text-muted-foreground line-clamp-2">{prog.description || meta?.desc || ''}</p>
             <div className="mt-3 flex items-center gap-1 text-xs font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity">
               Open
               <ChevronRight className="h-3.5 w-3.5" />
@@ -214,6 +309,66 @@ export function PartToggle(props: {
             {active && (
               <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-primary/20" />
             )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Level Toggle (program-type aware: Part 1..N or Semester 1..N) ──
+// Drop-in replacement for PartToggle across the app. For an Intermediate
+// program it shows Part 1 / Part 2; for an ADP program it shows Semester 1..N
+// (N from the program's `levels`). Falls back to Part 1/2 while the catalog
+// loads or when `program` is unknown.
+export function LevelToggle(props: {
+  program?: string | null;
+  value: string;
+  onChange: (level: string) => void;
+  /** Provide to avoid a second catalog fetch (e.g. from a parent usePrograms). */
+  kind?: ProgramKind;
+  levels?: number;
+}) {
+  const { program, value, onChange } = props;
+  const hook = usePrograms();
+  const kind = props.kind ?? hook.kindOf(program);
+  const levels = props.levels ?? hook.levelsOf(program);
+  const isAdp = kind === 'adp';
+  const values = Array.from({ length: Math.max(1, levels) }, (_, i) => String(i + 1));
+  const yearWord = (n: number) => {
+    const map: Record<number, string> = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th', 5: '5th', 6: '6th', 7: '7th', 8: '8th' };
+    return map[n] || `${n}th`;
+  };
+
+  return (
+    <div className="inline-flex items-stretch gap-1.5 p-1.5 rounded-2xl bg-muted/60 border border-border/60 shadow-sm flex-wrap">
+      {values.map((v) => {
+        const n = Number(v);
+        const active = value === v;
+        const Icon = isAdp ? Layers : (n === 1 ? BookOpen : GraduationCap);
+        return (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onChange(v)}
+            className={`group relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-left transition-all duration-200 overflow-hidden ${
+              active
+                ? 'bg-gradient-to-br from-primary to-primary/85 text-primary-foreground shadow-md scale-[1.02]'
+                : 'text-muted-foreground hover:text-foreground hover:bg-background/70'
+            }`}
+          >
+            <span className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 transition-colors ${
+              active ? 'bg-white/20 backdrop-blur-sm border border-white/25' : 'bg-background/80 border border-border/60 group-hover:border-primary/30'
+            }`}>
+              <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-muted-foreground group-hover:text-primary'}`} />
+            </span>
+            <span className="flex flex-col leading-tight">
+              <span className="text-sm font-bold tracking-tight">{isAdp ? `Semester ${v}` : `Part ${v}`}</span>
+              <span className={`text-[10px] font-medium ${active ? 'text-white/80' : 'text-muted-foreground/80'}`}>
+                {isAdp ? `Sem ${v}` : `${yearWord(n)} Year`}
+              </span>
+            </span>
+            {active && <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-primary/20" />}
           </button>
         );
       })}
