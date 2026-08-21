@@ -249,6 +249,15 @@ const MIGRATION_STATEMENTS: string[] = [
   // marked "Passed Out" (status='Graduated', part='Passed') and stamped here so
   // their records are preserved as alumni without cluttering active rosters.
   `ALTER TABLE users ADD COLUMN graduatedAt TEXT`,
+  // Late-payment fine on an installment. `fine` = the fine decided for THIS
+  // installment (after the accountant edits/forgives it); `finePaid` = 1 when
+  // it was collected with this installment's payment; `carriedFine` = a fine
+  // carried INTO this installment from a previous overdue one (its amount was
+  // increased by that much). Lets the accountant collect / carry-forward /
+  // waive a fine when marking an overdue installment paid.
+  `ALTER TABLE fee_invoices ADD COLUMN fine REAL DEFAULT 0`,
+  `ALTER TABLE fee_invoices ADD COLUMN finePaid INTEGER DEFAULT 0`,
+  `ALTER TABLE fee_invoices ADD COLUMN carriedFine REAL DEFAULT 0`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===

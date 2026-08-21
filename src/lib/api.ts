@@ -629,8 +629,8 @@ export const api = {
     invalidateCache();
     return r;
   },
-  markInvoicePaid: async (id: string, paidAmount?: number, paymentMethod?: string) => {
-    const r = await request<any>(`fee-invoices/${id}/pay`, { method: 'PATCH', body: JSON.stringify({ paidAmount, paymentMethod }) });
+  markInvoicePaid: async (id: string, paidAmount?: number, paymentMethod?: string, fineOpts?: { fine?: number; finePaid?: boolean; carryFineToNext?: boolean }) => {
+    const r = await request<any>(`fee-invoices/${id}/pay`, { method: 'PATCH', body: JSON.stringify({ paidAmount, paymentMethod, ...(fineOpts || {}) }) });
     invalidateCache();
     return r;
   },
@@ -642,7 +642,7 @@ export const api = {
     return r;
   },
   // Edit an existing installment amount
-  editInstallment: async (installmentId: string, updates: { amount?: number; dueDate?: string }) => {
+  editInstallment: async (installmentId: string, updates: { amount?: number; dueDate?: string; fine?: number }) => {
     const r = await request<any>(`fee-invoices/${installmentId}`, { method: 'PATCH', body: JSON.stringify(updates) });
     invalidateCache();
     return r;

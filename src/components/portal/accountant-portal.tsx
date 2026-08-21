@@ -2072,6 +2072,80 @@ function OverviewView({
 
 type InstallmentRow = { id: string; amount: string; due: string };
 
+// Dialog shown when marking an OVERDUE installment paid. The accountant sets
+// the fine (editable — 0 = forgive), says whether the student paid it now, and
+// if not, whether to carry it forward to the next installment.
+function MarkPaidFineDialog({ inv, studentName, busy, onClose, onConfirm }: {
+  inv: any | null;
+  studentName?: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (opts: { fine: number; finePaid: boolean; carryFineToNext: boolean }) => void;
+}) {
+  const DEFAULT_FINE = 200; // suggested default; accountant can change or zero it
+  const [fine, setFine] = useState(String(DEFAULT_FINE));
+  const [choice, setChoice] = useState<'paid' | 'carry' | 'waive'>('paid');
+
+  useEffect(() => {
+    if (inv) { setFine(String(inv.fine != null && Number(inv.fine) > 0 ? inv.fine : DEFAULT_FINE)); setChoice('paid'); }
+  }, [inv]);
+
+  if (!inv) return null;
+  const instNo = String(inv.challanNo || '').match(/-(\d+)\s*$/)?.[1] || '';
+  const fineNum = Math.max(0, Number(fine) || 0);
+  const effectiveFine = choice === 'waive' ? 0 : fineNum;
+
+  const confirm = () => onConfirm({
+    fine: effectiveFine,
+    finePaid: choice === 'paid' && effectiveFine > 0,
+    carryFineToNext: choice === 'carry' && effectiveFine > 0,
+  });
+
+  return (
+    <Dialog open={!!inv} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-rose-500" /> Overdue — collect fine?</DialogTitle>
+          <DialogDescription>
+            Installment {instNo} for {studentName || 'this student'} is past its due date ({formatDate(inv.dueDate)}). Set the late fine, then choose how it&apos;s handled.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs text-gray-500">Fine amount (Rs)</Label>
+            <Input type="number" min={0} value={fine} onChange={(e) => setFine(e.target.value)} className={cn(inputCls, 'w-40')} disabled={choice === 'waive'} />
+            <p className="text-[11px] text-gray-400 mt-1">Edit freely — set to 0 or choose &ldquo;Forgive&rdquo; to waive it.</p>
+          </div>
+          <div className="space-y-2">
+            {([
+              ['paid', `Student paid the fine now (Rs ${fineNum.toLocaleString()} collected with this installment)`],
+              ['carry', `Not paid — carry Rs ${fineNum.toLocaleString()} to the next installment`],
+              ['waive', 'Forgive the fine (no charge)'],
+            ] as const).map(([val, label]) => (
+              <label key={val} className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer', choice === val ? 'border-[#F26522] bg-orange-50' : 'border-gray-200')}>
+                <input type="radio" name="finechoice" checked={choice === val} onChange={() => setChoice(val)} className="mt-0.5 accent-[#F26522]" />
+                <span className="text-sm text-gray-700">{label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="rounded-lg bg-gray-50 border border-gray-100 p-3 text-xs text-gray-600">
+            Installment amount <b>{fmtMoney(Number(inv.amount || 0))}</b>
+            {choice === 'paid' && effectiveFine > 0 && <> · fine <b>{fmtMoney(effectiveFine)}</b> · total collected <b>{fmtMoney(Number(inv.amount || 0) + effectiveFine)}</b></>}
+            {choice === 'carry' && effectiveFine > 0 && <> · <b>{fmtMoney(effectiveFine)}</b> fine added to next installment</>}
+            {choice === 'waive' && <> · fine waived</>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={confirm} disabled={busy} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+            {busy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />} Mark Paid
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function FeeInstallmentsView({
   user,
   students,
@@ -2126,6 +2200,11 @@ function FeeInstallmentsView({
   const [editingInstallment, setEditingInstallment] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [manualPlanMode, setManualPlanMode] = useState(false);
+  // The installment currently being marked paid via the fine dialog (overdue).
+  const [payFineInv, setPayFineInv] = useState<any | null>(null);
+  // Editing the fine amount inline on a row (installmentId being fine-edited).
+  const [editingFine, setEditingFine] = useState<string | null>(null);
+  const [fineAmountInput, setFineAmountInput] = useState('');
 
   // Delete student function
   const deleteStudent = async () => {
@@ -2687,10 +2766,25 @@ function FeeInstallmentsView({
   };
 
   // ── Mark an invoice paid ──
-  const markPaid = async (inv: any) => {
+  // Is this unpaid installment past its due date (as of today)?
+  const isOverdue = (inv: any) => {
+    if ((inv.status || '').toLowerCase() === 'paid' || !inv.dueDate) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return String(inv.dueDate).slice(0, 10) < today;
+  };
+
+  // Entry point for the Mark Paid button. Overdue installments open the fine
+  // dialog first; on-time ones are paid directly with no fine.
+  const markPaid = (inv: any) => {
+    if (isOverdue(inv)) { setPayFineInv(inv); return; }
+    doMarkPaid(inv, { fine: 0, finePaid: false, carryFineToNext: false });
+  };
+
+  // Actually record the payment (with optional fine handling).
+  const doMarkPaid = async (inv: any, fineOpts: { fine: number; finePaid: boolean; carryFineToNext: boolean }) => {
     setMarkingId(inv.id);
     try {
-      const updated = await api.markInvoicePaid(inv.id, Number(inv.amount), 'Cash');
+      const updated = await api.markInvoicePaid(inv.id, Number(inv.amount), 'Cash', fineOpts);
       onInvoiceUpdate({
         ...inv,
         ...updated,
@@ -2698,10 +2792,18 @@ function FeeInstallmentsView({
         paidAmount: Number(inv.amount),
         paidAt: new Date().toISOString(),
         paymentMethod: 'Cash',
+        fine: fineOpts.fine,
+        finePaid: fineOpts.finePaid,
       });
+      // If a fine was carried forward, refresh so the next installment shows its
+      // bumped amount.
+      if (updated?.carriedTo) onRefresh();
+      const fineNote = fineOpts.fine > 0
+        ? (fineOpts.finePaid ? ` (+ ${fmtMoney(fineOpts.fine)} fine)` : (fineOpts.carryFineToNext ? ` · ${fmtMoney(fineOpts.fine)} fine carried forward` : ''))
+        : '';
       toast({
         title: 'Marked as paid',
-        description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}`,
+        description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}${fineNote}`,
       });
       // Surface the login after payment. If the student has no real login yet,
       // the SERVER generates an easy name-based password (e.g. "Azan@4821"),
@@ -2731,6 +2833,19 @@ function FeeInstallmentsView({
       });
     } finally {
       setMarkingId(null);
+    }
+  };
+
+  // Edit / forgive the fine recorded on an installment (works paid or unpaid).
+  const saveFineEdit = async (inv: any) => {
+    const amt = Math.max(0, Number(fineAmountInput) || 0);
+    try {
+      await api.editInstallment(inv.id, { fine: amt });
+      onInvoiceUpdate({ ...inv, fine: amt });
+      setEditingFine(null); setFineAmountInput('');
+      toast({ title: amt === 0 ? 'Fine forgiven' : 'Fine updated', description: `${inv.studentName || selected?.name} — ${fmtMoney(amt)}` });
+    } catch (e: any) {
+      toast({ title: 'Could not update fine', description: e?.message || 'Try again.', variant: 'destructive' });
     }
   };
 
@@ -3263,6 +3378,25 @@ function FeeInstallmentsView({
                             {inv.challanNo || String(inv.id || '').slice(0, 12)}
                             {inv.paidAt && ` · Paid ${formatDate(inv.paidAt)}`}
                           </p>
+                          {/* Fine + overdue indicators */}
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            {isOverdue(inv) && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200">Overdue</span>}
+                            {Number(inv.carriedFine) > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">incl. {fmtMoney(Number(inv.carriedFine))} carried fine</span>}
+                            {editingFine === inv.id ? (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="text-[10px] text-gray-500">Fine Rs</span>
+                                <Input type="number" min={0} value={fineAmountInput} onChange={(e) => setFineAmountInput(e.target.value)} className="h-6 w-20 text-xs" autoFocus />
+                                <Button size="sm" className="h-6 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => saveFineEdit(inv)}>✓</Button>
+                                <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => { setEditingFine(null); setFineAmountInput(''); }}>✕</Button>
+                              </span>
+                            ) : Number(inv.fine) > 0 ? (
+                              <button onClick={() => { setEditingFine(inv.id); setFineAmountInput(String(inv.fine)); }}
+                                className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1',
+                                  inv.finePaid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100')}>
+                                Fine {fmtMoney(Number(inv.fine))} {inv.finePaid ? '· paid' : '· due'} <Pencil className="h-2.5 w-2.5" />
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="text-right shrink-0">
                           {editingInstallment === inv.id ? (
@@ -3360,6 +3494,15 @@ function FeeInstallmentsView({
                 </div>
               )}
             </div>
+
+            {/* Overdue → fine dialog when marking an installment paid */}
+            <MarkPaidFineDialog
+              inv={payFineInv}
+              studentName={selected?.name}
+              busy={markingId === payFineInv?.id}
+              onClose={() => setPayFineInv(null)}
+              onConfirm={async (opts) => { const v = payFineInv; setPayFineInv(null); if (v) await doMarkPaid(v, opts); }}
+            />
 
             {/* Login credentials popup (with student-record PDF download) */}
             <Dialog open={!!generatedLogin} onOpenChange={(o) => { if (!o) setGeneratedLogin(null); }}>

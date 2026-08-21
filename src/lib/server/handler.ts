@@ -3801,33 +3801,63 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const user = await requireAuth(req);
       requireRole(user, 'branch-manager', 'institute-admin');
       const id = pathSegments[1];
-      const { paidAmount, paymentMethod } = body || {};
+      // fine        = the fine decided for THIS overdue installment (0 = waived).
+      // finePaid    = true if the student paid that fine now (with the payment).
+      // carryFineToNext = true if the unpaid fine should be ADDED to the next
+      //                   unpaid installment instead of collected now.
+      const { paidAmount, paymentMethod, fine, finePaid, carryFineToNext } = body || {};
       const inv = await db.execute({ sql: 'SELECT * FROM fee_invoices WHERE id = ?', args: [id] });
       if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
       const invoice = inv.rows[0] as any;
       const amount = paidAmount || invoice.amount;
+      const fineAmt = Number(fine) > 0 ? Number(fine) : 0;
+      const finePaidFlag = fineAmt > 0 && finePaid === true ? 1 : 0;
+
       await db.execute({
-        sql: 'UPDATE fee_invoices SET status = ?, paidDate = ?, paidAmount = ?, paymentMethod = ? WHERE id = ?',
-        args: ['Paid', new Date().toISOString().slice(0, 10), amount, paymentMethod || 'Cash', id],
+        sql: 'UPDATE fee_invoices SET status = ?, paidDate = ?, paidAmount = ?, paymentMethod = ?, fine = ?, finePaid = ? WHERE id = ?',
+        args: ['Paid', new Date().toISOString().slice(0, 10), amount, paymentMethod || 'Cash', fineAmt, finePaidFlag, id],
       });
 
-      // v4.3.0: ONLY notify the student whose fee was marked paid. No staff
-      // spam — the user explicitly asked that fee-paid notifications go ONLY
-      // to the specific student they're related to.
+      // Carry an UNPAID fine forward to the student's next unpaid installment:
+      // bump its amount and record how much came from the carried fine.
+      let carriedTo: string | null = null;
+      if (fineAmt > 0 && !finePaidFlag && carryFineToNext === true && invoice.studentId) {
+        const seqOf = (challan: string) => { const m = String(challan || '').match(/-(\d+)\s*$/); return m ? parseInt(m[1], 10) : 9999; };
+        const thisSeq = seqOf(invoice.challanNo);
+        const others = await db.execute({
+          sql: `SELECT * FROM fee_invoices WHERE studentId = ? AND type = 'Installment' AND LOWER(status) != 'paid' AND id != ?`,
+          args: [invoice.studentId, id],
+        });
+        // Pick the next installment by sequence number after this one (else the earliest unpaid).
+        const candidates = (others.rows as any[])
+          .map((r) => ({ r, seq: seqOf(r.challanNo) }))
+          .sort((a, b) => a.seq - b.seq);
+        const next = candidates.find((c) => c.seq > thisSeq)?.r || candidates[0]?.r;
+        if (next) {
+          await db.execute({
+            sql: 'UPDATE fee_invoices SET amount = ?, carriedFine = COALESCE(carriedFine,0) + ? WHERE id = ?',
+            args: [Number(next.amount || 0) + fineAmt, fineAmt, next.id],
+          });
+          carriedTo = next.id;
+        }
+      }
+
+      // v4.3.0: ONLY notify the student whose fee was marked paid.
       try {
         const { sendPushToUser, fcmEnabled } = await import('./fcm');
         if (fcmEnabled() && invoice.studentId) {
+          const fineNote = finePaidFlag ? ` (incl. Rs ${fineAmt.toLocaleString()} fine)` : (carriedTo ? ` — Rs ${fineAmt.toLocaleString()} fine carried to your next installment` : '');
           await sendPushToUser(
             invoice.studentId,
             'fee-paid',
             `✅ Fee payment received`,
-            `Rs ${Number(amount).toLocaleString()} for ${invoice.month} ${invoice.year} has been marked Paid. Thank you!`,
+            `Rs ${Number(amount).toLocaleString()} for ${invoice.month} ${invoice.year} has been marked Paid${fineNote}. Thank you!`,
             { route: 'fees', invoiceId: id },
           );
         }
       } catch (e) { console.error('[fee-invoices/pay] push failed:', e); }
 
-      return NextResponse.json({ success: true, status: 'Paid' });
+      return NextResponse.json({ success: true, status: 'Paid', fine: fineAmt, finePaid: finePaidFlag === 1, carriedTo });
     }
 
     // Revert a Paid invoice back to Unpaid (correct a mistake). Clears the
@@ -3838,8 +3868,10 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const id = pathSegments[1];
       const inv = await db.execute({ sql: 'SELECT id FROM fee_invoices WHERE id = ?', args: [id] });
       if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+      // Also clear the fine flags for this installment (keeps the recorded fine
+      // amount so the accountant can see the history, but marks it uncollected).
       await db.execute({
-        sql: `UPDATE fee_invoices SET status = 'Unpaid', paidDate = NULL, paidAmount = 0, paymentMethod = NULL WHERE id = ?`,
+        sql: `UPDATE fee_invoices SET status = 'Unpaid', paidDate = NULL, paidAmount = 0, paymentMethod = NULL, finePaid = 0 WHERE id = ?`,
         args: [id],
       });
       return NextResponse.json({ success: true, status: 'Unpaid' });
@@ -3887,33 +3919,41 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const user = await requireAuth(req);
       requireRole(user, 'branch-manager', 'institute-admin');
       const id = pathSegments[1];
-      const { amount, dueDate } = body || {};
-      
+      const { amount, dueDate, fine } = body || {};
+
       // Check if invoice exists
       const inv = await db.execute({ sql: 'SELECT * FROM fee_invoices WHERE id = ?', args: [id] });
       if (inv.rows.length === 0) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
-      
+
       const invoice = inv.rows[0] as any;
-      
-      // Don't allow editing paid invoices
-      if ((invoice.status || '').toLowerCase() === 'paid') {
+
+      // Editing the FINE is allowed even on a paid invoice (forgive after the
+      // fact); amount/dueDate edits are still blocked once paid.
+      const editsFineOnly = fine !== undefined && amount === undefined && dueDate === undefined;
+      if ((invoice.status || '').toLowerCase() === 'paid' && !editsFineOnly) {
         return NextResponse.json({ error: 'Cannot edit paid invoices' }, { status: 400 });
       }
-      
+
       // Build update query dynamically
       const updates: string[] = [];
       const args: any[] = [];
-      
+
       if (amount !== undefined) {
         updates.push('amount = ?');
         args.push(amount);
       }
-      
+
       if (dueDate !== undefined) {
         updates.push('dueDate = ?');
         args.push(dueDate);
       }
-      
+
+      if (fine !== undefined) {
+        // Set/forgive the fine on this installment (0 = fully waived).
+        updates.push('fine = ?');
+        args.push(Number(fine) > 0 ? Number(fine) : 0);
+      }
+
       if (updates.length === 0) {
         return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
       }
