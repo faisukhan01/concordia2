@@ -2107,7 +2107,7 @@ function MarkPaidFineDialog({ inv, studentName, busy, onClose, onConfirm }: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-rose-500" /> Overdue — collect fine?</DialogTitle>
           <DialogDescription>
-            Installment {instNo} for {studentName || 'this student'} is past its due date ({formatDate(inv.dueDate)}). Set the late fine, then choose how it&apos;s handled.
+            Installment {instNo} for {studentName || 'this student'} is past its due date ({inv._dueLabel || formatDate(inv.dueDate) || '—'}). Set the late fine, then choose how it&apos;s handled.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -2766,17 +2766,41 @@ function FeeInstallmentsView({
   };
 
   // ── Mark an invoice paid ──
-  // Is this unpaid installment past its due date (as of today)?
+  // 1-based installment number from the challan (CH-INST-…-{n}).
+  const instSeqOf = (inv: any) => {
+    const m = String(inv.challanNo || '').match(/-(\d+)\s*$/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+
+  // Effective due date for an installment. Prefers the stored dueDate; when
+  // that's blank (many installments were created without one), it's derived the
+  // SAME way the challan shows it: base(createdAt of installment 1) + (n-1)*3
+  // months, then +5 days. Returns a Date or null.
+  const effectiveDue = (inv: any): Date | null => {
+    if (inv.dueDate) { const d = new Date(inv.dueDate); if (!isNaN(d.getTime())) return d; }
+    const base = studentInvoices[0]?.createdAt || inv.createdAt;
+    if (!base) return null;
+    const seq = instSeqOf(inv);
+    if (seq <= 0) return null;
+    const b = new Date(base);
+    if (isNaN(b.getTime())) return null;
+    const created = new Date(b.getFullYear(), b.getMonth() + (seq - 1) * 3, b.getDate());
+    return new Date(created.getFullYear(), created.getMonth(), created.getDate() + 5);
+  };
+
+  // Is this unpaid installment past its (effective) due date, as of today?
   const isOverdue = (inv: any) => {
-    if ((inv.status || '').toLowerCase() === 'paid' || !inv.dueDate) return false;
-    const today = new Date().toISOString().slice(0, 10);
-    return String(inv.dueDate).slice(0, 10) < today;
+    if ((inv.status || '').toLowerCase() === 'paid') return false;
+    const due = effectiveDue(inv);
+    if (!due) return false;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return due < today;
   };
 
   // Entry point for the Mark Paid button. Overdue installments open the fine
   // dialog first; on-time ones are paid directly with no fine.
   const markPaid = (inv: any) => {
-    if (isOverdue(inv)) { setPayFineInv(inv); return; }
+    if (isOverdue(inv)) { setPayFineInv({ ...inv, _dueLabel: effectiveDue(inv)?.toLocaleDateString('en-GB') || '' }); return; }
     doMarkPaid(inv, { fine: 0, finePaid: false, carryFineToNext: false });
   };
 
@@ -2805,11 +2829,11 @@ function FeeInstallmentsView({
         title: 'Marked as paid',
         description: `${inv.studentName || selected?.name} — ${fmtMoney(Number(inv.amount))}${fineNote}`,
       });
-      // Surface the login after payment. If the student has no real login yet,
-      // the SERVER generates an easy name-based password (e.g. "Azan@4821"),
-      // unique per student and unchangeable by them. If they already have one,
-      // fetch it so the accountant can still hand over / print the credentials.
-      if (selected) {
+      // Surface the login ONLY for the FIRST installment (that's when the login
+      // is issued) — or if the student still has no real login. Later
+      // installments just get the fine adjustment, no password popup.
+      const seq = instSeqOf(inv);
+      if (selected && (seq === 1 || !hasRealLogin(selected))) {
         try {
           if (!hasRealLogin(selected)) {
             const gen = await api.generateStudentLogin(selected.id, selected.rollNo || undefined);
@@ -3369,7 +3393,7 @@ function FeeInstallmentsView({
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm font-medium text-gray-900">
                               {isInstallment
-                                ? `Installment ${instNo || ''} — Due ${formatDate(inv.dueDate)}`
+                                ? `Installment ${instNo || ''} — Due ${formatDate(inv.dueDate) || effectiveDue(inv)?.toLocaleDateString('en-GB') || '—'}`
                                 : `${inv.type || 'Tuition'} — ${inv.month ? monthName(inv.month) : ''} ${inv.year || ''}`}
                             </p>
                             <StatusBadge status={inv.status} />
