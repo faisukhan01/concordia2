@@ -118,13 +118,15 @@ import {
   Zap,
   PieChart,
   RotateCcw,
+  X,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { savePdf, printPdf } from '@/lib/pdf-utils';
 import { buildConcordiaChallan, buildConcordiaChallanBook } from '@/lib/challan';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -1120,6 +1122,219 @@ export function AccountantPortal({ activeModule, user }: Props) {
 
 // ───────────────────────── 1. Overview / Dashboard ─────────────────────────
 
+// ───────────────────────── Promote Students (Part 1 → Part 2) ─────────────
+// Accountant / Admin year-end promotion. Multi-step:
+//   1. Pick a Program + its Part 1 section(s) to promote.
+//   2. Pick the target Part 2 section (existing) or create a new one.
+//   3. Confirm — shows exactly how many move up and how many current Part 2
+//      students of the target section will be marked Passed Out (kept as data).
+export function PromoteStudentsDialog({
+  open, onClose, students, branchId,
+}: {
+  open: boolean; onClose: () => void; students: any[]; branchId?: string;
+}) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [program, setProgram] = useState('');
+  const [fromSections, setFromSections] = useState<string[]>([]);
+  const [toSection, setToSection] = useState('');
+  const [newSection, setNewSection] = useState('');
+  const [creatingNew, setCreatingNew] = useState(false);
+  const [graduateExisting, setGraduateExisting] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ promoted: number; graduated: number } | null>(null);
+
+  const reset = () => {
+    setStep(1); setProgram(''); setFromSections([]); setToSection(''); setNewSection('');
+    setCreatingNew(false); setGraduateExisting(true); setResult(null);
+  };
+  const close = () => { reset(); onClose(); };
+  useEffect(() => { if (open) reset(); }, [open]);
+
+  // Active students only (exclude already-graduated / passed).
+  const active = useMemo(() => students.filter((s) => (s.status || 'Active') === 'Active' && (s.part === '1' || s.part === '2')), [students]);
+
+  const part1Sections = useMemo(() => {
+    if (!program) return [] as { section: string; count: number }[];
+    const m = new Map<string, number>();
+    for (const s of active) if (s.program === program && String(s.part || '1') === '1' && s.section) m.set(s.section, (m.get(s.section) || 0) + 1);
+    return [...m.entries()].map(([section, count]) => ({ section, count })).sort((a, b) => a.section.localeCompare(b.section));
+  }, [active, program]);
+
+  const part2Sections = useMemo(() => {
+    if (!program) return [] as { section: string; count: number }[];
+    const m = new Map<string, number>();
+    for (const s of active) if (s.program === program && String(s.part || '1') === '2' && s.section) m.set(s.section, (m.get(s.section) || 0) + 1);
+    return [...m.entries()].map(([section, count]) => ({ section, count })).sort((a, b) => a.section.localeCompare(b.section));
+  }, [active, program]);
+
+  const targetSection = (creatingNew ? newSection : toSection).trim().toUpperCase();
+  const promoteCount = useMemo(
+    () => active.filter((s) => s.program === program && String(s.part || '1') === '1' && fromSections.includes(s.section)).length,
+    [active, program, fromSections],
+  );
+  const graduateCount = useMemo(
+    () => (graduateExisting && targetSection)
+      ? active.filter((s) => s.program === program && String(s.part || '1') === '2' && s.section === targetSection).length
+      : 0,
+    [active, program, targetSection, graduateExisting],
+  );
+
+  const toggleFrom = (sec: string) =>
+    setFromSections((prev) => prev.includes(sec) ? prev.filter((x) => x !== sec) : [...prev, sec]);
+
+  const run = async () => {
+    if (!program || fromSections.length === 0 || !targetSection) return;
+    setBusy(true);
+    try {
+      const r = await api.promoteStudents({ program, fromSections, toSection: targetSection, graduateExisting });
+      setResult({ promoted: r.promoted, graduated: r.graduated });
+      toast({ title: 'Promotion complete', description: `${r.promoted} promoted · ${r.graduated} passed out.` });
+    } catch (e: any) {
+      toast({ title: 'Promotion failed', description: e?.message || 'Try again.', variant: 'destructive' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) close(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <GraduationCap className="h-5 w-5 text-[#F26522]" /> Promote Students — Part 1 → Part 2
+          </DialogTitle>
+          <DialogDescription>
+            Move a program&apos;s Part 1 section up to Part 2 for the new academic year. The outgoing Part 2 students are kept as <b>Passed Out</b> records.
+          </DialogDescription>
+        </DialogHeader>
+
+        {result ? (
+          <div className="py-6 text-center space-y-2">
+            <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+            <p className="text-lg font-bold text-gray-900">Done!</p>
+            <p className="text-sm text-gray-600">
+              <b>{result.promoted}</b> student{result.promoted === 1 ? '' : 's'} promoted to {deptLabel(program)} · Part 2 · Section {targetSection}.
+            </p>
+            {result.graduated > 0 && (
+              <p className="text-sm text-gray-600"><b>{result.graduated}</b> previous Part 2 student{result.graduated === 1 ? '' : 's'} marked Passed Out.</p>
+            )}
+            <DialogFooter className="pt-4"><Button onClick={close} className="bg-[#F26522] hover:bg-[#D4541E] text-white">Close</Button></DialogFooter>
+          </div>
+        ) : (
+          <>
+            {/* Step indicator */}
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className={cn('flex-1 h-1 rounded-full', step >= n ? 'bg-[#F26522]' : 'bg-gray-200')} />
+              ))}
+            </div>
+
+            {/* Step 1 — program + Part 1 sections */}
+            {step === 1 && (
+              <div className="space-y-4 py-2">
+                <div>
+                  <Label className="text-xs text-gray-500">Program</Label>
+                  <Select value={program} onValueChange={(v) => { setProgram(v); setFromSections([]); setToSection(''); setCreatingNew(false); }}>
+                    <SelectTrigger><SelectValue placeholder="Select a program" /></SelectTrigger>
+                    <SelectContent>{DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{deptLabel(d)}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                {program && (
+                  <div>
+                    <Label className="text-xs text-gray-500">Part 1 section(s) to promote</Label>
+                    {part1Sections.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-3">No Part 1 students in {deptLabel(program)}.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 mt-1">
+                        {part1Sections.map(({ section, count }) => (
+                          <button key={section} onClick={() => toggleFrom(section)}
+                            className={cn('flex items-center justify-between rounded-lg border px-3 py-2 text-sm',
+                              fromSections.includes(section) ? 'border-[#F26522] bg-orange-50 text-[#1A1A1A]' : 'border-gray-200 bg-white text-gray-600')}>
+                            <span className="font-medium">Section {section}</span>
+                            <span className="text-xs text-gray-400">{count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <DialogFooter>
+                  <Button variant="outline" onClick={close}>Cancel</Button>
+                  <Button disabled={!program || fromSections.length === 0} onClick={() => setStep(2)} className="bg-[#F26522] hover:bg-[#D4541E] text-white">Next</Button>
+                </DialogFooter>
+              </div>
+            )}
+
+            {/* Step 2 — target Part 2 section */}
+            {step === 2 && (
+              <div className="space-y-4 py-2">
+                <p className="text-sm text-gray-600">
+                  Promoting <b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} from {deptLabel(program)} · Part 1 · {fromSections.join(', ')}.
+                </p>
+                <div>
+                  <Label className="text-xs text-gray-500">Move them into Part 2 section</Label>
+                  {!creatingNew ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 mt-1">
+                        {part2Sections.map(({ section, count }) => (
+                          <button key={section} onClick={() => setToSection(section)}
+                            className={cn('flex items-center justify-between rounded-lg border px-3 py-2 text-sm',
+                              toSection === section ? 'border-[#F26522] bg-orange-50' : 'border-gray-200 bg-white text-gray-600')}>
+                            <span className="font-medium">Section {section}</span>
+                            <span className="text-xs text-gray-400">{count} now</span>
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => { setCreatingNew(true); setToSection(''); }} className="mt-2 text-sm text-[#F26522] hover:underline inline-flex items-center gap-1">
+                        <Plus className="h-3.5 w-3.5" /> Create a new section
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 mt-1">
+                      <Input value={newSection} onChange={(e) => setNewSection(e.target.value.toUpperCase())} placeholder="e.g. MK" className="w-32" maxLength={4} />
+                      <button onClick={() => { setCreatingNew(false); setNewSection(''); }} className="text-sm text-gray-400 hover:text-gray-600">Cancel</button>
+                    </div>
+                  )}
+                </div>
+                {targetSection && part2Sections.some((s) => s.section === targetSection) && (
+                  <label className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 p-3 cursor-pointer">
+                    <input type="checkbox" checked={graduateExisting} onChange={(e) => setGraduateExisting(e.target.checked)} className="h-4 w-4 mt-0.5 accent-[#F26522]" />
+                    <span className="text-xs text-gray-700">
+                      Mark the <b>{graduateCount}</b> current Part 2 · {targetSection} student{graduateCount === 1 ? '' : 's'} as <b>Passed Out</b> (their records are kept). Uncheck to merge instead.
+                    </span>
+                  </label>
+                )}
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+                  <Button disabled={!targetSection} onClick={() => setStep(3)} className="bg-[#F26522] hover:bg-[#D4541E] text-white">Review</Button>
+                </DialogFooter>
+              </div>
+            )}
+
+            {/* Step 3 — confirm */}
+            {step === 3 && (
+              <div className="space-y-4 py-2">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm space-y-2">
+                  <div className="flex items-center gap-2 text-gray-900 font-semibold"><ArrowRightLeft className="h-4 w-4 text-[#F26522]" /> Confirm promotion</div>
+                  <p className="text-gray-700"><b>{promoteCount}</b> student{promoteCount === 1 ? '' : 's'} · {deptLabel(program)} Part 1 ({fromSections.join(', ')}) → <b>Part 2 · Section {targetSection}</b>.</p>
+                  {graduateCount > 0
+                    ? <p className="text-gray-700"><b>{graduateCount}</b> current Part 2 · {targetSection} student{graduateCount === 1 ? '' : 's'} → <b>Passed Out</b> (kept as records, login disabled).</p>
+                    : <p className="text-gray-500">No current Part 2 · {targetSection} students will be graduated.</p>}
+                  <p className="text-[11px] text-gray-400">This changes live data for the new academic year. Promoted students keep their roll number, login and past fees.</p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setStep(2)} disabled={busy}>Back</Button>
+                  <Button onClick={run} disabled={busy} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+                    {busy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <GraduationCap className="h-4 w-4 mr-1.5" />} Promote now
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function OverviewView({
   user,
   students,
@@ -1257,12 +1472,24 @@ function OverviewView({
     return DEPARTMENTS.map((d) => ({ label: deptLabel(d), value: map[d] }));
   }, [students]);
 
+  const [promoteOpen, setPromoteOpen] = useState(false);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Welcome back, ${firstName}`}
         subtitle="Fee collection, challans, and student logins — all in one place."
+        action={
+          <Button
+            onClick={() => setPromoteOpen(true)}
+            className="bg-[#F26522] hover:bg-[#D4541E] text-white"
+          >
+            <GraduationCap className="h-4 w-4 mr-1.5" /> Promote Students
+          </Button>
+        }
       />
+      <PromoteStudentsDialog open={promoteOpen} onClose={() => setPromoteOpen(false)} students={students} branchId={user?.branchId} />
+
 
       {/* KPI cards — 2 stats + 2 quick-actions, in a 4-col responsive grid */}
       {loading ? (

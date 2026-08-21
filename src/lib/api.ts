@@ -427,6 +427,16 @@ export const api = {
     invalidateCache();
     return r;
   },
+  // Year-end promotion: move Part 1 students (program + fromSections) up to
+  // Part 2 section `toSection`; optionally graduate (Pass Out) the outgoing
+  // Part 2 students in that target section. Accountant / Admin only.
+  promoteStudents: async (body: { program: string; fromSections: string[]; toSection: string; graduateExisting?: boolean }) => {
+    const r = await request<{ success: boolean; promoted: number; graduated: number }>(
+      'platform/students/promote', { method: 'POST', body: JSON.stringify(body) },
+    );
+    invalidateCache();
+    return r;
+  },
   scopedStats: (instituteId?: string, branchId?: string) => {
     const q = new URLSearchParams();
     if (instituteId) q.set('instituteId', instituteId);

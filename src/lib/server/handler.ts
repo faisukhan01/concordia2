@@ -1458,6 +1458,82 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       });
     }
 
+    // ── Promote Students (year-end: Part 1 → Part 2) ──────────────────────────
+    // POST platform/students/promote   (Accountant / Admin only)
+    // Body: { program, fromSections: string[], toSection, graduateExisting?: bool }
+    //
+    // 1. (if graduateExisting) The OUTGOING Part 2 students currently in
+    //    (program, toSection) are marked Passed Out: status='Graduated',
+    //    part='Passed', graduatedAt=now. Their full record + fee history is
+    //    KEPT — they just leave the active roster.
+    // 2. The Part 1 students in (program, fromSections) move up: part='2',
+    //    section=toSection. Roll numbers, logins, and past fees are preserved.
+    // 3. A Part 2 class row for (program, toSection) is ensured.
+    // This is a live, year-changing operation — the UI shows an exact preview
+    // and confirmation before calling it.
+    if (method === 'POST' && path === 'platform/students/promote') {
+      const user = await requireAuth(req);
+      requireRole(user, 'accountant', 'admin', 'branch-manager', 'institute-admin', 'super-admin');
+      const program = String(body?.program || '').trim();
+      const fromSections: string[] = Array.isArray(body?.fromSections)
+        ? body.fromSections.map((s: any) => String(s).trim().toUpperCase()).filter(Boolean)
+        : [];
+      const toSection = String(body?.toSection || '').trim().toUpperCase();
+      const graduateExisting = body?.graduateExisting !== false; // default true
+      if (!program || fromSections.length === 0 || !toSection) {
+        return NextResponse.json({ error: 'program, fromSections and toSection are required' }, { status: 400 });
+      }
+      const brId = user.branchId;
+      const now = new Date().toISOString();
+
+      // 1) Graduate the outgoing Part 2 students in the target section.
+      let graduated = 0;
+      if (graduateExisting) {
+        const g = await db.execute({
+          sql: `UPDATE users SET status = 'Graduated', part = 'Passed', graduatedAt = ?
+                WHERE role = 'student' AND status = 'Active'
+                  AND class = ? AND COALESCE(part,'1') = '2' AND section = ?
+                  ${brId ? 'AND branchId = ?' : ''}`,
+          args: brId ? [now, program, toSection, brId] : [now, program, toSection],
+        });
+        graduated = Number(g.rowsAffected || 0);
+        // Their active sessions are void now.
+        await db.execute({
+          sql: `DELETE FROM sessions WHERE userId IN (
+                  SELECT id FROM users WHERE role='student' AND status='Graduated' AND class=? AND section=? AND graduatedAt=?
+                )`,
+          args: [program, toSection, now],
+        }).catch(() => {});
+      }
+
+      // 2) Ensure the Part 2 class row for the target section exists.
+      const clsEx = await db.execute({
+        sql: `SELECT id FROM classes WHERE branchId = ? AND name = ? AND section = ? AND COALESCE(part,'1') = '2'`,
+        args: [brId, program, toSection],
+      });
+      if (clsEx.rows.length === 0) {
+        await db.execute({
+          sql: `INSERT INTO classes (id, branchId, name, section, program, part) VALUES (?, ?, ?, ?, ?, '2')`,
+          args: [nextId('CLS'), brId, program, toSection, program],
+        });
+      }
+
+      // 3) Promote the Part 1 students of the chosen source sections → Part 2.
+      const placeholders = fromSections.map(() => '?').join(',');
+      const p = await db.execute({
+        sql: `UPDATE users SET part = '2', section = ?, class = ?
+              WHERE role = 'student' AND status = 'Active'
+                AND class = ? AND COALESCE(part,'1') = '1' AND section IN (${placeholders})
+                ${brId ? 'AND branchId = ?' : ''}`,
+        args: brId
+          ? [toSection, program, program, ...fromSections, brId]
+          : [toSection, program, program, ...fromSections],
+      });
+      const promoted = Number(p.rowsAffected || 0);
+
+      return NextResponse.json({ success: true, promoted, graduated, program, toSection, fromSections });
+    }
+
     // ── Bulk Generate Logins (Accountant / Academic / Admissions / Admin) ──
     // POST platform/students/bulk-generate-logins
     //

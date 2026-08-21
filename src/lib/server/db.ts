@@ -235,6 +235,10 @@ const MIGRATION_STATEMENTS: string[] = [
   // marks-entry for that subject is routed to (and limited to) that teacher.
   `ALTER TABLE date_sheet_entries ADD COLUMN teacherId TEXT`,
   `ALTER TABLE date_sheet_entries ADD COLUMN teacherName TEXT`,
+  // Year-end promotion: when Part 1 → Part 2, the outgoing Part 2 students are
+  // marked "Passed Out" (status='Graduated', part='Passed') and stamped here so
+  // their records are preserved as alumni without cluttering active rosters.
+  `ALTER TABLE users ADD COLUMN graduatedAt TEXT`,
 ];
 
 // === Data migration — backfill program+part on existing classes from name ===

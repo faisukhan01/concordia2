@@ -49,7 +49,8 @@ import {
 
 // Sub-portal components — the admin accesses every role's full portal.
 import { AdmissionsPortal } from './admissions-portal';
-import { AccountantPortal } from './accountant-portal';
+import { AccountantPortal, PromoteStudentsDialog } from './accountant-portal';
+import { Button } from '@/components/ui/button';
 import { AcademicPortal } from './academic-portal';
 import { useApp } from '@/lib/store';
 import { SimpleBarChart, SimplePieChart, ChartCard } from './shared/concordia-charts';
@@ -298,12 +299,20 @@ function AdminDashboard({ user, setActiveModule }: { user: any; setActiveModule:
     ].filter((d) => d.value > 0);
   }, [fees]);
 
+  const [promoteOpen, setPromoteOpen] = useState(false);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Welcome back, ${firstName}`}
         subtitle="Monitor everything happening across the whole institute and all portals."
+        action={
+          <Button onClick={() => setPromoteOpen(true)} className="bg-[#F26522] hover:bg-[#D4541E] text-white">
+            <GraduationCap className="h-4 w-4 mr-1.5" /> Promote Students
+          </Button>
+        }
       />
+      <PromoteStudentsDialog open={promoteOpen} onClose={() => setPromoteOpen(false)} students={students} branchId={user?.branchId} />
 
       {/* ── Live KPIs — no fake data, all from API ── */}
       {loading ? (
