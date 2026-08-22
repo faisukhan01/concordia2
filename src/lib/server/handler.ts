@@ -4323,21 +4323,19 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       if (!day || period === undefined) return NextResponse.json({ error: 'day and period required' }, { status: 400 });
       const brId = user.branchId;
 
-      // ─── Clash check #1: CLASS slot already taken ───
-      // The same class cannot have two lectures on the same day + period.
-      // Previously this silently overwrote the existing row — that hid
-      // mistakes. Now we error so the academic office sees the clash.
-      if (classId) {
-        const classClash = await db.execute({
-          sql: 'SELECT id, subject, teacherName FROM timetable WHERE branchId = ? AND classId = ? AND day = ? AND period = ?',
-          args: [brId, classId, day, period],
+      // ─── Clash check #1: DUPLICATE subject in the same slot ───
+      // A class CAN have multiple parallel subjects in one period (split /
+      // elective classes, e.g. Computer + Civics). We only block adding the
+      // exact SAME subject twice into the same day+period (a true duplicate).
+      if (classId && subject) {
+        const dupSubject = await db.execute({
+          sql: 'SELECT id FROM timetable WHERE branchId = ? AND classId = ? AND day = ? AND period = ? AND LOWER(subject) = LOWER(?)',
+          args: [brId, classId, day, period, subject],
         });
-        if (classClash.rows.length > 0) {
-          const c = classClash.rows[0] as any;
+        if (dupSubject.rows.length > 0) {
           const clsLabel = className ? `${className}${section ? '-' + section : ''}` : 'This class';
-          const detail = c.subject ? ` (${c.subject}${c.teacherName ? ' · ' + c.teacherName : ''})` : '';
           return NextResponse.json({
-            error: `${clsLabel} already has a lecture scheduled for ${day} Period ${period}${detail}. Delete that entry first if you want to change it.`,
+            error: `${clsLabel} already has "${subject}" at ${day} Period ${period}. Add a different subject to split the period.`,
           }, { status: 409 });
         }
       }

@@ -2052,12 +2052,16 @@ function StudentTimetable({ user }: { user: any }) {
                         </div>
                       </td>
                       {TIMETABLE_DAYS.map((day) => {
-                        const entry = byDay[day].find((e) => Number(e.period) === period);
+                        // A period can hold multiple parallel subjects (e.g.
+                        // Computer / Civics split classes) — show them all.
+                        const slotEntries = byDay[day].filter((e) => Number(e.period) === period);
                         const isToday = day === todayName;
                         return (
                           <td key={day} className="align-top px-1 pb-2">
-                            {entry ? (
-                              <TimetableCell entry={entry} isToday={isToday} />
+                            {slotEntries.length > 0 ? (
+                              <div className="space-y-1">
+                                {slotEntries.map((entry, i) => <TimetableCell key={entry.id || i} entry={entry} isToday={isToday} />)}
+                              </div>
                             ) : (
                               <div
                                 className={cn(

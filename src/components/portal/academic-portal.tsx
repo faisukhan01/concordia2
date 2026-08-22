@@ -1848,12 +1848,17 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
     if (!fTeacherId) { toast({ title: 'Teacher is required', description: 'Every period must have a teacher so it shows on their timetable.', variant: 'destructive' }); return; }
     const teacher = teachers.find((t) => t.id === fTeacherId) || null;
 
-    // Clash #1 — class slot taken (ignore the entry being edited).
-    const classClash = entries.find((e) => e.day === fDay && Number(e.period) === period && e.id !== editingId);
-    if (classClash) {
+    // A class CAN now have multiple parallel subjects in the same period (e.g.
+    // Computer / Civics split classes). We only block adding the SAME subject
+    // twice into the same slot (a true duplicate), not a different subject.
+    const dupSubject = entries.find((e) =>
+      e.day === fDay && Number(e.period) === period && e.id !== editingId &&
+      (e.subject || '').trim().toLowerCase() === fSubject.trim().toLowerCase(),
+    );
+    if (dupSubject) {
       toast({
-        title: '⚠ Clash: class slot taken',
-        description: `This class already has a lecture at Period ${period} on ${fDay} (${classClash.subject || 'a lecture'}${classClash.teacherName ? ` · ${classClash.teacherName}` : ''}). Delete that entry first to change it.`,
+        title: 'Already added',
+        description: `"${fSubject.trim()}" is already at Period ${period} on ${fDay} for this class. Add a different subject/teacher to split the period.`,
         variant: 'destructive',
       });
       return;
@@ -2182,7 +2187,8 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
             // ── Finalized weekly grid: periods (rows) × days (columns) ──
             (() => {
               const periods = Array.from(new Set(entries.map((e) => Number(e.period)))).sort((a, b) => a - b);
-              const cell = (day: string, p: number) => entries.find((e) => e.day === day && Number(e.period) === p);
+              const cellEntries = (day: string, p: number) => entries.filter((e) => e.day === day && Number(e.period) === p);
+              const openAdd = (d: string, p: number) => { setEditingId(null); resetForm(); setFDay(d); setFPeriod(String(p)); setShowForm(true); setView('builder'); };
               return (
                 <div className="overflow-x-auto -mx-2 px-2">
                   <table className="w-full border-collapse text-sm min-w-[720px]">
@@ -2199,23 +2205,32 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                         <tr key={p}>
                           <td className="sticky left-0 bg-white p-2 align-top text-xs font-bold text-gray-700 border-b border-gray-100">P{p}</td>
                           {DAYS.map((d) => {
-                            const e = cell(d, p);
+                            const es = cellEntries(d, p);
                             return (
                               <td key={d} className="p-1.5 align-top border-b border-gray-100">
-                                {e ? (
-                                  <div className="group relative rounded-lg border border-gray-200 bg-gradient-to-br from-orange-50/60 to-white p-2.5 pr-7 hover:border-[#F26522]/40 transition-colors">
-                                    <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <button onClick={() => editEntry(e)} title="Edit" className="h-5 w-5 grid place-items-center text-gray-400 hover:text-[#F26522] rounded"><Pencil className="h-3 w-3" /></button>
-                                      <button onClick={() => removeEntry(e)} disabled={deletingId === e.id} title="Delete" className="h-5 w-5 grid place-items-center text-gray-400 hover:text-rose-600 rounded">{deletingId === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}</button>
-                                    </div>
-                                    <div className="text-sm font-semibold text-gray-900 leading-tight">{e.subject || '—'}</div>
-                                    <div className="text-[10px] text-gray-500 mt-0.5">{e.startTime}–{e.endTime}</div>
-                                    {e.teacherName && <div className="text-[10px] text-gray-500 truncate">{e.teacherName}</div>}
-                                    {e.roomName && <div className="text-[10px] text-gray-400">{e.roomName}</div>}
+                                {es.length > 0 ? (
+                                  <div className="space-y-1.5">
+                                    {es.map((e) => (
+                                      <div key={e.id} className="group relative rounded-lg border border-gray-200 bg-gradient-to-br from-orange-50/60 to-white p-2.5 pr-7 hover:border-[#F26522]/40 transition-colors">
+                                        <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button onClick={() => editEntry(e)} title="Edit" className="h-5 w-5 grid place-items-center text-gray-400 hover:text-[#F26522] rounded"><Pencil className="h-3 w-3" /></button>
+                                          <button onClick={() => removeEntry(e)} disabled={deletingId === e.id} title="Delete" className="h-5 w-5 grid place-items-center text-gray-400 hover:text-rose-600 rounded">{deletingId === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}</button>
+                                        </div>
+                                        <div className="text-sm font-semibold text-gray-900 leading-tight">{e.subject || '—'}</div>
+                                        <div className="text-[10px] text-gray-500 mt-0.5">{e.startTime}–{e.endTime}</div>
+                                        {e.teacherName && <div className="text-[10px] text-gray-500 truncate">{e.teacherName}</div>}
+                                        {e.roomName && <div className="text-[10px] text-gray-400">{e.roomName}</div>}
+                                      </div>
+                                    ))}
+                                    {/* Split the period — add a parallel subject */}
+                                    <button onClick={() => openAdd(d, p)} title="Add another subject in this period"
+                                      className="w-full rounded-lg border border-dashed border-gray-200 text-[10px] text-gray-400 hover:text-[#F26522] hover:border-[#F26522]/40 py-1 inline-flex items-center justify-center gap-1">
+                                      <Plus className="h-3 w-3" /> Split
+                                    </button>
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => { setEditingId(null); resetForm(); setFDay(d); setFPeriod(String(p)); setShowForm(true); setView('builder'); }}
+                                    onClick={() => openAdd(d, p)}
                                     className="w-full h-full min-h-[52px] rounded-lg border border-dashed border-gray-200 text-gray-300 hover:text-[#F26522] hover:border-[#F26522]/40 grid place-items-center"
                                     title={`Add ${d} P${p}`}
                                   >
