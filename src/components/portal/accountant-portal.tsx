@@ -2082,12 +2082,18 @@ function MarkPaidFineDialog({ inv, studentName, busy, onClose, onConfirm }: {
   onClose: () => void;
   onConfirm: (opts: { fine: number; finePaid: boolean; carryFineToNext: boolean }) => void;
 }) {
-  const DEFAULT_FINE = 200; // suggested default; accountant can change or zero it
-  const [fine, setFine] = useState(String(DEFAULT_FINE));
+  const [fine, setFine] = useState('0');
   const [choice, setChoice] = useState<'paid' | 'carry' | 'waive'>('paid');
 
   useEffect(() => {
-    if (inv) { setFine(String(inv.fine != null && Number(inv.fine) > 0 ? inv.fine : DEFAULT_FINE)); setChoice('paid'); }
+    if (inv) {
+      // Default to the SAME late fine the challan already shows: the difference
+      // between "Payable after due date" and the installment amount = 5% of the
+      // installment (rounded). Accountant can edit or waive it.
+      const suggested = Math.round(Number(inv.amount || 0) * 0.05);
+      setFine(String(inv.fine != null && Number(inv.fine) > 0 ? inv.fine : suggested));
+      setChoice('paid');
+    }
   }, [inv]);
 
   if (!inv) return null;
@@ -2114,7 +2120,7 @@ function MarkPaidFineDialog({ inv, studentName, busy, onClose, onConfirm }: {
           <div>
             <Label className="text-xs text-gray-500">Fine amount (Rs)</Label>
             <Input type="number" min={0} value={fine} onChange={(e) => setFine(e.target.value)} className={cn(inputCls, 'w-40')} disabled={choice === 'waive'} />
-            <p className="text-[11px] text-gray-400 mt-1">Edit freely — set to 0 or choose &ldquo;Forgive&rdquo; to waive it.</p>
+            <p className="text-[11px] text-gray-400 mt-1">Pre-filled with the challan&apos;s late fine (5% after due date). Edit freely — set to 0 or choose &ldquo;Forgive&rdquo; to waive it.</p>
           </div>
           <div className="space-y-2">
             {([
