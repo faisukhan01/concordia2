@@ -397,6 +397,47 @@ export async function markAbsentNow(): Promise<{ date: string; skipped?: string;
   return { date, marked_absent: Number(result.rowsAffected ?? 0) };
 }
 
+/**
+ * Morning absent alert (Vercel Cron ~8:30 AM Karachi). Notifies every enrolled
+ * student (and their parents, via the mirror) who has NOT checked in at the gate
+ * yet today: "Ahmed is absent — hasn't come to college today." Gated behind
+ * attendance_settings.notify_parents. Skips holidays / non-working days. Does
+ * NOT write attendance rows (the nightly job owns that) — it's just an alert.
+ */
+export async function absentAlertNow(): Promise<{ date: string; skipped?: string; notified?: number }> {
+  const date = todayLocal();
+  const s = await getSettings();
+  if (s.notify_parents !== 1) return { date, skipped: 'notifications off' };
+  const holiday = await db.execute({ sql: `SELECT 1 FROM holidays WHERE date = ?`, args: [date] });
+  if (!isWorkingDay(s, date) || holiday.rows.length > 0) return { date, skipped: 'non-working day' };
+
+  // Enrolled, active students with NO check-in today.
+  const rows = await db.execute({
+    sql: `SELECT u.id, u.name FROM device_users du
+          JOIN users u ON u.id = du.student_id
+          WHERE du.is_active = 1 AND u.role = 'student' AND u.status = 'Active'
+            AND NOT EXISTS (
+              SELECT 1 FROM attendance_daily a
+              WHERE a.student_id = u.id AND a.date = ? AND a.check_in_at IS NOT NULL
+            )`,
+    args: [date],
+  });
+  if (rows.rows.length === 0) return { date, notified: 0 };
+
+  const { sendPushToUser } = await import('./fcm');
+  let notified = 0;
+  for (const r of rows.rows as any[]) {
+    const name = r.name || 'Your child';
+    try {
+      await sendPushToUser(String(r.id), 'attendance', '❌ Absent today',
+        `${name} has not checked in at the college gate today. Please contact the college if this is unexpected.`,
+        { route: 'student-biometric' });
+      notified++;
+    } catch (e) { console.error('[absent-alert] push failed:', e); }
+  }
+  return { date, notified };
+}
+
 // ---------------------------------------------------------------- PIN allocation
 
 /**

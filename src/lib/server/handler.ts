@@ -3171,6 +3171,16 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json(await markAbsentNow());
     }
 
+    // Morning absent alert — ~8:30 AM Karachi. Notifies students + parents who
+    // haven't checked in at the gate yet today.
+    if (method === 'GET' && path === 'cron/absent-alert') {
+      if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }
+      const { absentAlertNow } = await import('./attendance');
+      return NextResponse.json(await absentAlertNow());
+    }
+
     // ── Session-authenticated biometric routes (namespaced under biometric/*
     //    because GET/POST 'attendance' is already the teachers' manual register).
     const isBio = pathSegments[0] === 'biometric';
@@ -3213,6 +3223,28 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       let rows = r.rows.map((x: any) => ({ ...x, status: x.status || 'not_marked' }));
       if (query.status) rows = rows.filter((x: any) => x.status === query.status);
       return NextResponse.json({ date, entries: rows });
+    }
+
+    // GET biometric/checkins — the studentIds in a section who have CHECKED IN
+    // on a date (used to auto-fill the teacher's manual attendance from
+    // biometric). Teacher-accessible (scoped to the branch).
+    if (method === 'GET' && isBio && path === 'biometric/checkins') {
+      const user = await requireAuth(req);
+      requireRole(user, 'teacher', 'admin', 'academic', 'accountant', 'admissions', 'branch-manager', 'institute-admin', 'super-admin');
+      const date = query.date || new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
+      const args: any[] = [date];
+      let where = "u.role = 'student' AND u.status = 'Active' AND a.check_in_at IS NOT NULL";
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      if (query.program) { where += ' AND u.class = ?'; args.push(query.program); }
+      if (query.section) { where += ' AND u.section = ?'; args.push(String(query.section).toUpperCase()); }
+      if (query.part) { where += " AND COALESCE(u.part,'1') = ?"; args.push(/^\d{1,2}$/.test(query.part) ? query.part : '1'); }
+      const r = await db.execute({
+        sql: `SELECT u.id AS studentId, a.check_in_at, a.status
+              FROM attendance_daily a JOIN users u ON u.id = a.student_id
+              WHERE a.date = ? AND ${where}`,
+        args,
+      });
+      return NextResponse.json({ date, present: r.rows.map((x: any) => String(x.studentId)) });
     }
 
     // GET biometric/attendance/student/:id — one student's history + calendar.

@@ -317,6 +317,15 @@ export const api = {
   },
   bioTeacherAttendance: (date?: string) =>
     request<{ date: string; entries: any[] }>(date ? `biometric/teacher-attendance?date=${date}` : 'biometric/teacher-attendance'),
+  // Which students in a section have checked in on a date (auto-fill teacher attendance).
+  bioCheckins: (params: { date: string; program?: string; part?: string; section?: string }) => {
+    const q = new URLSearchParams();
+    q.set('date', params.date);
+    if (params.program) q.set('program', params.program);
+    if (params.part) q.set('part', params.part);
+    if (params.section) q.set('section', params.section);
+    return request<{ date: string; present: string[] }>(`biometric/checkins?${q.toString()}`);
+  },
   bioSummary: (params?: { month?: string; program?: string; section?: string }) => {
     const q = new URLSearchParams();
     if (params?.month) q.set('month', params.month);

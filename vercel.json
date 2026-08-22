@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["bom1"],
   "crons": [
-    { "path": "/api/cron/mark-absent", "schedule": "0 15 * * *" }
+    { "path": "/api/cron/mark-absent", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/absent-alert", "schedule": "30 3 * * *" }
   ]
 }

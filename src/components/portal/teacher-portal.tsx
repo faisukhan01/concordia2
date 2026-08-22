@@ -953,20 +953,32 @@ function TeacherAttendance({
       .finally(() => setLoadingExisting(false));
   }, [classId, date, user.id]);
 
-  // Everyone defaults to PRESENT (orange). The teacher only flips absentees.
+  // Auto-fill from BIOMETRIC: students who checked in at the gate → Present,
+  // everyone else → Absent. The teacher can still adjust before submitting.
+  // `autoFilled` shows a note so it's clear where the marks came from.
+  const [autoFilled, setAutoFilled] = useState(false);
   const listKey = list.map((s) => s.id).join(',');
   useEffect(() => {
-    if (loadingExisting || existing || list.length === 0) return;
-    setMarks((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const s of list) {
-        if (!next[s.id]) { next[s.id] = 'Present'; changed = true; }
-      }
-      return changed ? next : prev;
-    });
+    if (loadingExisting || existing || list.length === 0 || !cls) { setAutoFilled(false); return; }
+    let cancelled = false;
+    api.bioCheckins({ date, program: cls.program, part: cls.part, section: cls.section })
+      .then((res) => {
+        if (cancelled) return;
+        const present = new Set(res.present || []);
+        const next: Record<string, AttendanceStatus> = {};
+        for (const s of list) next[s.id] = present.has(s.id) ? 'Present' : 'Absent';
+        setMarks(next);
+        setAutoFilled(true);
+      })
+      .catch(() => {
+        // Biometric unavailable → fall back to everyone Present (old behaviour).
+        if (cancelled) return;
+        setMarks((prev) => { const next = { ...prev }; for (const s of list) if (!next[s.id]) next[s.id] = 'Present'; return next; });
+        setAutoFilled(false);
+      });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listKey, existing, loadingExisting]);
+  }, [listKey, existing, loadingExisting, date, cls?.program, cls?.part, cls?.section]);
 
   const toggleMark = (id: string) =>
     setMarks((m) => ({ ...m, [id]: (m[id] === 'Absent' ? 'Present' : 'Absent') }));
@@ -1104,6 +1116,14 @@ function TeacherAttendance({
             <span>
               Attendance for <span className="font-medium">{fmtDate(date)}</span> was already marked.
               Saving will overwrite the previous record.
+            </span>
+          </div>
+        )}
+        {!existing && autoFilled && cls && (
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50/50 px-3 py-2 text-[12px] text-emerald-800">
+            <CalendarCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              Auto-filled from <span className="font-medium">biometric gate check-ins</span> for {fmtDate(date)} — students who checked in are <span className="font-medium">Present</span>, the rest <span className="font-medium">Absent</span>. Adjust any if needed, then Save.
             </span>
           </div>
         )}
