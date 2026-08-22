@@ -1777,8 +1777,8 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
   // New-entry form state
   const [fDay, setFDay] = useState('Monday');
   const [fPeriod, setFPeriod] = useState('1');
-  const [fSubject, setFSubject] = useState('');
-  const [fTeacherId, setFTeacherId] = useState('');
+  // A period can hold several parallel subjects — each with its OWN teacher.
+  const [pairs, setPairs] = useState<{ subject: string; teacherId: string }[]>([{ subject: '', teacherId: '' }]);
   const [fStart, setFStart] = useState('08:00');
   const [fEnd, setFEnd] = useState('08:45');
   const [fRoom, setFRoom] = useState('');
@@ -1831,8 +1831,12 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
   }, [activeClassId]);
 
   const resetForm = () => {
-    setFDay('Monday'); setFPeriod('1'); setFSubject(''); setFTeacherId(''); setFStart('08:00'); setFEnd('08:45'); setFRoom('');
+    setFDay('Monday'); setFPeriod('1'); setPairs([{ subject: '', teacherId: '' }]); setFStart('08:00'); setFEnd('08:45'); setFRoom('');
   };
+  const setPair = (i: number, patch: Partial<{ subject: string; teacherId: string }>) =>
+    setPairs((ps) => ps.map((p, idx) => idx === i ? { ...p, ...patch } : p));
+  const addPair = () => setPairs((ps) => [...ps, { subject: '', teacherId: '' }]);
+  const removePair = (i: number) => setPairs((ps) => ps.length > 1 ? ps.filter((_, idx) => idx !== i) : ps);
 
   // ── Save entry with client-side clash detection (PRESERVED from old code).
   // The backend enforces the same three rules but surfacing them here gives
@@ -1844,89 +1848,68 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
       toast({ title: 'Day and a valid Period (1–12) are required', variant: 'destructive' });
       return;
     }
-    if (!fSubject.trim()) { toast({ title: 'Subject is required', variant: 'destructive' }); return; }
-    if (!fTeacherId) { toast({ title: 'Teacher is required', description: 'Every period must have a teacher so it shows on their timetable.', variant: 'destructive' }); return; }
-    const teacher = teachers.find((t) => t.id === fTeacherId) || null;
-
-    // A class CAN now have multiple parallel subjects in the same period (e.g.
-    // Computer / Civics split classes). We only block adding the SAME subject
-    // twice into the same slot (a true duplicate), not a different subject.
-    const dupSubject = entries.find((e) =>
-      e.day === fDay && Number(e.period) === period && e.id !== editingId &&
-      (e.subject || '').trim().toLowerCase() === fSubject.trim().toLowerCase(),
-    );
-    if (dupSubject) {
-      toast({
-        title: 'Already added',
-        description: `"${fSubject.trim()}" is already at Period ${period} on ${fDay} for this class. Add a different subject/teacher to split the period.`,
-        variant: 'destructive',
-      });
-      return;
+    // Keep only the filled rows. Each row = one subject + its OWN teacher, so a
+    // single Save can add several parallel subjects to the same period.
+    const rows = pairs
+      .map((p) => ({ subject: p.subject.trim(), teacherId: p.teacherId, teacher: teachers.find((t) => t.id === p.teacherId) || null }))
+      .filter((p) => p.subject || p.teacherId);
+    if (rows.length === 0) { toast({ title: 'Add at least one subject', variant: 'destructive' }); return; }
+    for (const r of rows) {
+      if (!r.subject) { toast({ title: 'Subject is required', description: 'Fill the subject for every row (or remove the empty one).', variant: 'destructive' }); return; }
+      if (!r.teacherId) { toast({ title: 'Teacher is required', description: `Pick a teacher for "${r.subject}".`, variant: 'destructive' }); return; }
     }
+    // No duplicate subjects within this same save.
+    const seen = new Set<string>();
+    for (const r of rows) { const k = r.subject.toLowerCase(); if (seen.has(k)) { toast({ title: 'Duplicate subject', description: `"${r.subject}" is listed twice.`, variant: 'destructive' }); return; } seen.add(k); }
 
-    // Clash #2 + #3 — teacher double-booked / time overlap
-    if (teacher) {
+    // Per-row clash checks: same subject already in this slot; teacher double-booked.
+    for (const r of rows) {
+      const dupSubject = entries.find((e) =>
+        e.day === fDay && Number(e.period) === period && e.id !== editingId &&
+        (e.subject || '').trim().toLowerCase() === r.subject.toLowerCase(),
+      );
+      if (dupSubject) {
+        toast({ title: 'Already added', description: `"${r.subject}" is already at Period ${period} on ${fDay} for this class.`, variant: 'destructive' });
+        return;
+      }
       try {
-        const teacherEntries = await api.getTimetable({ teacherId: teacher.id });
+        const teacherEntries = await api.getTimetable({ teacherId: r.teacherId });
         const teacherClash = (Array.isArray(teacherEntries) ? teacherEntries : []).find(
           (e: any) => e.day === fDay && Number(e.period) === period && e.id !== editingId,
         );
         if (teacherClash) {
-          const clashCls = teacherClash.className
-            ? `${teacherClash.className}${teacherClash.section ? '-' + teacherClash.section : ''}`
-            : 'another class';
-          toast({
-            title: '⚠ Clash: teacher double-booked',
-            description: `${teacher.name} already has ${teacherClash.subject || 'a lecture'} at Period ${period} on ${fDay} in ${clashCls}. Pick a different teacher, day, or period.`,
-            variant: 'destructive',
-          });
+          const clashCls = teacherClash.className ? `${teacherClash.className}${teacherClash.section ? '-' + teacherClash.section : ''}` : 'another class';
+          toast({ title: '⚠ Clash: teacher double-booked', description: `${r.teacher?.name || 'That teacher'} already has ${teacherClash.subject || 'a lecture'} at Period ${period} on ${fDay} in ${clashCls}. Pick a different teacher.`, variant: 'destructive' });
           return;
         }
-        if (fStart && fEnd) {
-          const timeClash = (Array.isArray(teacherEntries) ? teacherEntries : []).find((e: any) =>
-            e.day === fDay && e.id !== editingId && e.startTime && e.endTime && e.startTime < fEnd && e.endTime > fStart,
-          );
-          if (timeClash) {
-            const clashCls = timeClash.className
-              ? `${timeClash.className}${timeClash.section ? '-' + timeClash.section : ''}`
-              : 'another class';
-            toast({
-              title: '⚠ Clash: teacher time overlap',
-              description: `${teacher.name} already has a lecture on ${fDay} ${timeClash.startTime}–${timeClash.endTime} in ${clashCls} that overlaps ${fStart}–${fEnd}.`,
-              variant: 'destructive',
-            });
-            return;
-          }
-        }
-      } catch {
-        // Network failure on the pre-check — fall through to the server.
-      }
+      } catch { /* pre-check network failure — the server re-checks */ }
     }
 
     setSaving(true);
     try {
-      await api.saveTimetableEntry({
-        classId: activeClassId,
-        className: activeClassObj?.name || '',
-        section: activeClassObj?.section || '',
-        day: fDay,
-        period,
-        startTime: fStart,
-        endTime: fEnd,
-        subject: fSubject.trim(),
-        teacherId: teacher?.id || null,
-        teacherName: teacher?.name || '',
-        roomName: fRoom.trim(),
-      });
-      // When editing, remove the old row after the new one is saved.
+      for (const r of rows) {
+        await api.saveTimetableEntry({
+          classId: activeClassId,
+          className: activeClassObj?.name || '',
+          section: activeClassObj?.section || '',
+          day: fDay,
+          period,
+          startTime: fStart,
+          endTime: fEnd,
+          subject: r.subject,
+          teacherId: r.teacher?.id || null,
+          teacherName: r.teacher?.name || '',
+          roomName: fRoom.trim(),
+        });
+      }
+      // When editing, remove the old row after the new one(s) are saved.
       if (editingId) { try { await api.deleteTimetableEntry(editingId); } catch {} }
-      toast({ title: editingId ? 'Timetable entry updated' : 'Timetable entry saved', description: `${fDay} • Period ${period} • ${fSubject.trim()}` });
+      toast({ title: editingId ? 'Timetable entry updated' : `${rows.length} subject${rows.length === 1 ? '' : 's'} saved`, description: `${fDay} • Period ${period} • ${rows.map((r) => r.subject).join(' / ')}` });
       resetForm();
       setEditingId(null);
       setShowForm(false);
       reloadEntries();
     } catch (e: any) {
-      // Server-side clash message (already very specific — surface verbatim).
       toast({ title: '⚠ Clash detected', description: e?.message || 'Failed to save entry', variant: 'destructive' });
     } finally {
       setSaving(false);
@@ -1938,8 +1921,7 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
     setEditingId(e.id);
     setFDay(e.day || 'Monday');
     setFPeriod(String(e.period || '1'));
-    setFSubject(e.subject || '');
-    setFTeacherId(e.teacherId || '');
+    setPairs([{ subject: e.subject || '', teacherId: e.teacherId || '' }]);
     setFStart(e.startTime || '08:00');
     setFEnd(e.endTime || '08:45');
     setFRoom(e.roomName || '');
@@ -2129,8 +2111,8 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
 
           {showForm && (
             <div className="rounded-xl border border-gray-200 bg-gray-50/40 p-4 mb-4">
-              <SectionHeader title={editingId ? 'Edit Timetable Entry' : 'New Timetable Entry'} desc="Pick a day + period. Teacher is required so the period shows on their timetable. Clashes are caught before saving." />
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <SectionHeader title={editingId ? 'Edit Timetable Entry' : 'New Timetable Entry'} desc={editingId ? 'Edit this period.' : 'Pick a day + period, then add one or more subjects — each with its OWN teacher — to run them in the same slot (split / parallel classes).'} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
                 <Field label="Day" required>
                   <Select value={fDay} onValueChange={setFDay}>
                     <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Day" /></SelectTrigger>
@@ -2142,27 +2124,49 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
                 <Field label="Period" required>
                   <Input type="number" min={1} max={12} value={fPeriod} onChange={(e) => setFPeriod(e.target.value)} className={inputCls} placeholder="1" />
                 </Field>
-                <Field label="Subject" required>
-                  <Input value={fSubject} onChange={(e) => setFSubject(e.target.value)} className={inputCls} placeholder="Mathematics" />
-                </Field>
-                <Field label="Teacher" required>
-                  <Select value={fTeacherId} onValueChange={setFTeacherId}>
-                    <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Select teacher" /></SelectTrigger>
-                    <SelectContent>
-                      {teachers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </Field>
                 <Field label="Start Time">
                   <Input type="time" value={fStart} onChange={(e) => setFStart(e.target.value)} className={inputCls} />
                 </Field>
                 <Field label="End Time">
                   <Input type="time" value={fEnd} onChange={(e) => setFEnd(e.target.value)} className={inputCls} />
                 </Field>
+              </div>
+
+              {/* Subject + Teacher rows — one per parallel subject */}
+              <div className="space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Subjects &amp; teachers {!editingId && '(add more to split the period)'}</div>
+                {pairs.map((p, i) => (
+                  <div key={i} className="flex items-end gap-2">
+                    <div className="flex-1">
+                      {i === 0 && <label className="block text-[11px] text-gray-500 mb-1">Subject</label>}
+                      <Input value={p.subject} onChange={(e) => setPair(i, { subject: e.target.value })} className={inputCls} placeholder="e.g. Physics" />
+                    </div>
+                    <div className="flex-1">
+                      {i === 0 && <label className="block text-[11px] text-gray-500 mb-1">Teacher</label>}
+                      <Select value={p.teacherId} onValueChange={(v) => setPair(i, { teacherId: v })}>
+                        <SelectTrigger className={cn(inputCls, 'h-10')}><SelectValue placeholder="Select teacher" /></SelectTrigger>
+                        <SelectContent>
+                          {teachers.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}{t.rollNo ? ` • ${t.rollNo}` : ''}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {!editingId && pairs.length > 1 && (
+                      <button onClick={() => removePair(i)} className="h-10 w-9 grid place-items-center text-gray-400 hover:text-rose-600 rounded-lg border border-gray-200" title="Remove this subject"><Trash2 className="h-4 w-4" /></button>
+                    )}
+                  </div>
+                ))}
+                {!editingId && (
+                  <button onClick={addPair} className="text-sm text-[#F26522] hover:underline inline-flex items-center gap-1 mt-1">
+                    <Plus className="h-3.5 w-3.5" /> Add another subject &amp; teacher
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 items-end">
                 <Field label="Room">
                   <Input value={fRoom} onChange={(e) => setFRoom(e.target.value)} className={inputCls} placeholder="Room 101" />
                 </Field>
-                <div className="flex items-end gap-2">
+                <div className="sm:col-span-2 flex items-end gap-2">
                   <button onClick={saveEntry} disabled={saving} className={btnPrimary + ' h-10 flex-1'}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {editingId ? 'Update Entry' : 'Save Entry'}
                   </button>
