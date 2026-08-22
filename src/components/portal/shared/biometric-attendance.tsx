@@ -112,6 +112,146 @@ function clockPK(iso?: string | null): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// TEACHER BIOMETRIC — same PIN/device model as students. Allocate PINs (single
+// or all), and see teachers' daily check-in / check-out.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function TeacherBiometricView() {
+  const [tab, setTab] = useState<'enroll' | 'attendance'>('enroll');
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [pinInfo, setPinInfo] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+  // attendance
+  const [date, setDate] = useState(todayKarachi());
+  const [rows, setRows] = useState<any[]>([]);
+  const [loadingRows, setLoadingRows] = useState(false);
+
+  const loadTeachers = useCallback(async () => {
+    setLoading(true);
+    try { setTeachers(await api.bioTeachers()); } catch { /* ignore */ } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadTeachers(); }, [loadTeachers]);
+
+  const loadRows = useCallback(async () => {
+    setLoadingRows(true);
+    try { const r = await api.bioTeacherAttendance(date); setRows(r.entries || []); }
+    catch { /* ignore */ } finally { setLoadingRows(false); }
+  }, [date]);
+  useEffect(() => { if (tab === 'attendance') loadRows(); }, [tab, loadRows]);
+
+  const pending = teachers.filter((t) => !t.pinAllocated);
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return teachers;
+    return teachers.filter((x) => `${x.name} ${x.rollNo || ''} ${x.email || ''}`.toLowerCase().includes(t));
+  }, [teachers, q]);
+
+  const allocateOne = async (tch: any) => {
+    try { const r = await api.bioAllocatePin(tch.id); setPinInfo({ pin: r.pin, name: r.studentName }); await loadTeachers(); }
+    catch (e: any) { toast({ title: 'Could not allocate PIN', description: e?.message || 'Try again.', variant: 'destructive' }); }
+  };
+  const allocateAll = async () => {
+    if (pending.length === 0) return;
+    setBusy(true);
+    try { const r = await api.bioAllocateTeachers(); toast({ title: 'PINs allocated', description: `${r.allocated} teacher${r.allocated === 1 ? '' : 's'} now have a PIN.` }); await loadTeachers(); }
+    catch (e: any) { toast({ title: 'Could not allocate', description: e?.message || 'Try again.', variant: 'destructive' }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <PageHeader title="Teacher Biometric" subtitle="Allocate device PINs to teachers, then see their gate check-in / check-out" action={<HistoryDownload teacherMode />} />
+      <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
+        <TabsList>
+          <TabsTrigger value="enroll">Enrollment</TabsTrigger>
+          <TabsTrigger value="attendance">Check-in / out</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="enroll" className="mt-4">
+          <Card>
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <div className="relative flex-1 min-w-[12rem]">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Input placeholder="Search teacher name / ID / email…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+              </div>
+              {pending.length > 0 && (
+                <Button size="sm" onClick={allocateAll} disabled={busy} style={{ background: ORANGE }} className="text-white hover:opacity-90">
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Fingerprint className="w-3.5 h-3.5 mr-1.5" />}
+                  Allocate PIN to all teachers ({pending.length})
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={loadTeachers}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh</Button>
+            </div>
+            <div className={cn('max-h-[32rem] overflow-y-auto', SCROLLBAR_CLS)}>
+              <Table>
+                <TableHeader>
+                  <TableRow>{['Teacher', 'Teacher ID', 'PIN', 'Fingerprint', ''].map((h) => <TableHead key={h} className="uppercase text-[11px] text-gray-400">{h}</TableHead>)}</TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-gray-400 py-8">{loading ? 'Loading…' : 'No teachers.'}</TableCell></TableRow>}
+                  {filtered.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell><div className="font-medium">{t.name}</div><div className="text-xs text-gray-400">{t.email || '—'}</div></TableCell>
+                      <TableCell className="text-sm text-gray-500">{t.rollNo || '—'}</TableCell>
+                      <TableCell>{t.pin ? <span className="font-mono font-semibold">{t.pin}</span> : <span className="text-gray-300">—</span>}</TableCell>
+                      <TableCell>
+                        {t.fingerprintConfirmed
+                          ? <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200"><CheckCircle2 className="w-3 h-3 mr-1" />Confirmed</Badge>
+                          : t.pinAllocated
+                            ? <Badge className="bg-amber-50 text-amber-700 border border-amber-200"><Clock className="w-3 h-3 mr-1" />Awaiting punch</Badge>
+                            : <span className="text-gray-300 text-sm">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        {t.pinAllocated
+                          ? <Button variant="ghost" size="sm" onClick={() => setPinInfo({ pin: t.pin, name: t.name })}>View PIN</Button>
+                          : <Button size="sm" onClick={() => allocateOne(t)} style={{ background: ORANGE }} className="text-white hover:opacity-90"><Fingerprint className="w-3.5 h-3.5 mr-1.5" />Allocate PIN</Button>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="attendance" className="mt-4">
+          <Card>
+            <div className="flex flex-wrap items-end gap-3 mb-4">
+              <div><Label className="text-xs text-gray-500">Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-40" /></div>
+              <Button variant="outline" size="sm" onClick={loadRows}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />{loadingRows ? 'Loading…' : 'Refresh'}</Button>
+            </div>
+            <div className={cn('max-h-[32rem] overflow-y-auto', SCROLLBAR_CLS)}>
+              <Table>
+                <TableHeader>
+                  <TableRow>{['Teacher', 'Teacher ID', 'PIN', 'Check-in', 'Check-out', 'Status'].map((h) => <TableHead key={h} className="uppercase text-[11px] text-gray-400">{h}</TableHead>)}</TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-gray-400 py-8">{loadingRows ? 'Loading…' : 'No enrolled teachers yet — allocate PINs first.'}</TableCell></TableRow>}
+                  {rows.map((r) => (
+                    <TableRow key={r.studentId}>
+                      <TableCell><div className="font-medium">{r.name}</div><div className="text-xs text-gray-400">{r.email || '—'}</div></TableCell>
+                      <TableCell className="text-sm text-gray-500">{r.rollNo || '—'}</TableCell>
+                      <TableCell className="font-mono text-sm">{r.pin || '—'}</TableCell>
+                      <TableCell className="text-emerald-700 font-medium">{clockPK(r.check_in_at)}{r.minutes_late > 0 && <span className="text-amber-600 text-xs ml-1">+{r.minutes_late}m</span>}</TableCell>
+                      <TableCell className="text-sky-700">{clockPK(r.check_out_at)}</TableCell>
+                      <TableCell><StatusBadge status={r.status} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <PinInstructionsDialog info={pinInfo} onClose={() => setPinInfo(null)} />
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Download check-in/out history as Excel — Last week / Last month / Complete.
 // Staff → the whole section; student → their own. Range floored at go-live.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -128,8 +268,8 @@ function historyRange(kind: 'week' | 'month' | 'all'): { from: string; to: strin
   return { from, to };
 }
 
-function HistoryDownload({ program, part, section, studentMode }: {
-  program?: string; part?: string; section?: string; studentMode?: boolean;
+function HistoryDownload({ program, part, section, studentMode, teacherMode }: {
+  program?: string; part?: string; section?: string; studentMode?: boolean; teacherMode?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -151,6 +291,14 @@ function HistoryDownload({ program, part, section, studentMode }: {
             Status: STATUS_STYLES[e.status]?.label || e.status, 'Minutes Late': e.minutes_late || 0,
           }));
         fname = `MyGateAttendance_${from}_to_${to}.xlsx`;
+      } else if (teacherMode) {
+        const data = await api.bioHistory({ role: 'teacher', from, to });
+        rows = (data.rows || []).map((r: any) => ({
+          'Teacher ID': r.rollNo || '', Name: r.name,
+          Date: r.date, 'Check-in': clockPK(r.check_in_at), 'Check-out': clockPK(r.check_out_at),
+          Status: STATUS_STYLES[r.status]?.label || r.status, 'Minutes Late': r.minutes_late || 0,
+        }));
+        fname = `TeacherGateAttendance_${from}_to_${to}.xlsx`;
       } else {
         const data = await api.bioHistory({ program, part, section, from, to });
         rows = (data.rows || []).map((r: any) => ({
@@ -234,6 +382,7 @@ function AdminView({ user, navKey }: { user: any; navKey: string }) {
         <TabsList className="flex flex-wrap h-auto gap-1">
           <TabsTrigger value="live">Live Feed</TabsTrigger>
           <TabsTrigger value="register">Daily Register</TabsTrigger>
+          <TabsTrigger value="teachers">Teachers</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
           <TabsTrigger value="holidays">Holidays</TabsTrigger>
@@ -242,6 +391,7 @@ function AdminView({ user, navKey }: { user: any; navKey: string }) {
         <TabsContent value="register" className="mt-4">
           <SectionDrill navKey={`${navKey}-reg`}>{(sel, enroll, reload) => <SectionRegister {...sel} enroll={enroll} reloadEnroll={reload} />}</SectionDrill>
         </TabsContent>
+        <TabsContent value="teachers" className="mt-4"><TeacherBiometricView /></TabsContent>
         <TabsContent value="reports" className="mt-4"><SummaryView user={user} /></TabsContent>
         <TabsContent value="settings" className="mt-4"><SettingsTab /></TabsContent>
         <TabsContent value="holidays" className="mt-4"><HolidaysTab /></TabsContent>
@@ -678,21 +828,35 @@ function SectionSummary({ program, part, section }: { program: string; part: str
 // and Monthly Summary tabs appear scoped to that section. No device controls,
 // no overrides, no settings.
 function StaffReadOnlyView({ navKey }: { navKey: string }) {
+  const [who, setWho] = useState<'students' | 'teachers'>('students');
   return (
     <>
-      <PageHeader title="Biometric Attendance" subtitle="Open a Program → Part → Section to see its daily register and monthly summary" />
-      <SectionDrill navKey={navKey}>
-        {(sel, enroll, reload) => (
-          <Tabs defaultValue="register" className="w-full">
-            <TabsList>
-              <TabsTrigger value="register">Daily Register</TabsTrigger>
-              <TabsTrigger value="summary">Monthly Summary</TabsTrigger>
-            </TabsList>
-            <TabsContent value="register" className="mt-4"><SectionRegister {...sel} enroll={enroll} reloadEnroll={reload} readOnly /></TabsContent>
-            <TabsContent value="summary" className="mt-4"><SectionSummary {...sel} /></TabsContent>
-          </Tabs>
-        )}
-      </SectionDrill>
+      <PageHeader
+        title="Biometric Attendance"
+        subtitle="Gate check-in / check-out records for students and teachers"
+        action={
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+            <button onClick={() => setWho('students')} className={cn('px-3 py-1.5 text-sm font-medium', who === 'students' ? 'text-white' : 'text-gray-500')} style={who === 'students' ? { background: ORANGE } : undefined}>Students</button>
+            <button onClick={() => setWho('teachers')} className={cn('px-3 py-1.5 text-sm font-medium', who === 'teachers' ? 'text-white' : 'text-gray-500')} style={who === 'teachers' ? { background: ORANGE } : undefined}>Teachers</button>
+          </div>
+        }
+      />
+      {who === 'teachers' ? (
+        <TeacherBiometricView />
+      ) : (
+        <SectionDrill navKey={navKey}>
+          {(sel, enroll, reload) => (
+            <Tabs defaultValue="register" className="w-full">
+              <TabsList>
+                <TabsTrigger value="register">Daily Register</TabsTrigger>
+                <TabsTrigger value="summary">Monthly Summary</TabsTrigger>
+              </TabsList>
+              <TabsContent value="register" className="mt-4"><SectionRegister {...sel} enroll={enroll} reloadEnroll={reload} readOnly /></TabsContent>
+              <TabsContent value="summary" className="mt-4"><SectionSummary {...sel} /></TabsContent>
+            </Tabs>
+          )}
+        </SectionDrill>
+      )}
     </>
   );
 }

@@ -308,6 +308,15 @@ export const api = {
   // Cached (60s, stale-while-revalidate) — the enrollment list is loaded on
   // every biometric page open; mutations above invalidate it.
   bioEnrollment: () => cachedGet<any[]>('biometric/enrollment'),
+  // ── Teacher biometric (same PIN/device model) ──
+  bioTeachers: () => cachedGet<any[]>('biometric/teachers'),
+  bioAllocateTeachers: async () => {
+    const r = await request<{ success: boolean; allocated: number }>('biometric/allocate-pin-teachers', { method: 'POST' });
+    invalidateCache();
+    return r;
+  },
+  bioTeacherAttendance: (date?: string) =>
+    request<{ date: string; entries: any[] }>(date ? `biometric/teacher-attendance?date=${date}` : 'biometric/teacher-attendance'),
   bioSummary: (params?: { month?: string; program?: string; section?: string }) => {
     const q = new URLSearchParams();
     if (params?.month) q.set('month', params.month);
@@ -317,8 +326,9 @@ export const api = {
     return request<{ month: string; students: any[] }>(qs ? `biometric/summary?${qs}` : 'biometric/summary');
   },
   // Section-wide check-in/out history for a date range (staff Excel export).
-  bioHistory: (params: { program?: string; part?: string; section?: string; from?: string; to?: string }) => {
+  bioHistory: (params: { program?: string; part?: string; section?: string; from?: string; to?: string; role?: 'student' | 'teacher' }) => {
     const q = new URLSearchParams();
+    if (params.role) q.set('role', params.role);
     if (params.program) q.set('program', params.program);
     if (params.part) q.set('part', params.part);
     if (params.section) q.set('section', params.section);

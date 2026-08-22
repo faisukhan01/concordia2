@@ -3379,11 +3379,71 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const user = await requireAuth(req);
       requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
       const studentId = pathSegments[2];
-      const stu = await db.execute({ sql: `SELECT id, name FROM users WHERE id = ? AND role = 'student'`, args: [studentId] });
-      if (stu.rows.length === 0) return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+      // Works for students AND teachers (same PIN/device model).
+      const stu = await db.execute({ sql: `SELECT id, name FROM users WHERE id = ? AND role IN ('student','teacher')`, args: [studentId] });
+      if (stu.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 });
       const { allocatePin } = await import('./attendance');
       const pin = await allocatePin(studentId);
       return NextResponse.json({ success: true, pin, studentName: (stu.rows[0] as any).name });
+    }
+
+    // GET biometric/teachers — teacher enrollment list (PIN + fingerprint status).
+    if (method === 'GET' && isBio && path === 'biometric/teachers') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
+      const args: any[] = [];
+      let where = "u.role = 'teacher' AND u.status = 'Active'";
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      const r = await db.execute({
+        sql: `SELECT u.id, u.name, u.rollNo, u.email, u.guardianPhone AS phone,
+                     du.device_pin AS pin, du.enrolled_at
+              FROM users u
+              LEFT JOIN device_users du ON du.student_id = u.id AND du.is_active = 1
+              WHERE ${where}
+              ORDER BY (du.device_pin IS NOT NULL), u.name`,
+        args,
+      });
+      return NextResponse.json(r.rows.map((x: any) => ({ ...x, pinAllocated: !!x.pin, fingerprintConfirmed: !!x.enrolled_at })));
+    }
+
+    // POST biometric/allocate-pin-teachers — allocate PINs to every teacher
+    // without one, in a single pass.
+    if (method === 'POST' && isBio && path === 'biometric/allocate-pin-teachers') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'admissions', 'super-admin');
+      const args: any[] = [];
+      let where = "u.role = 'teacher' AND u.status = 'Active' AND du.device_pin IS NULL";
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      const teachers = await db.execute({
+        sql: `SELECT u.id FROM users u LEFT JOIN device_users du ON du.student_id = u.id AND du.is_active = 1 WHERE ${where}`,
+        args,
+      });
+      const ids = teachers.rows.map((r: any) => String(r.id));
+      const { allocatePinsBulk } = await import('./attendance');
+      const res = await allocatePinsBulk(ids);
+      return NextResponse.json({ success: true, allocated: res.length });
+    }
+
+    // GET biometric/teacher-attendance — teachers' check-in/out for a date.
+    if (method === 'GET' && isBio && path === 'biometric/teacher-attendance') {
+      const user = await requireAuth(req);
+      requireRole(user, 'admin', 'academic', 'accountant', 'super-admin');
+      const date = query.date || new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
+      const args: any[] = [date];
+      let where = "u.role = 'teacher' AND u.status = 'Active'";
+      if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
+      const r = await db.execute({
+        sql: `SELECT u.id AS studentId, u.name, u.rollNo, u.email, du.device_pin AS pin,
+                     a.id AS attendanceId, a.status, a.check_in_at, a.check_out_at, a.minutes_late, a.source, a.note
+              FROM device_users du
+              JOIN users u ON u.id = du.student_id
+              LEFT JOIN attendance_daily a ON a.student_id = u.id AND a.date = ?
+              WHERE du.is_active = 1 AND ${where}
+              ORDER BY u.name`,
+        args,
+      });
+      const rows = r.rows.map((x: any) => ({ ...x, status: x.status || 'not_marked' }));
+      return NextResponse.json({ date, entries: rows });
     }
 
     // POST biometric/allocate-pin-section — allocate PINs to every student in a
@@ -3482,10 +3542,14 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       const to = query.to || new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
       const args: any[] = [from, to];
       let where = 'a.date >= ? AND a.date <= ?';
+      // role=teacher exports teachers' history (no program/section filters).
+      where += query.role === 'teacher' ? " AND u.role = 'teacher'" : " AND u.role = 'student'";
       if (user.branchId) { where += ' AND u.branchId = ?'; args.push(user.branchId); }
-      if (query.program) { where += ' AND u.class = ?'; args.push(query.program); }
-      if (query.section) { where += ' AND u.section = ?'; args.push(String(query.section).toUpperCase()); }
-      if (query.part) { where += " AND COALESCE(u.part,'1') = ?"; args.push(/^\d{1,2}$/.test(query.part) ? query.part : '1'); }
+      if (query.role !== 'teacher') {
+        if (query.program) { where += ' AND u.class = ?'; args.push(query.program); }
+        if (query.section) { where += ' AND u.section = ?'; args.push(String(query.section).toUpperCase()); }
+        if (query.part) { where += " AND COALESCE(u.part,'1') = ?"; args.push(/^\d{1,2}$/.test(query.part) ? query.part : '1'); }
+      }
       const r = await db.execute({
         sql: `SELECT u.id AS studentId, u.name, u.rollNo, u.class, u.section, u.part,
                      a.date, a.check_in_at, a.check_out_at, a.status, a.minutes_late
