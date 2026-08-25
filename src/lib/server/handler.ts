@@ -1366,6 +1366,29 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
       return NextResponse.json({ password: target.password, mustChangePassword: target.mustChangePassword === 1 });
     }
 
+    // POST platform/users/passwords — bulk login details for a set of students
+    // (staff only). Used to export a whole section's logins as Excel / PDF.
+    if (method === 'POST' && path === 'platform/users/passwords') {
+      const user = await requireAuth(req);
+      requireRole(user, 'accountant', 'admissions', 'academic', 'admin', 'branch-manager', 'institute-admin', 'super-admin');
+      const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: any) => String(x)).filter(Boolean) : [];
+      if (ids.length === 0) return NextResponse.json([]);
+      const placeholders = ids.map(() => '?').join(',');
+      const r = await db.execute({
+        sql: `SELECT id, name, rollNo, email, password, class, section, part, branchId, instituteId
+              FROM users WHERE id IN (${placeholders})`,
+        args: ids,
+      });
+      let rows = r.rows as any[];
+      // Branch/institute scoping for restricted roles.
+      if (user.role === 'branch-manager') rows = rows.filter((x) => x.branchId === user.branchId);
+      if (user.role === 'institute-admin') rows = rows.filter((x) => x.instituteId === user.instituteId);
+      return NextResponse.json(rows.map((x) => ({
+        id: x.id, name: x.name, rollNo: x.rollNo || '', email: x.email || '',
+        password: x.password || '', class: x.class || '', section: x.section || '', part: x.part || '',
+      })));
+    }
+
     // ── Generate Login (Accountant / Academic / Admissions / Admin) ──
     // POST platform/users/:id/generate-login
     //

@@ -423,6 +423,11 @@ export const api = {
   deleteUser: async (id: string) =>
     { const r = await request<any>(`platform/users/${id}`, { method: 'DELETE' }); invalidateCache(); return r; },
   getUserPassword: (id: string) => request<any>(`platform/users/${id}/password`),
+  // Bulk login details for a set of students (staff only) — for Excel/PDF export.
+  getStudentLogins: (ids: string[]) =>
+    request<{ id: string; name: string; rollNo: string; email: string; password: string; class: string; section: string; part: string }[]>(
+      'platform/users/passwords', { method: 'POST', body: JSON.stringify({ ids }) },
+    ),
   // Generate (or regenerate) a student's login. Auto-assigns a branch-sequential
   // roll number if `rollNo` is omitted, so students imported without a roll
   // number can finally log in. Returns { rollNo, email, password }.

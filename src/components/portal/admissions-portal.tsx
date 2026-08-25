@@ -1658,6 +1658,53 @@ export function StudentRecordsView({
     );
   }, [students, drill.cls, drill.section, drill.part]);
 
+  // ── Export the section's student logins (Roll No · Name · Username · Password).
+  const [exportingLogins, setExportingLogins] = useState<null | 'xlsx' | 'pdf'>(null);
+  const fetchSectionLogins = async () => {
+    const ids = tableStudents.map((s) => s.id).filter(Boolean);
+    if (ids.length === 0) { toast({ title: 'No students in this section', variant: 'destructive' }); return null; }
+    const logins = await api.getStudentLogins(ids);
+    const byId = new Map(logins.map((l) => [l.id, l]));
+    // Preserve the table's order; username = roll number they sign in with.
+    return tableStudents.map((s) => {
+      const l = byId.get(s.id);
+      const rollNo = l?.rollNo || s.rollNo || '';
+      return { rollNo, name: l?.name || s.name || '', username: rollNo || l?.email || '', password: l?.password || '' };
+    });
+  };
+  const sectionLabel = () => {
+    const t = drill.section || drill.cls;
+    return `${deptLabel(drill.dept)}_P${drill.part}_${t?.section || ''}`.replace(/\s+/g, '');
+  };
+  const exportLoginsExcel = async () => {
+    setExportingLogins('xlsx');
+    try {
+      const rows = await fetchSectionLogins();
+      if (!rows) return;
+      const XLSX = await import('xlsx');
+      const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({ 'Roll No': r.rollNo, Name: r.name, Username: r.username, Password: r.password })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Logins');
+      XLSX.writeFile(wb, `Logins_${sectionLabel()}.xlsx`);
+      toast({ title: 'Excel exported', description: `${rows.length} student logins.` });
+    } catch (e: any) {
+      toast({ title: 'Could not export', description: e?.message || 'Try again.', variant: 'destructive' });
+    } finally { setExportingLogins(null); }
+  };
+  const exportLoginsPdf = async () => {
+    setExportingLogins('pdf');
+    try {
+      const rows = await fetchSectionLogins();
+      if (!rows) return;
+      const { buildStudentLoginsSheet } = await import('@/lib/pdf-utils');
+      const doc = buildStudentLoginsSheet(rows, `${deptLabel(drill.dept)} · Part ${drill.part} · Section ${(drill.section || drill.cls)?.section || ''} — Logins`);
+      savePdf(doc, `Logins_${sectionLabel()}.pdf`);
+      toast({ title: 'PDF downloaded', description: `${rows.length} student logins.` });
+    } catch (e: any) {
+      toast({ title: 'Could not export', description: e?.message || 'Try again.', variant: 'destructive' });
+    } finally { setExportingLogins(null); }
+  };
+
   // ── Student count helpers for the card grids.
   const getStudentCountForClass = (clsId: string) => {
     const c = classes.find((x) => x.id === clsId);
@@ -1893,17 +1940,41 @@ export function StudentRecordsView({
                   {tableStudents.length} student{tableStudents.length === 1 ? '' : 's'} enrolled
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                onClick={() =>
-                  setDrill((d) => ({ ...d, cls: null, section: null }))
-                }
-              >
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-                Back to sections
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs border-gray-200"
+                  onClick={exportLoginsExcel}
+                  disabled={!!exportingLogins || tableStudents.length === 0}
+                  title="Export all logins (Roll No · Name · Username · Password) as Excel"
+                >
+                  {exportingLogins === 'xlsx' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+                  Logins (Excel)
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs border-gray-200"
+                  onClick={exportLoginsPdf}
+                  disabled={!!exportingLogins || tableStudents.length === 0}
+                  title="Download all logins in one PDF"
+                >
+                  {exportingLogins === 'pdf' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+                  Logins (PDF)
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                  onClick={() =>
+                    setDrill((d) => ({ ...d, cls: null, section: null }))
+                  }
+                >
+                  <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                  Back to sections
+                </Button>
+              </div>
             </div>
             <StudentTable
               students={tableStudents}

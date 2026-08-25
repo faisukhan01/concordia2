@@ -925,6 +925,67 @@ export function buildStudentCredentialsSlip(d: StudentCredentialsData): jsPDF {
 }
 
 // ---------------------------------------------------------------------------
+// Section login sheet — all students' portal logins in ONE table PDF.
+// Given to the office to hand out / archive. Roll No · Name · Username · Password.
+// ---------------------------------------------------------------------------
+export interface StudentLoginRow {
+  rollNo?: string;
+  name?: string;
+  username?: string; // usually the roll number or email
+  password?: string;
+}
+
+export function buildStudentLoginsSheet(rows: StudentLoginRow[], heading = 'Student Login Details'): jsPDF {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageW = 210, marginX = 14;
+  // Columns: #, Roll No, Name, Username, Password.
+  const cols = [
+    { key: 'idx', label: '#', x: marginX, w: 10 },
+    { key: 'rollNo', label: 'Roll No', x: marginX + 10, w: 24 },
+    { key: 'name', label: 'Name', x: marginX + 34, w: 62 },
+    { key: 'username', label: 'Username', x: marginX + 96, w: 46 },
+    { key: 'password', label: 'Password', x: marginX + 142, w: 40 },
+  ];
+  const drawHeader = (title: string) => {
+    doc.setFontSize(16); doc.setTextColor('#F26522'); doc.text('Concordia College', marginX, 18);
+    doc.setTextColor('#111827'); doc.setFontSize(12); doc.text(title, marginX, 25);
+    doc.setFontSize(8); doc.setTextColor('#6b7280');
+    doc.text(`${rows.length} student(s) · generated ${new Date().toLocaleDateString('en-GB')}`, marginX, 30);
+  };
+  const drawColHead = (y: number) => {
+    doc.setFillColor(243, 244, 246); doc.rect(marginX, y - 5, pageW - marginX * 2, 7, 'F');
+    doc.setFontSize(8.5); doc.setTextColor('#374151');
+    for (const c of cols) doc.text(c.label, c.x + 1.5, y);
+  };
+
+  let y = 40;
+  drawHeader(heading);
+  drawColHead(y); y += 7;
+  doc.setFontSize(9);
+  rows.forEach((r, i) => {
+    if (y > 285) { doc.addPage(); y = 20; drawHeader(heading + ' (cont.)'); y = 40; drawColHead(y); y += 7; doc.setFontSize(9); }
+    doc.setTextColor('#111827');
+    const cells: Record<string, string> = {
+      idx: String(i + 1),
+      rollNo: r.rollNo || '—',
+      name: (r.name || '—').slice(0, 34),
+      username: (r.username || '—').slice(0, 26),
+      password: r.password || '—',
+    };
+    for (const c of cols) {
+      if (c.key === 'password' || c.key === 'username') doc.setFont('courier', 'normal'); else doc.setFont('helvetica', 'normal');
+      doc.text(cells[c.key], c.x + 1.5, y);
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setDrawColor(235); doc.line(marginX, y + 1.5, pageW - marginX, y + 1.5);
+    y += 7;
+  });
+  doc.setFontSize(7.5); doc.setTextColor('#9ca3af');
+  doc.text('Passwords are managed by the college office — students cannot change them. Keep this sheet confidential.', marginX, 292);
+  return doc;
+}
+
+// ---------------------------------------------------------------------------
 // Convenience helpers — caller chooses download vs print
 // ---------------------------------------------------------------------------
 
