@@ -4459,45 +4459,10 @@ export async function handleApiRequest(method: string, pathSegments: string[], r
         }
       }
 
-      // ─── Clash check #2: TEACHER already booked elsewhere ───
-      // The same teacher cannot be in two places at once — if they already
-      // have a lecture on this day + period (in any class), block it.
-      if (teacherId) {
-        const teacherClash = await db.execute({
-          sql: 'SELECT id, className, section, subject FROM timetable WHERE branchId = ? AND teacherId = ? AND day = ? AND period = ?',
-          args: [brId, teacherId, day, period],
-        });
-        if (teacherClash.rows.length > 0) {
-          const t = teacherClash.rows[0] as any;
-          const clashCls = t.className ? `${t.className}${t.section ? '-' + t.section : ''}` : 'another class';
-          const clashSub = t.subject ? ` (${t.subject})` : '';
-          return NextResponse.json({
-            error: `${teacherName || 'This teacher'} already has a lecture on ${day} Period ${period} in ${clashCls}${clashSub}. Pick a different teacher, day, or period.`,
-          }, { status: 409 });
-        }
-      }
-
-      // ─── Clash check #3: TEACHER time overlap (same day, overlapping
-      // start/end times in a different period) ───
-      // Periods are discrete, but if the academic office set custom
-      // start/end times that overlap with another of the teacher's
-      // lectures on the same day, block that too.
-      if (teacherId && startTime && endTime) {
-        const overlap = await db.execute({
-          sql: `SELECT id, className, section, subject, period, startTime, endTime FROM timetable
-                WHERE branchId = ? AND teacherId = ? AND day = ? AND id IS NOT NULL
-                AND startTime != '' AND endTime != ''
-                AND startTime < ? AND endTime > ?`,
-          args: [brId, teacherId, day, endTime, startTime],
-        });
-        if (overlap.rows.length > 0) {
-          const t = overlap.rows[0] as any;
-          const clashCls = t.className ? `${t.className}${t.section ? '-' + t.section : ''}` : 'another class';
-          return NextResponse.json({
-            error: `${teacherName || 'This teacher'} already has a lecture on ${day} ${t.startTime}–${t.endTime} in ${clashCls} that overlaps with ${startTime}–${endTime}.`,
-          }, { status: 409 });
-        }
-      }
+      // NOTE: teacher double-booking / time-overlap checks were intentionally
+      // REMOVED. One teacher may take any number of classes at the same time
+      // (e.g. the same Physics lecture to Medical + ICS together). Only the
+      // per-class duplicate-subject guard above applies.
 
       const id = nextId('TT');
       await db.execute({

@@ -1862,7 +1862,9 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
     const seen = new Set<string>();
     for (const r of rows) { const k = r.subject.toLowerCase(); if (seen.has(k)) { toast({ title: 'Duplicate subject', description: `"${r.subject}" is listed twice.`, variant: 'destructive' }); return; } seen.add(k); }
 
-    // Per-row clash checks: same subject already in this slot; teacher double-booked.
+    // Only guard against the SAME subject twice in this class's slot. Teachers
+    // are NOT restricted — one teacher may take any number of classes at the
+    // same time (e.g. the same Physics lecture to Medical + ICS together).
     for (const r of rows) {
       const dupSubject = entries.find((e) =>
         e.day === fDay && Number(e.period) === period && e.id !== editingId &&
@@ -1872,17 +1874,6 @@ function TimetableView({ user, classes, teachers }: { user: any; classes: any[];
         toast({ title: 'Already added', description: `"${r.subject}" is already at Period ${period} on ${fDay} for this class.`, variant: 'destructive' });
         return;
       }
-      try {
-        const teacherEntries = await api.getTimetable({ teacherId: r.teacherId });
-        const teacherClash = (Array.isArray(teacherEntries) ? teacherEntries : []).find(
-          (e: any) => e.day === fDay && Number(e.period) === period && e.id !== editingId,
-        );
-        if (teacherClash) {
-          const clashCls = teacherClash.className ? `${teacherClash.className}${teacherClash.section ? '-' + teacherClash.section : ''}` : 'another class';
-          toast({ title: '⚠ Clash: teacher double-booked', description: `${r.teacher?.name || 'That teacher'} already has ${teacherClash.subject || 'a lecture'} at Period ${period} on ${fDay} in ${clashCls}. Pick a different teacher.`, variant: 'destructive' });
-          return;
-        }
-      } catch { /* pre-check network failure — the server re-checks */ }
     }
 
     setSaving(true);
